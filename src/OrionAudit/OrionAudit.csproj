@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>OrionAudit</PackageId>
+    <Description>EF Core change audit trail with JSON Patch diffs, multi-tenant support, time-travel reconstruction, and OpenTelemetry instrumentation.</Description>
+    <PackageTags>audit;audit-trail;efcore;entity-framework;change-tracking;json-patch;compliance;ddd</PackageTags>
+    <PackageReadmeFile>docs/README.md</PackageReadmeFile>
+    <PackageIcon>docs/logo.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <PackageReference Include="JsonPatch.Net" Version="3.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
+    <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
+  </ItemGroup>
+</Project>
