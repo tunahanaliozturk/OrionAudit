@@ -36,9 +36,11 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var configuration = serviceProvider.GetRequiredService<IAuditConfiguration>();
         var clock = serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
 
+        // State check is a struct compare; IsAudited is a FrozenDictionary lookup. Both are cheap,
+        // but state-first lets us skip the dictionary lookup for entities that aren't being saved.
         var auditedEntries = ctx.ChangeTracker.Entries()
-            .Where(e => configuration.IsAudited(e.Entity.GetType()))
-            .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted
+                        && configuration.IsAudited(e.Entity.GetType()))
             .ToList();
 
         if (auditedEntries.Count == 0)

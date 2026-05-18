@@ -33,9 +33,8 @@ public static class AuditQueryExtensions
             return query;
         }
         var appServiceProvider = context.GetService<IDbContextOptions>()
-            .Extensions
-            .OfType<CoreOptionsExtension>()
-            .FirstOrDefault()?.ApplicationServiceProvider;
+            .FindExtension<CoreOptionsExtension>()?
+            .ApplicationServiceProvider;
         if (appServiceProvider is null)
         {
             return query;
