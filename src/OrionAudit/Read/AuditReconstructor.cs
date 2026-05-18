@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
@@ -21,14 +22,29 @@ public sealed class AuditReconstructor : IAuditReconstructor
         where T : class, new()
     {
         ArgumentException.ThrowIfNullOrEmpty(entityId);
-        var entityTypeName = typeof(T).AssemblyQualifiedName!;
-        var rows = await context.Set<AuditLog>()
-            .Where(a => a.EntityType == entityTypeName && a.EntityId == entityId && a.OccurredOnUtc <= asOf)
-            .OrderBy(a => a.OccurredOnUtc)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+        using var activity = OrionAuditTelemetry.ActivitySource.StartActivity("OrionAudit.Reconstruct", ActivityKind.Internal);
+        activity?.SetTag("orionaudit.entity_type", typeof(T).Name);
+        activity?.SetTag("orionaudit.as_of", asOf.ToString("O"));
 
-        return Replay<T>(rows, entityId);
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var entityTypeName = typeof(T).AssemblyQualifiedName!;
+            var rows = await context.Set<AuditLog>()
+                .Where(a => a.EntityType == entityTypeName && a.EntityId == entityId && a.OccurredOnUtc <= asOf)
+                .OrderBy(a => a.OccurredOnUtc)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            activity?.SetTag("orionaudit.audit_row_count", rows.Count);
+            var result = Replay<T>(rows, entityId);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        finally
+        {
+            OrionAuditTelemetry.ReconstructDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+        }
     }
 
     /// <inheritdoc />
@@ -39,22 +55,37 @@ public sealed class AuditReconstructor : IAuditReconstructor
         where T : class, new()
     {
         ArgumentNullException.ThrowIfNull(entityIds);
-        var idList = entityIds.ToList();
-        var entityTypeName = typeof(T).AssemblyQualifiedName!;
+        using var activity = OrionAuditTelemetry.ActivitySource.StartActivity("OrionAudit.ReconstructMany", ActivityKind.Internal);
+        activity?.SetTag("orionaudit.entity_type", typeof(T).Name);
+        activity?.SetTag("orionaudit.as_of", asOf.ToString("O"));
 
-        var rows = await context.Set<AuditLog>()
-            .Where(a => a.EntityType == entityTypeName && idList.Contains(a.EntityId) && a.OccurredOnUtc <= asOf)
-            .OrderBy(a => a.OccurredOnUtc)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var grouped = rows.GroupBy(a => a.EntityId).ToDictionary(g => g.Key, g => g.ToList());
-        var result = new Dictionary<string, T?>(idList.Count, StringComparer.Ordinal);
-        foreach (var id in idList)
+        var stopwatch = Stopwatch.StartNew();
+        try
         {
-            result[id] = grouped.TryGetValue(id, out var group) ? Replay<T>(group, id) : null;
+            var idList = entityIds.ToList();
+            activity?.SetTag("orionaudit.entity_id_count", idList.Count);
+            var entityTypeName = typeof(T).AssemblyQualifiedName!;
+
+            var rows = await context.Set<AuditLog>()
+                .Where(a => a.EntityType == entityTypeName && idList.Contains(a.EntityId) && a.OccurredOnUtc <= asOf)
+                .OrderBy(a => a.OccurredOnUtc)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            activity?.SetTag("orionaudit.audit_row_count", rows.Count);
+            var grouped = rows.GroupBy(a => a.EntityId).ToDictionary(g => g.Key, g => g.ToList());
+            var result = new Dictionary<string, T?>(idList.Count, StringComparer.Ordinal);
+            foreach (var id in idList)
+            {
+                result[id] = grouped.TryGetValue(id, out var group) ? Replay<T>(group, id) : null;
+            }
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }
-        return result;
+        finally
+        {
+            OrionAuditTelemetry.ReconstructDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+        }
     }
 
     private static T? Replay<T>(List<AuditLog> rows, string entityId) where T : class, new()

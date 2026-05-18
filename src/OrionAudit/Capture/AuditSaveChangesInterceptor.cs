@@ -46,16 +46,44 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
         }
 
+        using var activity = OrionAuditTelemetry.ActivitySource.StartActivity("OrionAudit.Capture", ActivityKind.Internal);
+        activity?.SetTag("orionaudit.entry_count", auditedEntries.Count);
+
+        var stopwatch = Stopwatch.StartNew();
         var user = serviceProvider.GetService<IAuditUserResolver>()?.Resolve(serviceProvider);
         var tenantId = serviceProvider.GetService<IAuditTenantResolver>()?.Resolve(serviceProvider);
         var correlationId = Activity.Current?.Id;
         var occurredOn = clock.GetUtcNow().UtcDateTime;
 
+        if (tenantId is not null)
+        {
+            activity?.SetTag("orionaudit.tenant_id", tenantId);
+        }
+        if (user?.Type is not null)
+        {
+            activity?.SetTag("orionaudit.user_type", user.Type);
+        }
+
+        int writtenCount = 0;
+        int failedCount = 0;
         foreach (var entry in auditedEntries)
         {
             var auditLog = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn);
             ctx.Add(auditLog);
+            if (auditLog.Error is null)
+            {
+                writtenCount++;
+            }
+            else
+            {
+                failedCount++;
+            }
         }
+
+        OrionAuditTelemetry.EntriesWritten.Add(writtenCount);
+        OrionAuditTelemetry.EntriesFailed.Add(failedCount);
+        OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+        activity?.SetStatus(ActivityStatusCode.Ok);
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
