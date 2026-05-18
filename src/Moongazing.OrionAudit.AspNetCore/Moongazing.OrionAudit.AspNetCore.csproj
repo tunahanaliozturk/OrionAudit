@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>OrionAudit.AspNetCore</PackageId>
+    <Description>ASP.NET Core integration for OrionAudit. Provides HttpContextAuditUserResolver and DI helpers.</Description>
+    <PackageTags>audit;audit-trail;aspnetcore;efcore;httpcontext;orionaudit</PackageTags>
+    <PackageReadmeFile>docs/README.md</PackageReadmeFile>
+    <PackageIcon>docs/logo.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
+    <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
+  </ItemGroup>
+</Project>

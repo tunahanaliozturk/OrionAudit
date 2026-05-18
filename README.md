@@ -18,8 +18,8 @@ dotnet add package OrionAudit.Testing      # optional, fluent assertions for tes
 ```csharp
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using OrionAudit;
-using OrionAudit.AspNetCore;
+using Moongazing.OrionAudit;
+using Moongazing.OrionAudit.AspNetCore;
 
 services.AddOrionAudit<AppDbContext>(o => o
     .Audit<Order>()
