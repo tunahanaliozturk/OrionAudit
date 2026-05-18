@@ -57,11 +57,12 @@ TemporaryDependencyNodeTargetIdentifier=net10.0
 /warnaserror+:NU1605,SYSLIB0011
 
 [sourceFiles]
+AuditAspNetCoreServiceCollectionExtensions.cs
+HttpContextAuditUserResolver.cs
 obj/Debug/net10.0/
  .NETCoreApp,Version=v10.0.AssemblyAttributes.cs
  OrionAudit.AspNetCore.AssemblyInfo.cs
  OrionAudit.AspNetCore.GlobalUsings.g.cs
-OrionAuditAspNetCoreMarker.cs
 
 [metadataReferences]
 ../OrionAudit/obj/Debug/net10.0/ref/OrionAudit.dll
@@ -466,11 +467,12 @@ TemporaryDependencyNodeTargetIdentifier=net8.0
 /warnaserror+:NU1605,SYSLIB0011
 
 [sourceFiles]
+AuditAspNetCoreServiceCollectionExtensions.cs
+HttpContextAuditUserResolver.cs
 obj/Debug/net8.0/
  .NETCoreApp,Version=v8.0.AssemblyAttributes.cs
  OrionAudit.AspNetCore.AssemblyInfo.cs
  OrionAudit.AspNetCore.GlobalUsings.g.cs
-OrionAuditAspNetCoreMarker.cs
 
 [metadataReferences]
 ../OrionAudit/obj/Debug/net8.0/ref/OrionAudit.dll
@@ -867,11 +869,12 @@ TemporaryDependencyNodeTargetIdentifier=net9.0
 /warnaserror+:NU1605,SYSLIB0011
 
 [sourceFiles]
+AuditAspNetCoreServiceCollectionExtensions.cs
+HttpContextAuditUserResolver.cs
 obj/Debug/net9.0/
  .NETCoreApp,Version=v9.0.AssemblyAttributes.cs
  OrionAudit.AspNetCore.AssemblyInfo.cs
  OrionAudit.AspNetCore.GlobalUsings.g.cs
-OrionAuditAspNetCoreMarker.cs
 
 [metadataReferences]
 ../OrionAudit/obj/Debug/net9.0/ref/OrionAudit.dll
