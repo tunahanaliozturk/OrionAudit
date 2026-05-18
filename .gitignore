@@ -486,3 +486,6 @@ artifacts/
 *.db
 *.db-shm
 *.db-wal
+
+# JetBrains Rider local sidecar caches
+*.lscache

@@ -64,8 +64,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             activity?.SetTag("orionaudit.user_type", user.Type);
         }
 
-        int writtenCount = 0;
-        int failedCount = 0;
+        var writtenCount = 0;
+        var failedCount = 0;
         foreach (var entry in auditedEntries)
         {
             var auditLog = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn);
