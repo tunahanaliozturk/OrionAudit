@@ -1,6 +1,6 @@
 namespace OrionAudit;
 
-/// <summary>The kind of mutation captured by an <c>AuditLog</c> row.</summary>
+/// <summary>The kind of mutation captured by an <see cref="AuditLog"/> row.</summary>
 public enum AuditAction : byte
 {
     /// <summary>Entity was inserted into the database.</summary>

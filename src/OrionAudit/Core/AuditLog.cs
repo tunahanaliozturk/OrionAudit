@@ -21,7 +21,7 @@ public sealed class AuditLog
     /// <summary>UTC timestamp at which the change was captured.</summary>
     public DateTime OccurredOnUtc { get; set; }
 
-    /// <summary>Optional user id (from <c>IAuditUserResolver</c>); null when unattributed.</summary>
+    /// <summary>Optional user id (from <see cref="IAuditUserResolver"/>); null when unattributed.</summary>
     public string? UserId { get; set; }
 
     /// <summary>Optional human-readable user display name.</summary>
@@ -30,7 +30,7 @@ public sealed class AuditLog
     /// <summary>Classification: <c>"user"</c>, <c>"system"</c>, <c>"job"</c>, etc.</summary>
     public string? UserType { get; set; }
 
-    /// <summary>Optional tenant id (from <c>IAuditTenantResolver</c>); null for single-tenant apps.</summary>
+    /// <summary>Optional tenant id (from <see cref="IAuditTenantResolver"/>); null for single-tenant apps.</summary>
     public string? TenantId { get; set; }
 
     /// <summary>Optional W3C trace context id (<c>Activity.Current?.Id</c>) at capture time.</summary>
