@@ -77,9 +77,12 @@ var orderAsOfLastMonth = await reconstructor.ReconstructAsync<Order>(
 
 ## Documentation
 
+- [Roadmap](ROADMAP.md) — what's planned for v0.2, v0.3, v0.4, and v1.0
+- [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)
 - Sample console app: [sample/OrionAudit.Sample.Console](sample/OrionAudit.Sample.Console)
+- Benchmarks: [bench/OrionAudit.Bench](bench/OrionAudit.Bench)
 
 ## License
 
