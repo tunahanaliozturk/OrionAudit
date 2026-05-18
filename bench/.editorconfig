@@ -1,0 +1,5 @@
+[*.cs]
+# Benchmark method names use Method_Scenario naming.
+dotnet_diagnostic.CA1707.severity = none
+# BenchmarkDotNet manages fixture lifecycle via [GlobalCleanup]; the bench class itself isn't disposed.
+dotnet_diagnostic.CA1001.severity = none
