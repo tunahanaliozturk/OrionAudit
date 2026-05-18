@@ -135,3 +135,17 @@ public class AuditSaveChangesInterceptorTests
         Assert.Empty(await ctx.AuditLogs.ToListAsync());
     }
 }
+
+public class AuditSaveChangesInterceptorErrorTests
+{
+    [Auditable]
+    public sealed class Cyclic
+    {
+        public int Id { get; set; }
+        public Cyclic? Self { get; set; }
+    }
+
+    [Fact(Skip = "Reserved: simulating an in-process diff failure requires a property type that JsonSerializer chokes on. Add when a stable repro is in hand.")]
+    public Task DiffFailure_WritesRow_WithErrorAndEmptyDiff()
+        => Task.CompletedTask;
+}
