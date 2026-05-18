@@ -32,13 +32,20 @@ public static class AuditQueryExtensions
         {
             return query;
         }
-        var sp = context.GetInfrastructure();
-        var resolver = sp.GetService<IAuditTenantResolver>();
+        var appServiceProvider = context.GetService<IDbContextOptions>()
+            .Extensions
+            .OfType<CoreOptionsExtension>()
+            .FirstOrDefault()?.ApplicationServiceProvider;
+        if (appServiceProvider is null)
+        {
+            return query;
+        }
+        var resolver = appServiceProvider.GetService<IAuditTenantResolver>();
         if (resolver is null)
         {
             return query;
         }
-        var tenantId = resolver.Resolve(sp);
+        var tenantId = resolver.Resolve(appServiceProvider);
         if (tenantId is null)
         {
             return query;

@@ -6,3 +6,5 @@ dotnet_diagnostic.CS8892.severity = none
 # xUnit v3 analyzer: require TestContext.Current.CancellationToken passed to every async call.
 # We rely on the test harness timeout instead of plumbing the token everywhere.
 dotnet_diagnostic.xUnit1051.severity = none
+# Test fixtures often implement IAsyncLifetime / IAsyncDisposable without GC.SuppressFinalize.
+dotnet_diagnostic.CA1816.severity = none
