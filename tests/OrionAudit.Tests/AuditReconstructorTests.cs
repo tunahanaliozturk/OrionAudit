@@ -131,4 +131,60 @@ public class AuditReconstructorTests
         Assert.NotNull(result);
         Assert.Equal("Pending", result.Status);
     }
+
+    [Fact]
+    public async Task ReconstructManyAsync_ReturnsStateForEachId()
+    {
+        await using var sp = Build();
+        await using var scope = sp.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+        var reconstructor = scope.ServiceProvider.GetRequiredService<IAuditReconstructor>();
+
+        var a = new Order { Status = "PendingA" };
+        var b = new Order { Status = "PendingB" };
+        ctx.Orders.AddRange(a, b);
+        await ctx.SaveChangesAsync();
+
+        var result = await reconstructor.ReconstructManyAsync<Order>(
+            new[] { a.Id.ToString(), b.Id.ToString() },
+            DateTime.UtcNow.AddMinutes(1));
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal("PendingA", result[a.Id.ToString()]!.Status);
+        Assert.Equal("PendingB", result[b.Id.ToString()]!.Status);
+    }
+
+    [Fact]
+    public async Task ReconstructManyAsync_ReturnsNullForMissingIds()
+    {
+        await using var sp = Build();
+        await using var scope = sp.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+        var reconstructor = scope.ServiceProvider.GetRequiredService<IAuditReconstructor>();
+
+        var a = new Order { Status = "Pending" };
+        ctx.Orders.Add(a);
+        await ctx.SaveChangesAsync();
+
+        var result = await reconstructor.ReconstructManyAsync<Order>(
+            new[] { a.Id.ToString(), "missing-id" },
+            DateTime.UtcNow.AddMinutes(1));
+
+        Assert.Equal(2, result.Count);
+        Assert.NotNull(result[a.Id.ToString()]);
+        Assert.Null(result["missing-id"]);
+    }
+
+    [Fact]
+    public async Task ReconstructManyAsync_EmptyInput_ReturnsEmptyDictionary()
+    {
+        await using var sp = Build();
+        await using var scope = sp.CreateAsyncScope();
+        var reconstructor = scope.ServiceProvider.GetRequiredService<IAuditReconstructor>();
+
+        var result = await reconstructor.ReconstructManyAsync<Order>(
+            Array.Empty<string>(), DateTime.UtcNow);
+
+        Assert.Empty(result);
+    }
 }
