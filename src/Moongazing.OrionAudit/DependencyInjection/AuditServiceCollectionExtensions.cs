@@ -40,8 +40,14 @@ public static class AuditServiceCollectionExtensions
         services.TryAddSingleton(options.SnapshotPolicy);
         services.TryAddSingleton(options.RetentionPolicy);
         services.TryAddSingleton(options.SweepOptions);
-        services.TryAddScoped<IAuditReconstructor>(sp => new AuditReconstructor(sp.GetRequiredService<TDbContext>()));
+        services.TryAddScoped<IAuditReconstructor>(sp => new AuditReconstructor(
+            sp.GetRequiredService<TDbContext>(),
+            sp.GetService<System.Text.Json.Serialization.JsonSerializerContext>()));
         services.TryAddSingleton(TimeProvider.System);
+        if (options.JsonContext is not null)
+        {
+            services.TryAddSingleton(options.JsonContext);
+        }
 
         if (options.RetentionPolicy is not RetentionPolicy.NonePolicy)
         {

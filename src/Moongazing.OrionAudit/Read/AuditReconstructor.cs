@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Moongazing.OrionAudit.Capture;
 
@@ -10,11 +11,20 @@ namespace Moongazing.OrionAudit.Read;
 public sealed class AuditReconstructor : IAuditReconstructor
 {
     private readonly DbContext context;
+    private readonly JsonSerializerContext? jsonContext;
 
     /// <summary>Initializes a new instance reading from the supplied <see cref="DbContext"/>.</summary>
-    public AuditReconstructor(DbContext context)
+    public AuditReconstructor(DbContext context) : this(context, jsonContext: null) { }
+
+    /// <summary>
+    /// Initializes a new instance with an optional source-generated <see cref="JsonSerializerContext"/>
+    /// that the reconstructor will use when deserialising replayed state — trim-safe and
+    /// Native-AOT clean. When null, falls back to reflective <c>JsonSerializer.Deserialize&lt;T&gt;</c>.
+    /// </summary>
+    public AuditReconstructor(DbContext context, JsonSerializerContext? jsonContext)
     {
         this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.jsonContext = jsonContext;
     }
 
     /// <inheritdoc />
@@ -88,7 +98,7 @@ public sealed class AuditReconstructor : IAuditReconstructor
         }
     }
 
-    private static T? Replay<T>(List<AuditLog> rows, string entityId) where T : class, new()
+    private T? Replay<T>(List<AuditLog> rows, string entityId) where T : class, new()
     {
         if (rows.Count == 0)
         {
@@ -152,6 +162,8 @@ public sealed class AuditReconstructor : IAuditReconstructor
             }
         }
 
-        return JsonSerializer.Deserialize<T>(state);
+        return jsonContext is not null
+            ? (T?)JsonSerializer.Deserialize(state, typeof(T), jsonContext)
+            : JsonSerializer.Deserialize<T>(state);
     }
 }

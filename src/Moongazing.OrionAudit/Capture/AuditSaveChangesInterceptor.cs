@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -68,13 +69,14 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         }
 
         var snapshotPolicy = serviceProvider.GetService<SnapshotPolicy>() ?? SnapshotPolicy.Never;
+        var jsonContext = serviceProvider.GetService<JsonSerializerContext>();
         var snapshotsTaken = 0;
 
         var writtenCount = 0;
         var failedCount = 0;
         foreach (var entry in auditedEntries)
         {
-            var (auditLog, afterNode) = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn);
+            var (auditLog, afterNode) = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn, jsonContext);
 
             // Apply periodic snapshot policy on Updated rows only — Deleted / SoftDeleted already
             // populated Snapshot inside BuildAuditLog.
@@ -150,7 +152,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         AuditUser? user,
         string? tenantId,
         string? correlationId,
-        DateTime occurredOn)
+        DateTime occurredOn,
+        JsonSerializerContext? jsonContext)
     {
         var entityType = entry.Entity.GetType();
         var primaryKey = ExtractPrimaryKey(entry);
@@ -199,8 +202,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         JsonObject? afterNodeForCaller = null;
         try
         {
-            var beforeNode = SnapshotBuilder.Build(entityType, beforeValues, configuration);
-            var afterNode = SnapshotBuilder.Build(entityType, afterValues, configuration);
+            var beforeNode = SnapshotBuilder.Build(entityType, beforeValues, configuration, jsonContext);
+            var afterNode = SnapshotBuilder.Build(entityType, afterValues, configuration, jsonContext);
             auditLog.Diff = DiffEngine.Compute(beforeNode, afterNode);
 
             if (action is AuditAction.Deleted)

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Moongazing.OrionAudit.Configuration;
 
 namespace Moongazing.OrionAudit.Capture;
@@ -23,12 +24,16 @@ public static class SnapshotBuilder
 
     /// <summary>
     /// Produces a <see cref="JsonObject"/> snapshot of the supplied property values, applying any
-    /// configured field rules for <paramref name="entityType"/>.
+    /// configured field rules for <paramref name="entityType"/>. When <paramref name="jsonContext"/>
+    /// is supplied, non-primitive property values are serialised through it instead of through
+    /// the reflective <c>JsonSerializer.SerializeToNode</c> fallback — trim-safe and Native-AOT
+    /// clean.
     /// </summary>
     public static JsonObject Build(
         Type entityType,
         IReadOnlyDictionary<string, object?> propertyValues,
-        IAuditConfiguration configuration)
+        IAuditConfiguration configuration,
+        JsonSerializerContext? jsonContext = null)
     {
         ArgumentNullException.ThrowIfNull(entityType);
         ArgumentNullException.ThrowIfNull(propertyValues);
@@ -52,7 +57,7 @@ public static class SnapshotBuilder
                     break;
                 case AuditFieldRule.Capture:
                 default:
-                    snapshot[propName] = ConvertToNode(rawValue);
+                    snapshot[propName] = ConvertToNode(rawValue, jsonContext);
                     break;
             }
         }
@@ -95,11 +100,13 @@ public static class SnapshotBuilder
         }
     }
 
-    private static JsonNode? ConvertToNode(object? value)
+    private static JsonNode? ConvertToNode(object? value, JsonSerializerContext? jsonContext)
     {
         // Primitive fast path skips JsonSerializer's reflection machinery on every property of
-        // every audited entity. Anything not listed falls back to the reflective serializer,
-        // which is also the only path that handles user-defined value types and collections.
+        // every audited entity. Anything not listed falls through to either the supplied
+        // source-generated context (trim-safe, AOT-clean) or — if none is configured — the
+        // reflective serializer, which is the only path that handles user-defined value types
+        // and collections without a generator.
         return value switch
         {
             null => null,
@@ -124,7 +131,20 @@ public static class SnapshotBuilder
             TimeSpan ts => JsonValue.Create(ts.ToString("c", System.Globalization.CultureInfo.InvariantCulture)),
             Guid g => JsonValue.Create(g),
             byte[] bytes => JsonValue.Create(Convert.ToBase64String(bytes)),
-            _ => JsonSerializer.SerializeToNode(value, value.GetType())
+            _ => SerializeViaContextOrReflection(value, jsonContext),
         };
+    }
+
+    private static JsonNode? SerializeViaContextOrReflection(object value, JsonSerializerContext? jsonContext)
+    {
+        if (jsonContext is not null)
+        {
+            var typeInfo = jsonContext.GetTypeInfo(value.GetType());
+            if (typeInfo is not null)
+            {
+                return JsonSerializer.SerializeToNode(value, typeInfo);
+            }
+        }
+        return JsonSerializer.SerializeToNode(value, value.GetType());
     }
 }

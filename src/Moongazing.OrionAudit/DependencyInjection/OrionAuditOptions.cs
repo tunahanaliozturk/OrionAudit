@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json.Serialization;
 using Moongazing.OrionAudit.Configuration;
 
 namespace Moongazing.OrionAudit;
@@ -17,6 +18,7 @@ public sealed class OrionAuditOptions
     internal SnapshotPolicy SnapshotPolicy { get; private set; } = SnapshotPolicy.Never;
     internal RetentionPolicy RetentionPolicy { get; private set; } = RetentionPolicy.None;
     internal RetentionSweepOptions SweepOptions { get; } = new();
+    internal JsonSerializerContext? JsonContext { get; private set; }
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public OrionAuditOptions Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
@@ -109,6 +111,21 @@ public sealed class OrionAuditOptions
             throw new ArgumentOutOfRangeException(nameof(max), max, "Must be >= 1.");
         }
         SweepOptions.MaxRowsPerSweep = max;
+        return this;
+    }
+
+    /// <summary>
+    /// Supplies a System.Text.Json source-generated <see cref="JsonSerializerContext"/> for
+    /// snapshot serialisation and time-travel deserialisation. When set, the snapshot builder
+    /// and reconstructor route audited types through the context instead of through the
+    /// reflective <c>JsonSerializer.SerializeToNode</c> / <c>Deserialize&lt;T&gt;</c> paths —
+    /// trim-safe and Native-AOT-clean. When null (default) the library falls back to
+    /// reflection (which emits trim warnings under <c>PublishAot</c>).
+    /// </summary>
+    public OrionAuditOptions UseJsonContext(JsonSerializerContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        JsonContext = context;
         return this;
     }
 }
