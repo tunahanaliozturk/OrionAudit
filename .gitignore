@@ -487,5 +487,8 @@ artifacts/
 *.db-shm
 *.db-wal
 
+# BenchmarkDotNet output
+BenchmarkDotNet.Artifacts/
+
 # JetBrains Rider local sidecar caches
 *.lscache
