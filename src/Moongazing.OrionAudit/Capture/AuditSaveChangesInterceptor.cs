@@ -100,6 +100,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     {
         var entityType = entry.Entity.GetType();
         var primaryKey = ExtractPrimaryKey(entry);
+        var typeConfig = configuration.GetConfig(entityType);
 
         var action = entry.State switch
         {
@@ -108,6 +109,18 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             EntityState.Deleted => AuditAction.Deleted,
             _ => throw new InvalidOperationException($"Unsupported entry state {entry.State}.")
         };
+
+        // Promote Updated → SoftDeleted when the configured boolean property flips false → true.
+        if (action == AuditAction.Updated && typeConfig?.SoftDeleteProperty is { } softDeleteProp)
+        {
+            var property = entry.Properties.FirstOrDefault(p => p.Metadata.Name == softDeleteProp);
+            if (property is not null
+                && property.OriginalValue is false
+                && property.CurrentValue is true)
+            {
+                action = AuditAction.SoftDeleted;
+            }
+        }
 
         var beforeValues = entry.State == EntityState.Added
             ? new Dictionary<string, object?>()
@@ -135,9 +148,14 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             var afterNode = SnapshotBuilder.Build(entityType, afterValues, configuration);
             auditLog.Diff = DiffEngine.Compute(beforeNode, afterNode);
 
-            if (action == AuditAction.Deleted)
+            if (action is AuditAction.Deleted)
             {
                 auditLog.Snapshot = beforeNode.ToJsonString();
+            }
+            else if (action is AuditAction.SoftDeleted)
+            {
+                // For soft-deletes the row still exists, so capture the post-flip state.
+                auditLog.Snapshot = afterNode.ToJsonString();
             }
         }
         catch (Exception ex)

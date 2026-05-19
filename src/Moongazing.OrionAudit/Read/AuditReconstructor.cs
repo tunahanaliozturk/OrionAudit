@@ -94,7 +94,7 @@ public sealed class AuditReconstructor : IAuditReconstructor
         {
             return null;
         }
-        if (rows[^1].Action == AuditAction.Deleted)
+        if (rows[^1].Action is AuditAction.Deleted or AuditAction.SoftDeleted)
         {
             return null;
         }

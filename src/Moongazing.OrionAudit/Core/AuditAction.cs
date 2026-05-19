@@ -9,4 +9,10 @@ public enum AuditAction : byte
     Updated = 1,
     /// <summary>Entity was deleted from the database.</summary>
     Deleted = 2,
+    /// <summary>
+    /// Entity was logically deleted by flipping a soft-delete property from <c>false</c> to
+    /// <c>true</c>. Distinct from <see cref="Deleted"/> so reads can surface live deletions vs.
+    /// hard removals.
+    /// </summary>
+    SoftDeleted = 3,
 }

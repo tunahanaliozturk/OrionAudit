@@ -10,6 +10,7 @@ namespace Moongazing.OrionAudit.Configuration;
 public sealed class AuditConfigurationBuilder
 {
     private readonly Dictionary<Type, Dictionary<string, AuditFieldRule>> rulesByType = new();
+    private readonly Dictionary<Type, string?> softDeleteByType = new();
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public AuditConfigurationBuilder Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
@@ -17,6 +18,7 @@ public sealed class AuditConfigurationBuilder
         var entityType = typeof(T);
         var rules = GetOrCreateRules(entityType);
         ApplyAttributeRules(entityType, rules);
+        ApplySoftDeleteAttribute(entityType);
 
         if (configure is not null)
         {
@@ -25,6 +27,10 @@ public sealed class AuditConfigurationBuilder
             foreach (var (propName, rule) in typeBuilder.Rules)
             {
                 rules[propName] = rule;
+            }
+            if (typeBuilder.SoftDeleteProperty is not null)
+            {
+                softDeleteByType[entityType] = typeBuilder.SoftDeleteProperty;
             }
         }
 
@@ -37,6 +43,7 @@ public sealed class AuditConfigurationBuilder
         ArgumentNullException.ThrowIfNull(entityType);
         var rules = GetOrCreateRules(entityType);
         ApplyAttributeRules(entityType, rules);
+        ApplySoftDeleteAttribute(entityType);
         return this;
     }
 
@@ -45,7 +52,10 @@ public sealed class AuditConfigurationBuilder
     {
         var configsByType = rulesByType.ToDictionary(
             kvp => kvp.Key,
-            kvp => new AuditableTypeConfig(kvp.Key, kvp.Value));
+            kvp => new AuditableTypeConfig(
+                kvp.Key,
+                kvp.Value,
+                softDeleteByType.TryGetValue(kvp.Key, out var sd) ? sd : null));
         return new AuditConfiguration(configsByType);
     }
 
@@ -57,6 +67,23 @@ public sealed class AuditConfigurationBuilder
             rulesByType[entityType] = rules;
         }
         return rules;
+    }
+
+    private void ApplySoftDeleteAttribute(Type entityType)
+    {
+        var attr = entityType.GetCustomAttribute<SoftDeleteAttribute>();
+        if (attr is null)
+        {
+            return;
+        }
+        var prop = entityType.GetProperty(attr.PropertyName,
+            BindingFlags.Instance | BindingFlags.Public);
+        if (prop is null || prop.PropertyType != typeof(bool))
+        {
+            throw new OrionAuditConfigurationException(
+                $"[SoftDelete] on '{entityType.Name}' points at '{attr.PropertyName}', which is not a public boolean instance property.");
+        }
+        softDeleteByType.TryAdd(entityType, attr.PropertyName);
     }
 
     private static void ApplyAttributeRules(Type entityType, Dictionary<string, AuditFieldRule> rules)

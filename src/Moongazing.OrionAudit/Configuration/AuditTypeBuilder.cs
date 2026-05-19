@@ -11,6 +11,20 @@ public sealed class AuditTypeBuilder<T> where T : class
 {
     internal Dictionary<string, AuditFieldRule> Rules { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Name of a boolean property whose flip captures <see cref="AuditAction.SoftDeleted"/>.</summary>
+    internal string? SoftDeleteProperty { get; private set; }
+
+    /// <summary>
+    /// Declares the boolean property whose flip from <c>false</c> to <c>true</c> is captured
+    /// as <see cref="AuditAction.SoftDeleted"/> rather than <see cref="AuditAction.Updated"/>.
+    /// Equivalent to the class-level <c>[SoftDelete(nameof(...))]</c> attribute.
+    /// </summary>
+    public AuditTypeBuilder<T> SoftDelete(Expression<Func<T, bool>> selector)
+    {
+        SoftDeleteProperty = PropertyName(selector);
+        return this;
+    }
+
     /// <summary>Marks the property as excluded from audit snapshots.</summary>
     public AuditTypeBuilder<T> Exclude<TProp>(Expression<Func<T, TProp>> selector)
     {

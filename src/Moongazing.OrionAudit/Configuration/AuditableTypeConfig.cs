@@ -21,16 +21,26 @@ public sealed class AuditableTypeConfig
     private readonly FrozenDictionary<string, AuditFieldRule> rules;
 
     /// <summary>Initializes a new configuration with the supplied field rules.</summary>
-    public AuditableTypeConfig(Type entityType, IDictionary<string, AuditFieldRule> rules)
+    public AuditableTypeConfig(
+        Type entityType,
+        IDictionary<string, AuditFieldRule> rules,
+        string? softDeleteProperty = null)
     {
         ArgumentNullException.ThrowIfNull(entityType);
         ArgumentNullException.ThrowIfNull(rules);
         EntityType = entityType;
         this.rules = rules.ToFrozenDictionary(StringComparer.Ordinal);
+        SoftDeleteProperty = softDeleteProperty;
     }
 
     /// <summary>The audited entity CLR type.</summary>
     public Type EntityType { get; }
+
+    /// <summary>
+    /// Name of the boolean property whose flip from <c>false</c> to <c>true</c> is captured as
+    /// <see cref="AuditAction.SoftDeleted"/>. Null when no soft-delete rule is configured.
+    /// </summary>
+    public string? SoftDeleteProperty { get; }
 
     /// <summary>
     /// Returns the rule for a given property name. Properties without an explicit rule are
