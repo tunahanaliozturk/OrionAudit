@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -66,11 +67,29 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             activity?.SetTag("orionaudit.user_type", user.Type);
         }
 
+        var snapshotPolicy = serviceProvider.GetService<SnapshotPolicy>() ?? SnapshotPolicy.Never;
+        var snapshotsTaken = 0;
+
         var writtenCount = 0;
         var failedCount = 0;
         foreach (var entry in auditedEntries)
         {
-            var auditLog = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn);
+            var (auditLog, afterNode) = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn);
+
+            // Apply periodic snapshot policy on Updated rows only — Deleted / SoftDeleted already
+            // populated Snapshot inside BuildAuditLog.
+            if (auditLog.Error is null
+                && auditLog.Action == AuditAction.Updated
+                && snapshotPolicy is not SnapshotPolicy.NeverPolicy
+                && afterNode is not null)
+            {
+                if (ShouldSnapshot(ctx, snapshotPolicy, auditLog, occurredOn))
+                {
+                    auditLog.Snapshot = afterNode.ToJsonString();
+                    snapshotsTaken++;
+                }
+            }
+
             ctx.Add(auditLog);
             if (auditLog.Error is null)
             {
@@ -84,13 +103,48 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         OrionAuditTelemetry.EntriesWritten.Add(writtenCount);
         OrionAuditTelemetry.EntriesFailed.Add(failedCount);
+        OrionAuditTelemetry.SnapshotsWritten.Add(snapshotsTaken);
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
         activity?.SetStatus(ActivityStatusCode.Ok);
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
 
-    private static AuditLog BuildAuditLog(
+    private static bool ShouldSnapshot(DbContext ctx, SnapshotPolicy policy, AuditLog row, DateTime occurredOn)
+    {
+        var cursor = ctx.Set<SnapshotCursor>().Find(row.EntityType, row.EntityId, row.TenantId ?? string.Empty);
+        if (cursor is null)
+        {
+            cursor = new SnapshotCursor
+            {
+                EntityType = row.EntityType,
+                EntityId = row.EntityId,
+                TenantId = row.TenantId ?? string.Empty,
+                UpdatesSinceLast = 0,
+                LastSnapshotUtc = null,
+            };
+            ctx.Add(cursor);
+        }
+
+        cursor.UpdatesSinceLast++;
+        var shouldSnapshot = policy switch
+        {
+            SnapshotPolicy.EveryNthPolicy n => cursor.UpdatesSinceLast >= n.Updates,
+            SnapshotPolicy.EveryDurationPolicy d =>
+                cursor.LastSnapshotUtc is null
+                || (occurredOn - cursor.LastSnapshotUtc.Value) >= d.Elapsed,
+            _ => false,
+        };
+
+        if (shouldSnapshot)
+        {
+            cursor.UpdatesSinceLast = 0;
+            cursor.LastSnapshotUtc = occurredOn;
+        }
+        return shouldSnapshot;
+    }
+
+    private static (AuditLog Log, JsonObject? AfterNode) BuildAuditLog(
         EntityEntry entry,
         IAuditConfiguration configuration,
         AuditUser? user,
@@ -142,6 +196,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             CorrelationId = correlationId,
         };
 
+        JsonObject? afterNodeForCaller = null;
         try
         {
             var beforeNode = SnapshotBuilder.Build(entityType, beforeValues, configuration);
@@ -157,6 +212,10 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 // For soft-deletes the row still exists, so capture the post-flip state.
                 auditLog.Snapshot = afterNode.ToJsonString();
             }
+
+            // Hand the after-state node to the outer loop so it can decide whether to also stamp
+            // a snapshot under the SnapshotPolicy (Updated rows only).
+            afterNodeForCaller = afterNode;
         }
         catch (Exception ex)
         {
@@ -164,7 +223,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             auditLog.Error = ex.ToString();
         }
 
-        return auditLog;
+        return (auditLog, afterNodeForCaller);
     }
 
     private static Dictionary<string, object?> SnapshotValues(EntityEntry entry, bool useOriginal)

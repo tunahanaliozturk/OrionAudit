@@ -8,3 +8,6 @@ dotnet_diagnostic.CS8892.severity = none
 dotnet_diagnostic.xUnit1051.severity = none
 # Test fixtures often implement IAsyncLifetime / IAsyncDisposable without GC.SuppressFinalize.
 dotnet_diagnostic.CA1816.severity = none
+# Tests often pass small inline arrays to Assert.Equal — caching them in static readonly fields
+# is overkill for one-off assertions.
+dotnet_diagnostic.CA1861.severity = none
