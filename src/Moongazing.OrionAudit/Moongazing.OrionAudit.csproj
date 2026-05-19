@@ -20,4 +20,23 @@
     <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
     <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
   </ItemGroup>
+
+  <!--
+    Ship the source generator inside the same NuGet (analyzers/dotnet/cs/) rather than as a
+    separate package. ReferenceOutputAssembly=false means we don't link the generator dll
+    into the runtime library; OutputItemType=Analyzer tells MSBuild to load it as a
+    compile-time analyzer when this project (and downstream consumers) build.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Moongazing.OrionAudit.Generators\Moongazing.OrionAudit.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Moongazing.OrionAudit.Generators\bin\$(Configuration)\netstandard2.0\Moongazing.OrionAudit.Generators.dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+  </ItemGroup>
 </Project>

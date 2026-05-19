@@ -1,0 +1,14 @@
+<!--
+  Roslyn analyzer hosts require netstandard2.0. This file stops the root Directory.Build.props
+  (which multi-targets net8/9/10 for the publishable libraries) from leaking into the
+  generator project. Same trick we use in bench/.
+-->
+<Project>
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
