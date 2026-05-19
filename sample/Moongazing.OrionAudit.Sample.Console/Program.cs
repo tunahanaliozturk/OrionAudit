@@ -8,7 +8,7 @@ using Moongazing.OrionAudit.Testing;
 
 const string Sep = "============================================================";
 
-Console.WriteLine("OrionAudit v0.1.0 — feature showcase");
+Console.WriteLine("OrionAudit v0.2.0 — feature showcase");
 Console.WriteLine(Sep);
 
 await using var connection = new SqliteConnection("DataSource=:memory:");
@@ -76,7 +76,7 @@ await Section("4. SENSITIVE-FIELD HANDLING", async () =>
     await using var scope = sp.CreateAsyncScope();
     var ctx = scope.ServiceProvider.GetRequiredService<ShopDb>();
     var customerInsert = (await Logs(ctx)).First(l =>
-        l.EntityType.StartsWith("OrionAudit.Sample.Customer", StringComparison.Ordinal)
+        l.EntityType.StartsWith("Moongazing.OrionAudit.Sample.Customer", StringComparison.Ordinal)
         && l.Action == AuditAction.Inserted);
     Console.WriteLine($"   Customer Insert Diff: {Truncate(customerInsert.Diff, 220)}");
     Console.WriteLine("   Note Email = 64-char SHA-256 hex, ApiKey = \"<redacted>\".");
@@ -124,6 +124,105 @@ await Section("7. OPENTELEMETRY ACTIVITY", async () =>
     }
 });
 
+Console.WriteLine();
+Console.WriteLine(Sep);
+Console.WriteLine("v0.2.0 features tour");
+Console.WriteLine(Sep);
+
+await Section("8. AUDIT SCOPE (correlation override for background work)", async () =>
+{
+    using (AuditScope.Push("nightly-cleanup-2026-05-19"))
+    {
+        await using var scope = sp.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<ShopDb>();
+        ctx.Orders.Add(new Order { CustomerName = "Tracer-2", Status = "Pending", Total = 2m });
+        await ctx.SaveChangesAsync();
+    }
+    await using var verifyScope = sp.CreateAsyncScope();
+    var verifyCtx = verifyScope.ServiceProvider.GetRequiredService<ShopDb>();
+    var last = await verifyCtx.AuditLog(crossTenant: true)
+        .OrderByDescending(a => a.OccurredOnUtc)
+        .FirstAsync();
+    Console.WriteLine($"   Last audit row CorrelationId = {last.CorrelationId}");
+});
+
+await Section("9. PERIODIC SNAPSHOTTING (separate DB so it's isolated)", async () =>
+{
+    await using var snapConn = new SqliteConnection("DataSource=:memory:");
+    await snapConn.OpenAsync();
+    var snapServices = new ServiceCollection();
+    snapServices.AddLogging();
+    snapServices.AddOrionAudit<ShopDb>(o => o.Audit<Order>().SnapshotEvery(3));
+    snapServices.AddSingleton(snapConn);
+    snapServices.AddDbContext<ShopDb>((p, o) =>
+        o.UseSqlite(p.GetRequiredService<SqliteConnection>()).UseOrionAudit(p));
+    await using var snapSp = snapServices.BuildServiceProvider();
+    await using (var bootstrap = snapSp.CreateAsyncScope())
+    {
+        await bootstrap.ServiceProvider.GetRequiredService<ShopDb>().Database.EnsureCreatedAsync();
+    }
+
+    Guid orderId;
+    await using (var scope = snapSp.CreateAsyncScope())
+    {
+        var ctx = scope.ServiceProvider.GetRequiredService<ShopDb>();
+        var order = new Order { CustomerName = "Snap", Status = "0", Total = 0m };
+        ctx.Orders.Add(order);
+        await ctx.SaveChangesAsync();
+        orderId = order.Id;
+        for (var i = 1; i <= 8; i++)
+        {
+            order.Status = $"v{i}";
+            await ctx.SaveChangesAsync();
+        }
+    }
+
+    await using (var scope = snapSp.CreateAsyncScope())
+    {
+        var ctx = scope.ServiceProvider.GetRequiredService<ShopDb>();
+        var totalRows = await ctx.AuditLogs.CountAsync();
+        var snapshotRows = await ctx.AuditLogs.CountAsync(a => a.Snapshot != null && a.Action == AuditAction.Updated);
+        Console.WriteLine($"   8 updates with SnapshotEvery(3) → {totalRows} audit rows, {snapshotRows} of them carry snapshots.");
+
+        var reconstructor = scope.ServiceProvider.GetRequiredService<IAuditReconstructor>();
+        var current = await reconstructor.ReconstructAsync<Order>(orderId.ToString(), DateTime.UtcNow.AddMinutes(1));
+        Console.WriteLine($"   Reconstructed final Status = {current!.Status} (no Insert-forward replay needed — picked up the snapshot).");
+    }
+});
+
+await Section("10. SOFT-DELETE CAPTURE", async () =>
+{
+    await using var sdConn = new SqliteConnection("DataSource=:memory:");
+    await sdConn.OpenAsync();
+    var sdServices = new ServiceCollection();
+    sdServices.AddLogging();
+    sdServices.AddOrionAudit<SoftDeleteDb>(o => o.Audit<Article>());
+    sdServices.AddSingleton(sdConn);
+    sdServices.AddDbContext<SoftDeleteDb>((p, o) =>
+        o.UseSqlite(p.GetRequiredService<SqliteConnection>()).UseOrionAudit(p));
+    await using var sdSp = sdServices.BuildServiceProvider();
+    await using (var bootstrap = sdSp.CreateAsyncScope())
+    {
+        await bootstrap.ServiceProvider.GetRequiredService<SoftDeleteDb>().Database.EnsureCreatedAsync();
+    }
+
+    await using (var scope = sdSp.CreateAsyncScope())
+    {
+        var ctx = scope.ServiceProvider.GetRequiredService<SoftDeleteDb>();
+        var article = new Article { Title = "Hello", IsDeleted = false };
+        ctx.Articles.Add(article);
+        await ctx.SaveChangesAsync();
+        article.IsDeleted = true;
+        await ctx.SaveChangesAsync();
+
+        foreach (var row in await ctx.AuditLogs.OrderBy(a => a.OccurredOnUtc).ToListAsync())
+        {
+            Console.WriteLine($"   {row.OccurredOnUtc:HH:mm:ss.fff}  {row.Action,-12}  snapshot={(row.Snapshot is null ? "no" : "yes")}");
+        }
+    }
+});
+
+Console.WriteLine();
 Console.WriteLine(Sep);
 Console.WriteLine("Sample complete.");
 

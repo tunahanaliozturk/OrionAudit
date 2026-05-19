@@ -41,3 +41,24 @@ public sealed class ShopDb : DbContext
         modelBuilder.ApplyOrionAuditConfigurations();
     }
 }
+
+[Auditable]
+[SoftDelete(nameof(IsDeleted))]
+public sealed class Article
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = "";
+    public bool IsDeleted { get; set; }
+}
+
+public sealed class SoftDeleteDb : DbContext
+{
+    public DbSet<Article> Articles => Set<Article>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public SoftDeleteDb(DbContextOptions<SoftDeleteDb> options) : base(options) { }
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Article>().HasKey(a => a.Id);
+        modelBuilder.ApplyOrionAuditConfigurations();
+    }
+}

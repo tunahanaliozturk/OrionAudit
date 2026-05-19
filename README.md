@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.1.0 is here!** EF Core `SaveChangesInterceptor` capture, JSON Patch diffs, multi-tenant filtering, sensitive-field hash/redact, time-travel reconstruction, ASP.NET Core integration, framework-agnostic test helpers, and OpenTelemetry instrumentation — all in one go.
-> [See what's planned for v0.2 and beyond.](ROADMAP.md)
+> **v0.2.0 is here!** Composite primary keys, periodic snapshotting (O(K) reconstruction instead of O(N)), declarative retention policies with a hosted sweep, provider-aware column hints (`jsonb` / `nvarchar(max)` / `TEXT`), soft-delete capture, and `AuditScope.Push` correlation override — on top of the full v0.1.0 surface.
+> [See the v0.2.0 changelog](CHANGELOG.md#020---2026-05-19) and [what's next](ROADMAP.md).
 
 ---
 
@@ -39,8 +39,11 @@
 | Framework-agnostic test helpers        |    Yes     |     -     |        -         |      -      |
 | Multi-targets net8 / net9 / net10      |    Yes     |    Yes    |       Yes        |    n/a      |
 | Source-gen / NativeAOT clean           |  Planned   |     -     |        -         |      -      |
-| Composite primary key support          |  Planned   |    Yes    |       Yes        |     Yes     |
-| Periodic snapshotting (O(1) replay)    |  Planned   |     -     |        -         |      -      |
+| Composite primary key support          |    Yes     |    Yes    |       Yes        |     Yes     |
+| Periodic snapshotting (O(K) replay)    |    Yes     |     -     |        -         |      -      |
+| Retention policy + background sweep    |    Yes     |     -     |        -         |      -      |
+| Soft-delete capture (distinct action)  |    Yes     |     -     |        -         |      -      |
+| Provider column hints (jsonb / nvarchar(max)) | Yes  |     -     |        -         |      -      |
 
 ---
 

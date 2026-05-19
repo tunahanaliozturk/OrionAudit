@@ -8,5 +8,6 @@ BenchmarkSwitcher
         typeof(DiffEngineBench),
         typeof(InterceptorBench),
         typeof(ReconstructorBench),
+        typeof(ReconstructorWithSnapshotBench),
     })
     .Run(args);

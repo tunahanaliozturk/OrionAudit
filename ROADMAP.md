@@ -47,25 +47,26 @@ application today.
 
 ---
 
-## v0.2.0 — Reliability & Scale *(planned)*
+## v0.2.0 — Reliability & Scale *(shipped)*
 
-Target theme: *make OrionAudit pleasant to live with on a real production database past the
+Theme: *make OrionAudit pleasant to live with on a real production database past the
 first 100k rows.*
 
-- **Composite primary key support.** The `ExtractPrimaryKey` short-circuit is dropped;
-  multi-column keys serialise as a stable ordinal-ordered tuple (`"key1|key2"`).
-- **Periodic snapshotting policy.** Optional opt-in: write a full `Snapshot` every N changes
-  (or every T elapsed time) on Update rows. Reconstruction picks the most recent snapshot
-  `<= asOf` and replays diffs from there — turns reconstruction into O(K) where K = changes
-  since the last snapshot.
-- **Retention policy.** First-class `AddOrionAudit` hook to declare `RetainFor(TimeSpan)` or
-  `RetainCount(int)`; a hosted service hard-deletes rows past the cutoff.
-- **Postgres JSONB / SQL Server `nvarchar(max)` storage hints.** Provider-aware mapping for
-  `Diff` / `Snapshot` columns so storage is compact and indexable.
-- **Soft-delete-friendly capture.** Detect entities using EF Core's `IsDeleted`-style query
-  filters; record a `Soft-Deleted` event distinct from a hard `Deleted`.
-- **Per-`SaveChanges` correlation override.** Replace `Activity.Current?.Id` with a user-set
-  scope key when no W3C trace is present (background jobs, console runners).
+- Composite primary key support via stable ordinal-joined `AuditKey` serialisation
+  (`"key1|key2|..."`, `|` percent-escaped in source values).
+- Periodic snapshotting policy (`SnapshotEvery(N)` / `SnapshotEvery(TimeSpan)`) backed by the
+  new `OrionAudit_Snapshot_Cursors` table; reconstruction walks back to the latest snapshot
+  `<= asOf` and replays only the diffs after it — O(K) instead of O(N).
+- Retention policy (`RetainFor(TimeSpan)` / `RetainCount(int)`) with the
+  `AuditRetentionHostedService` background sweep, bounded by `MaxRowsPerSweep` per cycle.
+- Provider-aware column hints (`OrionAuditColumnHints.SqlServerNvarcharMax`,
+  `PostgresJsonb`, `SqliteText`) on `ApplyOrionAuditConfigurations`.
+- Soft-delete capture via `[SoftDelete(nameof(IsDeleted))]` attribute and equivalent fluent
+  `b.SoftDelete(...)`; flips false → true emit new `AuditAction.SoftDeleted` (byte = 3);
+  reconstruction treats it like a hard delete.
+- `AuditScope.Push(correlationId)` ambient `AsyncLocal<string?>` correlation id, preferred over
+  `Activity.Current?.Id` when stamping `AuditLog.CorrelationId`. Useful for background jobs
+  and console runners.
 
 ### Considered for v0.2 but not promised
 
