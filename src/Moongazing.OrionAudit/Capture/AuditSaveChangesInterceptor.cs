@@ -168,15 +168,22 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var pk = entry.Metadata.FindPrimaryKey()
             ?? throw new OrionAuditConfigurationException(
                 $"Entity '{entry.Metadata.Name}' has no primary key configured.");
-        if (pk.Properties.Count > 1)
+
+        if (pk.Properties.Count == 1)
         {
-            throw new OrionAuditConfigurationException(
-                $"Entity '{entry.Metadata.Name}' has a composite primary key. " +
-                $"Composite keys are not supported in v0.1.0.");
+            var single = pk.Properties[0];
+            return entry.Property(single.Name).CurrentValue?.ToString()
+                ?? throw new InvalidOperationException(
+                    $"Primary key value for entity '{entry.Metadata.Name}' is null.");
         }
-        var keyProperty = pk.Properties[0];
-        var keyValue = entry.Property(keyProperty.Name).CurrentValue;
-        return keyValue?.ToString()
-            ?? throw new InvalidOperationException($"Primary key value for entity '{entry.Metadata.Name}' is null.");
+
+        var parts = new object?[pk.Properties.Count];
+        for (var i = 0; i < pk.Properties.Count; i++)
+        {
+            parts[i] = entry.Property(pk.Properties[i].Name).CurrentValue
+                ?? throw new InvalidOperationException(
+                    $"Composite primary key component '{pk.Properties[i].Name}' on '{entry.Metadata.Name}' is null.");
+        }
+        return AuditKey.From(parts);
     }
 }
