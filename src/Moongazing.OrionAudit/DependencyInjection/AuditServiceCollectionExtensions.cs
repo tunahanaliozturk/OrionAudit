@@ -1,8 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Moongazing.OrionAudit.Configuration;
 using Moongazing.OrionAudit.Read;
+using Moongazing.OrionAudit.Retention;
 
 namespace Moongazing.OrionAudit;
 
@@ -36,8 +38,15 @@ public static class AuditServiceCollectionExtensions
         var configuration = options.ConfigurationBuilder.Build();
         services.TryAddSingleton(configuration);
         services.TryAddSingleton(options.SnapshotPolicy);
+        services.TryAddSingleton(options.RetentionPolicy);
+        services.TryAddSingleton(options.SweepOptions);
         services.TryAddScoped<IAuditReconstructor>(sp => new AuditReconstructor(sp.GetRequiredService<TDbContext>()));
         services.TryAddSingleton(TimeProvider.System);
+
+        if (options.RetentionPolicy is not RetentionPolicy.NonePolicy)
+        {
+            services.AddHostedService<AuditRetentionHostedService<TDbContext>>();
+        }
 
         if (options.UserResolverType is not null)
         {

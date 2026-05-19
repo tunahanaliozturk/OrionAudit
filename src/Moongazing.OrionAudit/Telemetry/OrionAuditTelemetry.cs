@@ -29,4 +29,10 @@ public static class OrionAuditTelemetry
 
     internal static readonly Counter<long> SnapshotsWritten = Meter.CreateCounter<long>(
         "orionaudit.snapshots.written", unit: "snapshots", description: "Periodic snapshots written by the SnapshotPolicy.");
+
+    internal static readonly Counter<long> RetentionRowsDeleted = Meter.CreateCounter<long>(
+        "orionaudit.retention.rows_deleted", unit: "rows", description: "Audit rows hard-deleted by the retention sweep.");
+
+    internal static readonly Histogram<double> RetentionSweepDuration = Meter.CreateHistogram<double>(
+        "orionaudit.retention.sweep.duration", unit: "ms", description: "Retention sweep duration per cycle.");
 }

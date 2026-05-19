@@ -15,6 +15,8 @@ public sealed class OrionAuditOptions
     internal string TableNameValue { get; private set; } = AuditLogEntityTypeConfiguration.DefaultTableName;
     internal HashSet<Assembly> ScanAssemblies { get; } = new();
     internal SnapshotPolicy SnapshotPolicy { get; private set; } = SnapshotPolicy.Never;
+    internal RetentionPolicy RetentionPolicy { get; private set; } = RetentionPolicy.None;
+    internal RetentionSweepOptions SweepOptions { get; } = new();
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public OrionAuditOptions Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
@@ -68,6 +70,45 @@ public sealed class OrionAuditOptions
     public OrionAuditOptions SnapshotEvery(TimeSpan elapsed)
     {
         SnapshotPolicy = SnapshotPolicy.EveryDuration(elapsed);
+        return this;
+    }
+
+    /// <summary>
+    /// Deletes audit rows older than <paramref name="age"/>. The hosted sweep runs every hour
+    /// by default; override via <see cref="RetentionSweepInterval"/>.
+    /// </summary>
+    public OrionAuditOptions RetainFor(TimeSpan age)
+    {
+        RetentionPolicy = RetentionPolicy.RetainFor(age);
+        return this;
+    }
+
+    /// <summary>Keep the latest <paramref name="rows"/> audit rows per audited entity instance.</summary>
+    public OrionAuditOptions RetainCount(int rows)
+    {
+        RetentionPolicy = RetentionPolicy.RetainCount(rows);
+        return this;
+    }
+
+    /// <summary>Overrides the background sweep interval (default: 1 hour).</summary>
+    public OrionAuditOptions RetentionSweepInterval(TimeSpan interval)
+    {
+        if (interval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(interval), interval, "Must be positive.");
+        }
+        SweepOptions.SweepInterval = interval;
+        return this;
+    }
+
+    /// <summary>Caps how many rows the background sweep may delete per cycle (default: 10 000).</summary>
+    public OrionAuditOptions MaxRowsPerSweep(int max)
+    {
+        if (max < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(max), max, "Must be >= 1.");
+        }
+        SweepOptions.MaxRowsPerSweep = max;
         return this;
     }
 }
