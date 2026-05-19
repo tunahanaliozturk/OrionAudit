@@ -47,9 +47,9 @@ jobs:
       - run: dotnet build ${{ env.SOLUTION_PATH }} --no-restore --configuration Release
       - name: Pack All Projects
         run: |
-          dotnet pack src/OrionAudit/OrionAudit.csproj --no-build --configuration Release -o ./nupkgs
-          dotnet pack src/OrionAudit.AspNetCore/OrionAudit.AspNetCore.csproj --no-build --configuration Release -o ./nupkgs
-          dotnet pack src/OrionAudit.Testing/OrionAudit.Testing.csproj --no-build --configuration Release -o ./nupkgs
+          dotnet pack src/Moongazing.OrionAudit/Moongazing.OrionAudit.csproj --no-build --configuration Release -o ./nupkgs
+          dotnet pack src/Moongazing.OrionAudit.AspNetCore/Moongazing.OrionAudit.AspNetCore.csproj --no-build --configuration Release -o ./nupkgs
+          dotnet pack src/Moongazing.OrionAudit.Testing/Moongazing.OrionAudit.Testing.csproj --no-build --configuration Release -o ./nupkgs
       - name: Push to NuGet.org
         run: dotnet nuget push "./nupkgs/*.nupkg" --api-key ${{ secrets.NUGET }} --source https://api.nuget.org/v3/index.json --skip-duplicate
       - name: Push to GitHub Packages
