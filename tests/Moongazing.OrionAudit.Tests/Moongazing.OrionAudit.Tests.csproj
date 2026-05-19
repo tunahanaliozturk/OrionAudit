@@ -16,5 +16,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
     <ProjectReference Include="..\..\src\Moongazing.OrionAudit.Testing\Moongazing.OrionAudit.Testing.csproj" />
+    <!-- ProjectReference does not transitively propagate analyzer items, so the generator
+         needs its own direct reference (matches what NuGet does for consumers via the
+         analyzers/dotnet/cs/ folder shipped in the OrionAudit package). -->
+    <ProjectReference Include="..\..\src\Moongazing.OrionAudit.Generators\Moongazing.OrionAudit.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

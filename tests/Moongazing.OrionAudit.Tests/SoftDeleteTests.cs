@@ -146,9 +146,11 @@ public class SoftDeleteTests
         Assert.Contains("not a public boolean", ex.Message);
     }
 
+    // Private nested so the v0.3 source generator skips it — it's only ever used via the
+    // reflective Audit<T>() path in the test below.
     [Auditable]
     [SoftDelete(nameof(StateName))]
-    public sealed class BadlyTagged
+    private sealed class BadlyTagged
     {
         public int Id { get; set; }
         public string StateName { get; set; } = "";
