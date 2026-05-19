@@ -6,17 +6,31 @@ namespace Moongazing.OrionAudit;
 public static class AuditModelBuilderExtensions
 {
     /// <summary>
-    /// Applies the <see cref="AuditLogEntityTypeConfiguration"/> to the model. Call from
-    /// <c>DbContext.OnModelCreating</c>. Uses the default table name <c>OrionAudit_Log</c>; pass
-    /// <paramref name="tableName"/> to override.
+    /// Applies the OrionAudit entity-type configurations to the model. Call from
+    /// <c>DbContext.OnModelCreating</c>. Always maps <see cref="AuditLog"/>; also maps the
+    /// <see cref="SnapshotCursor"/> companion table (harmless when periodic snapshotting is
+    /// not configured — the table simply stays empty).
     /// </summary>
-    public static ModelBuilder ApplyOrionAuditConfigurations(this ModelBuilder modelBuilder, string? tableName = null)
+    /// <param name="modelBuilder">The EF Core model builder.</param>
+    /// <param name="auditLogTableName">Override the default <c>OrionAudit_Log</c> table name.</param>
+    /// <param name="snapshotCursorTableName">Override the default <c>OrionAudit_Snapshot_Cursors</c> table name.</param>
+    public static ModelBuilder ApplyOrionAuditConfigurations(
+        this ModelBuilder modelBuilder,
+        string? auditLogTableName = null,
+        string? snapshotCursorTableName = null)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
-        var config = tableName is null
+
+        var auditLog = auditLogTableName is null
             ? new AuditLogEntityTypeConfiguration()
-            : new AuditLogEntityTypeConfiguration(tableName);
-        modelBuilder.ApplyConfiguration(config);
+            : new AuditLogEntityTypeConfiguration(auditLogTableName);
+        modelBuilder.ApplyConfiguration(auditLog);
+
+        var cursor = snapshotCursorTableName is null
+            ? new SnapshotCursorEntityTypeConfiguration()
+            : new SnapshotCursorEntityTypeConfiguration(snapshotCursorTableName);
+        modelBuilder.ApplyConfiguration(cursor);
+
         return modelBuilder;
     }
 }

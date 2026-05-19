@@ -35,6 +35,7 @@ public static class AuditServiceCollectionExtensions
 
         var configuration = options.ConfigurationBuilder.Build();
         services.TryAddSingleton(configuration);
+        services.TryAddSingleton(options.SnapshotPolicy);
         services.TryAddScoped<IAuditReconstructor>(sp => new AuditReconstructor(sp.GetRequiredService<TDbContext>()));
         services.TryAddSingleton(TimeProvider.System);
 

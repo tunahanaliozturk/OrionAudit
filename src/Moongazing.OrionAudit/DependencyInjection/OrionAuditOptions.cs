@@ -14,6 +14,7 @@ public sealed class OrionAuditOptions
     internal Type? TenantResolverType { get; private set; }
     internal string TableNameValue { get; private set; } = AuditLogEntityTypeConfiguration.DefaultTableName;
     internal HashSet<Assembly> ScanAssemblies { get; } = new();
+    internal SnapshotPolicy SnapshotPolicy { get; private set; } = SnapshotPolicy.Never;
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public OrionAuditOptions Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
@@ -49,6 +50,24 @@ public sealed class OrionAuditOptions
     {
         ArgumentNullException.ThrowIfNull(assembly);
         ScanAssemblies.Add(assembly);
+        return this;
+    }
+
+    /// <summary>
+    /// Writes a full <see cref="AuditLog.Snapshot"/> every <paramref name="updates"/>-th Update for
+    /// each audited entity. Reconstruction starts from the latest snapshot and replays only the
+    /// diffs after it (turns O(N) into O(K) where K = updates since the last snapshot).
+    /// </summary>
+    public OrionAuditOptions SnapshotEvery(int updates)
+    {
+        SnapshotPolicy = SnapshotPolicy.Every(updates);
+        return this;
+    }
+
+    /// <summary>Time-based variant of <see cref="SnapshotEvery(int)"/>.</summary>
+    public OrionAuditOptions SnapshotEvery(TimeSpan elapsed)
+    {
+        SnapshotPolicy = SnapshotPolicy.EveryDuration(elapsed);
         return this;
     }
 }
