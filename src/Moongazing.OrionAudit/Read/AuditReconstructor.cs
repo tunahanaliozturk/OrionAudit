@@ -105,9 +105,38 @@ public sealed class AuditReconstructor : IAuditReconstructor
                 $"Audit history for entity id '{entityId}' starts with a non-Insert action — corrupted history.");
         }
 
-        var state = new JsonObject();
-        foreach (var row in rows)
+        // Find the latest snapshot row at or before asOf (rows are already ordered by OccurredOnUtc).
+        // Snapshots can come from the periodic SnapshotPolicy on Update rows, or implicitly from
+        // Insert (initial state). Walk backwards to find the freshest one.
+        var snapshotIndex = -1;
+        for (var i = rows.Count - 1; i >= 0; i--)
         {
+            if (rows[i].Snapshot is not null && rows[i].Action is AuditAction.Updated or AuditAction.Inserted)
+            {
+                snapshotIndex = i;
+                break;
+            }
+        }
+
+        JsonObject state;
+        int startIndex;
+        if (snapshotIndex >= 0 && rows[snapshotIndex].Snapshot is { } snapshotJson)
+        {
+            state = JsonNode.Parse(snapshotJson)?.AsObject()
+                ?? throw new OrionAuditException(
+                    $"Snapshot on row {rows[snapshotIndex].Id} for entity '{entityId}' did not deserialize as a JSON object.");
+            // Replay only the diffs that came AFTER the snapshot.
+            startIndex = snapshotIndex + 1;
+        }
+        else
+        {
+            state = new JsonObject();
+            startIndex = 0;
+        }
+
+        for (var i = startIndex; i < rows.Count; i++)
+        {
+            var row = rows[i];
             if (string.IsNullOrEmpty(row.Diff) || row.Diff == "[]")
             {
                 continue;
