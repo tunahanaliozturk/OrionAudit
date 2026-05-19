@@ -14,15 +14,20 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
     public const string DefaultTableName = "OrionAudit_Log";
 
     private readonly string tableName;
+    private readonly OrionAuditColumnHints columnHints;
 
-    /// <summary>Initializes a new configuration using <see cref="DefaultTableName"/>.</summary>
-    public AuditLogEntityTypeConfiguration() : this(DefaultTableName) { }
+    /// <summary>Initializes a new configuration using <see cref="DefaultTableName"/> and <see cref="OrionAuditColumnHints.Auto"/>.</summary>
+    public AuditLogEntityTypeConfiguration() : this(DefaultTableName, OrionAuditColumnHints.Auto) { }
 
     /// <summary>Initializes a new configuration with a custom table name.</summary>
-    public AuditLogEntityTypeConfiguration(string tableName)
+    public AuditLogEntityTypeConfiguration(string tableName) : this(tableName, OrionAuditColumnHints.Auto) { }
+
+    /// <summary>Initializes a new configuration with a custom table name and provider column hint.</summary>
+    public AuditLogEntityTypeConfiguration(string tableName, OrionAuditColumnHints columnHints)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
         this.tableName = tableName;
+        this.columnHints = columnHints;
     }
 
     /// <inheritdoc />
@@ -42,7 +47,21 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
         builder.Property(x => x.UserType).HasMaxLength(32);
         builder.Property(x => x.TenantId).HasMaxLength(128);
         builder.Property(x => x.CorrelationId).HasMaxLength(64);
-        builder.Property(x => x.Diff).IsRequired();
+
+        var diffProperty = builder.Property(x => x.Diff).IsRequired();
+        var snapshotProperty = builder.Property(x => x.Snapshot);
+        var hintedType = columnHints switch
+        {
+            OrionAuditColumnHints.SqlServerNvarcharMax => "nvarchar(max)",
+            OrionAuditColumnHints.PostgresJsonb => "jsonb",
+            OrionAuditColumnHints.SqliteText => "TEXT",
+            _ => null,
+        };
+        if (hintedType is not null)
+        {
+            diffProperty.HasColumnType(hintedType);
+            snapshotProperty.HasColumnType(hintedType);
+        }
 
         builder.HasIndex(x => new { x.EntityType, x.EntityId, x.OccurredOnUtc })
             .HasDatabaseName("IX_OrionAudit_EntityLookup");

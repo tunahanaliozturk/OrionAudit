@@ -14,16 +14,18 @@ public static class AuditModelBuilderExtensions
     /// <param name="modelBuilder">The EF Core model builder.</param>
     /// <param name="auditLogTableName">Override the default <c>OrionAudit_Log</c> table name.</param>
     /// <param name="snapshotCursorTableName">Override the default <c>OrionAudit_Snapshot_Cursors</c> table name.</param>
+    /// <param name="columnHints">Provider-specific column-type hints for <c>Diff</c> and <c>Snapshot</c> (default: <see cref="OrionAuditColumnHints.Auto"/>).</param>
     public static ModelBuilder ApplyOrionAuditConfigurations(
         this ModelBuilder modelBuilder,
         string? auditLogTableName = null,
-        string? snapshotCursorTableName = null)
+        string? snapshotCursorTableName = null,
+        OrionAuditColumnHints columnHints = OrionAuditColumnHints.Auto)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
-        var auditLog = auditLogTableName is null
-            ? new AuditLogEntityTypeConfiguration()
-            : new AuditLogEntityTypeConfiguration(auditLogTableName);
+        var auditLog = new AuditLogEntityTypeConfiguration(
+            auditLogTableName ?? AuditLogEntityTypeConfiguration.DefaultTableName,
+            columnHints);
         modelBuilder.ApplyConfiguration(auditLog);
 
         var cursor = snapshotCursorTableName is null
