@@ -121,6 +121,22 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
               .AppendLine("));");
         }
         sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>");
+        sb.AppendLine("    /// The fully-qualified names of every <c>[Auditable]</c> type the generator discovered.");
+        sb.AppendLine("    /// Useful as a sanity check or to wire a manual <c>JsonSerializerContext</c> (see");
+        sb.AppendLine("    /// <c>OrionAuditOptions.UseJsonContext</c>): each name here should have a matching");
+        sb.AppendLine("    /// <c>[JsonSerializable(typeof(...))]</c> attribute on the consumer's context.");
+        sb.AppendLine("    /// </summary>");
+        sb.AppendLine("    public static global::System.Collections.Generic.IReadOnlyList<string> AuditedTypeNames { get; } = new string[]");
+        sb.AppendLine("    {");
+        foreach (var t in types)
+        {
+            sb.Append("        \"")
+              .Append(t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
+              .AppendLine("\",");
+        }
+        sb.AppendLine("    };");
         sb.AppendLine("}");
 
         return sb.ToString();

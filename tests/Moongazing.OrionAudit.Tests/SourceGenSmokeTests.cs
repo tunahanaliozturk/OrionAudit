@@ -32,4 +32,12 @@ public class SourceGenSmokeTests
         Assert.Throws<ArgumentNullException>(() =>
             SourceGenSmokeModule.RegisterAuditedTypes(null!));
     }
+
+    [Fact]
+    public void AuditedTypeNames_ListsDiscoveredAuditableTypes()
+    {
+        Assert.Contains(
+            typeof(SourceGenWidget).FullName,
+            SourceGenSmokeModule.AuditedTypeNames.Select(static n => n.Replace("global::", "", StringComparison.Ordinal)));
+    }
 }
