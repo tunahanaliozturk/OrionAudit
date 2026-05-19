@@ -54,7 +54,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var stopwatch = Stopwatch.StartNew();
         var user = serviceProvider.GetService<IAuditUserResolver>()?.Resolve(serviceProvider);
         var tenantId = serviceProvider.GetService<IAuditTenantResolver>()?.Resolve(serviceProvider);
-        var correlationId = Activity.Current?.Id;
+        var correlationId = AuditScope.Current ?? Activity.Current?.Id;
         var occurredOn = clock.GetUtcNow().UtcDateTime;
 
         if (tenantId is not null)
