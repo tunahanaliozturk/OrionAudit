@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json.Serialization;
 using Moongazing.OrionAudit.Configuration;
@@ -49,7 +50,13 @@ public sealed class OrionAuditOptions
         return this;
     }
 
-    /// <summary>Adds an assembly to be scanned for <see cref="AuditableAttribute"/>-marked types.</summary>
+    /// <summary>
+    /// Adds an assembly to be scanned for <see cref="AuditableAttribute"/>-marked types via
+    /// reflection. Reflective path; for trim/AOT consumers, prefer the source-generated
+    /// <c>RegisterAuditedTypes</c> method on an <c>[OrionAuditModule]</c> partial class.
+    /// </summary>
+    [RequiresUnreferencedCode("Uses AuditableTypeDiscovery.Discover which scans the supplied assembly via reflection. Use the [OrionAuditModule] source generator instead.")]
+    [RequiresDynamicCode("Uses AuditableTypeDiscovery.Discover which scans the supplied assembly via reflection.")]
     public OrionAuditOptions ScanAssembly(Assembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -29,10 +30,7 @@ public static class AuditServiceCollectionExtensions
 
         if (options.ScanAssemblies.Count > 0)
         {
-            foreach (var type in AuditableTypeDiscovery.Discover(options.ScanAssemblies))
-            {
-                options.ConfigurationBuilder.Audit(type);
-            }
+            ScanAndRegister(options);
         }
 
         var configuration = options.ConfigurationBuilder.Build();
@@ -64,5 +62,22 @@ public static class AuditServiceCollectionExtensions
         }
 
         return services;
+    }
+
+    // ScanAndRegister wraps the reflective Discover call. AddOrionAudit only reaches here when
+    // the consumer explicitly called o.ScanAssembly(...), which is itself
+    // [RequiresUnreferencedCode]-annotated — so consumers who hit this path have already
+    // accepted the AOT-unsafe surface. Suppressing the warning propagation here keeps
+    // AddOrionAudit itself trim-clean for the common case.
+    [UnconditionalSuppressMessage("Trimming", "IL2026:Members annotated with 'RequiresUnreferencedCodeAttribute'",
+        Justification = "Only reached when o.ScanAssembly was called, which is itself [RequiresUnreferencedCode]-annotated.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050:Calling members annotated with 'RequiresDynamicCodeAttribute'",
+        Justification = "Only reached when o.ScanAssembly was called, which is itself [RequiresDynamicCode]-annotated.")]
+    private static void ScanAndRegister(OrionAuditOptions options)
+    {
+        foreach (var type in AuditableTypeDiscovery.Discover(options.ScanAssemblies))
+        {
+            options.ConfigurationBuilder.Audit(type);
+        }
     }
 }

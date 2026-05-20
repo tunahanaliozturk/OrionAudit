@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Moongazing.OrionAudit.Configuration;
@@ -9,6 +10,14 @@ public static class AuditableTypeDiscovery
     /// Returns all concrete public classes in the supplied assemblies that carry
     /// <see cref="AuditableAttribute"/>. Abstract classes and interfaces are skipped.
     /// </summary>
+    /// <remarks>
+    /// Uses runtime reflection (<c>Assembly.GetTypes()</c>) over every assembly, so trim and
+    /// Native AOT publishes will flag every call site. For AOT consumers, declare an
+    /// <c>[OrionAuditModule] partial class</c> and call its source-generated
+    /// <c>RegisterAuditedTypes</c> instead — that path is reflection-free.
+    /// </remarks>
+    [RequiresUnreferencedCode("OrionAudit's assembly scan uses reflection over the supplied assemblies. Use the [OrionAuditModule] source generator and call its emitted RegisterAuditedTypes for trim-safe registration.")]
+    [RequiresDynamicCode("OrionAudit's assembly scan uses reflection over the supplied assemblies.")]
     public static IReadOnlyList<Type> Discover(IEnumerable<Assembly> assemblies)
     {
         ArgumentNullException.ThrowIfNull(assemblies);
