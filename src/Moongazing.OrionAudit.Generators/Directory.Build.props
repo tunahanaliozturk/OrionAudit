@@ -10,5 +10,11 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
+    <!-- A Roslyn analyzer is a compile-time component, never a runtime asset. Stop a
+         consumer's `dotnet publish -p:PublishTrimmed=true` / PublishAot from trying to trim
+         or AOT-compile this netstandard2.0 project (which it cannot). -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishAot>false</PublishAot>
+    <IsTrimmable>false</IsTrimmable>
   </PropertyGroup>
 </Project>

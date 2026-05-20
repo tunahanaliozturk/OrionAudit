@@ -1,0 +1,13 @@
+<!--
+  Single-target net10.0 for the AOT probe — stops the root multi-target Directory.Build.props
+  from leaking net8/9 into this project (same trick used in bench/ and src/.Generators).
+-->
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks></TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
