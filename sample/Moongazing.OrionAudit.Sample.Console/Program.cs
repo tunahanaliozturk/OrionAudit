@@ -18,11 +18,18 @@ var tenantResolver = new InMemoryAuditTenantResolver("tenant-acme");
 var userResolver = new InMemoryAuditUserResolver(new AuditUser("alice@acme.io", "Alice Admin"));
 
 var services = new ServiceCollection();
-services.AddOrionAudit<ShopDb>(o => o
-    .Audit<Order>()
-    .Audit<Customer>(b => b
+services.AddOrionAudit<ShopDb>(o =>
+{
+    // v0.3 source-gen path: RegisterAuditedTypes is emitted by the generator from the
+    // [OrionAuditModule] partial class — no reflective assembly scan, AOT-safe.
+    SampleAuditModule.RegisterAuditedTypes(o.ConfigurationBuilder);
+    // Trim/AOT-safe JSON: route snapshot (de)serialisation through the source-gen context.
+    o.UseJsonContext(SampleJsonContext.Default);
+    // Fluent field rules still layer on top of the generator-registered types.
+    o.Audit<Customer>(b => b
         .Hash(c => c.Email)        // PII -> SHA-256 hex, still equality-checkable
-        .Redact(c => c.ApiKey)));   // truly secret -> "<redacted>", no change visibility
+        .Redact(c => c.ApiKey));   // truly secret -> "<redacted>", no change visibility
+});
 services.AddSingleton(connection);
 services.AddSingleton<IAuditTenantResolver>(tenantResolver);
 services.AddSingleton<IAuditUserResolver>(userResolver);
@@ -152,7 +159,12 @@ await Section("9. PERIODIC SNAPSHOTTING (separate DB so it's isolated)", async (
     await snapConn.OpenAsync();
     var snapServices = new ServiceCollection();
     snapServices.AddLogging();
-    snapServices.AddOrionAudit<ShopDb>(o => o.Audit<Order>().SnapshotEvery(3));
+    snapServices.AddOrionAudit<ShopDb>(o =>
+    {
+        SampleAuditModule.RegisterAuditedTypes(o.ConfigurationBuilder);
+        o.UseJsonContext(SampleJsonContext.Default);
+        o.SnapshotEvery(3);
+    });
     snapServices.AddSingleton(snapConn);
     snapServices.AddDbContext<ShopDb>((p, o) =>
         o.UseSqlite(p.GetRequiredService<SqliteConnection>()).UseOrionAudit(p));
@@ -196,7 +208,11 @@ await Section("10. SOFT-DELETE CAPTURE", async () =>
     await sdConn.OpenAsync();
     var sdServices = new ServiceCollection();
     sdServices.AddLogging();
-    sdServices.AddOrionAudit<SoftDeleteDb>(o => o.Audit<Article>());
+    sdServices.AddOrionAudit<SoftDeleteDb>(o =>
+    {
+        SampleAuditModule.RegisterAuditedTypes(o.ConfigurationBuilder);
+        o.UseJsonContext(SampleJsonContext.Default);
+    });
     sdServices.AddSingleton(sdConn);
     sdServices.AddDbContext<SoftDeleteDb>((p, o) =>
         o.UseSqlite(p.GetRequiredService<SqliteConnection>()).UseOrionAudit(p));

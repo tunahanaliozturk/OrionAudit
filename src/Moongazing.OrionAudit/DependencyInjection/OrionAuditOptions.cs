@@ -11,7 +11,12 @@ namespace Moongazing.OrionAudit;
 /// </summary>
 public sealed class OrionAuditOptions
 {
-    internal AuditConfigurationBuilder ConfigurationBuilder { get; } = new();
+    /// <summary>
+    /// The underlying fluent configuration builder. Exposed so the source-generated
+    /// <c>RegisterAuditedTypes(AuditConfigurationBuilder)</c> method on an
+    /// <c>[OrionAuditModule]</c> class can register audited types directly.
+    /// </summary>
+    public AuditConfigurationBuilder ConfigurationBuilder { get; } = new();
     internal Type? UserResolverType { get; private set; }
     internal Type? TenantResolverType { get; private set; }
     internal string TableNameValue { get; private set; } = AuditLogEntityTypeConfiguration.DefaultTableName;

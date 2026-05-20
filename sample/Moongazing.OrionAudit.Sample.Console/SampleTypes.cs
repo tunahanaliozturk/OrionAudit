@@ -1,7 +1,26 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Moongazing.OrionAudit;
 
 namespace Moongazing.OrionAudit.Sample;
+
+/// <summary>
+/// The v0.3 source-gen registration module. The generator emits
+/// <c>RegisterAuditedTypes(AuditConfigurationBuilder)</c> and an <c>AuditedTypeNames</c> list
+/// on this partial class — the trim-safe / AOT-clean way to register audited types.
+/// </summary>
+[OrionAuditModule]
+public partial class SampleAuditModule { }
+
+/// <summary>
+/// Hand-written System.Text.Json source-generated context covering every audited entity, so
+/// the snapshot builder and reconstructor never fall back to reflection — required for the
+/// Native AOT publish to be warning-free.
+/// </summary>
+[JsonSerializable(typeof(Customer))]
+[JsonSerializable(typeof(Order))]
+[JsonSerializable(typeof(Article))]
+public partial class SampleJsonContext : JsonSerializerContext { }
 
 [Auditable]
 public sealed class Customer

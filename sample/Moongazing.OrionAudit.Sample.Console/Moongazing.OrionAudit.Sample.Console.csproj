@@ -12,5 +12,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
     <ProjectReference Include="..\..\src\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
     <ProjectReference Include="..\..\src\Moongazing.OrionAudit.Testing\Moongazing.OrionAudit.Testing.csproj" />
+    <!-- Direct analyzer reference: ProjectReference doesn't propagate analyzers transitively.
+         A NuGet consumer gets the generator automatically via analyzers/dotnet/cs/. -->
+    <ProjectReference Include="..\..\src\Moongazing.OrionAudit.Generators\Moongazing.OrionAudit.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
