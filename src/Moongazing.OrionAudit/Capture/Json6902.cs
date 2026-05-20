@@ -354,51 +354,5 @@ internal static class Json6902
 
     // ---- Deep equality ----------------------------------------------------
 
-    private static bool NodesEqual(JsonNode? a, JsonNode? b)
-    {
-        if (a is null || b is null)
-        {
-            return a is null && b is null;
-        }
-
-        return a switch
-        {
-            JsonObject objA when b is JsonObject objB => ObjectsEqual(objA, objB),
-            JsonArray arrA when b is JsonArray arrB => ArraysEqual(arrA, arrB),
-            JsonValue valA when b is JsonValue valB => valA.ToJsonString() == valB.ToJsonString(),
-            _ => false,
-        };
-    }
-
-    private static bool ObjectsEqual(JsonObject a, JsonObject b)
-    {
-        if (a.Count != b.Count)
-        {
-            return false;
-        }
-        foreach (var (key, valueA) in a)
-        {
-            if (!b.TryGetPropertyValue(key, out var valueB) || !NodesEqual(valueA, valueB))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static bool ArraysEqual(JsonArray a, JsonArray b)
-    {
-        if (a.Count != b.Count)
-        {
-            return false;
-        }
-        for (var i = 0; i < a.Count; i++)
-        {
-            if (!NodesEqual(a[i], b[i]))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
+    private static bool NodesEqual(JsonNode? a, JsonNode? b) => JsonNode.DeepEquals(a, b);
 }
