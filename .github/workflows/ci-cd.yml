@@ -28,28 +28,8 @@ jobs:
       - run: dotnet build ${{ env.SOLUTION_PATH }} --no-restore --configuration Release
       - run: dotnet test ${{ env.SOLUTION_PATH }} --no-build --configuration Release
 
-  aot-publish-check:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            9.0.x
-            10.0.x
-      - name: Install Native AOT prerequisites
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
-      - name: Native AOT publish the OrionAudit probe
-        # The probe exercises OrionAudit's reflection-free surface (SnapshotBuilder, DiffEngine,
-        # the source generator, AuditKey, AuditScope) with PublishAot=true + TreatWarningsAsErrors.
-        # Any IL2*/IL3* trim/AOT warning fails the build. EF Core itself is not AOT-compatible,
-        # which is why the probe — not the EF-coupled sample — is the AOT target.
-        run: dotnet publish aot/Moongazing.OrionAudit.AotProbe -c Release -r linux-x64
-
   publish:
-    needs: [ build-and-test, aot-publish-check ]
+    needs: build-and-test
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     permissions:

@@ -8,17 +8,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
-  <!--
-    The AOT smoke check is gated behind a custom property (OrionAotCheck) instead of passing
-    -p:PublishAot=true on the command line. A command-line global would leak into the
-    netstandard2.0 generator project and fail with NETSDK1124. OrionAotCheck is read here only,
-    so the generator never sees it. CI runs: dotnet publish ... -p:OrionAotCheck=true
-  -->
-  <PropertyGroup Condition="'$(OrionAotCheck)' == 'true'">
-    <PublishAot>true</PublishAot>
-    <InvariantGlobalization>true</InvariantGlobalization>
-  </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
     <ProjectReference Include="..\..\src\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />

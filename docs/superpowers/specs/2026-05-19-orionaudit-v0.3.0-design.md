@@ -1,10 +1,20 @@
 # OrionAudit v0.3.0 — Design Spec
 
 **Date:** 2026-05-19
-**Status:** Draft (design); pending scope confirmation + implementation plan
+**Status:** Implemented with a scope cut — see the "Scope cut" note below.
 **Authors:** Tunahan Ali Ozturk
 **Family:** Orion (sibling of OrionGuard)
 **Predecessors:** [v0.1.0][s1] / [v0.2.0][s2]
+
+> **Scope cut (2026-05-20):** Full Native-AOT cleanliness was deferred to v0.4. The CI's ILC
+> analysis confirmed `JsonPatch.Net` — the library behind `DiffEngine.Compute/Apply` — carries
+> `[RequiresUnreferencedCode]` / `[RequiresDynamicCode]` and is not AOT-compatible. Making
+> OrionAudit's core fully AOT-clean requires replacing `JsonPatch.Net` with a hand-rolled,
+> source-gen-friendly RFC 6902 emitter, which is a v0.4 effort (see §2 and §10, which flagged
+> this risk up front). v0.3.0 therefore ships as a **Source Generator** release: the
+> `[OrionAuditModule]` discovery generator, `UseJsonContext` wiring, and trim annotations on
+> the assembly-scan surface. The `aot-publish-check` CI job and the AOT probe project were
+> removed; they return in v0.4 once the diff engine is AOT-safe.
 
 [s1]: 2026-05-13-orionaudit-v0.1.0-design.md
 [s2]: 2026-05-19-orionaudit-v0.2.0-design.md
