@@ -77,29 +77,54 @@ first 100k rows.*
 
 ---
 
-## v0.3.0 — AOT & Source-Gen *(planned)*
+## v0.3.0 — Source Generator *(shipped)*
 
-Target theme: *no reflection on the hot path, no `RequiresUnreferencedCode` warnings, Native
-AOT-clean.*
+Theme: *replace the runtime assembly scan with a compile-time generator; make the snapshot
+and reconstruct paths trim-aware.*
 
-- **Source-generated `[Auditable]` discovery.** Replaces the runtime assembly scan with a
-  compile-time `partial` registration class. Trim-safe, AOT-safe, zero startup cost.
-- **Source-generated JSON serialization for snapshots.** Per-entity `JsonSerializerContext`
-  emitted by the generator; eliminates `JsonSerializer.SerializeToNode` reflection on the
-  primitive fallback path.
-- **`[RequiresUnreferencedCode]` / `[RequiresDynamicCode]` annotations** on the remaining
-  reflective APIs so consumers get accurate trim diagnostics.
-- **Native AOT smoke test** in CI (`PublishAot=true` on the sample console).
+- Source-generated `[Auditable]` discovery via the `[OrionAuditModule]` attribute — the
+  generator (shipped in the `OrionAudit` NuGet under `analyzers/dotnet/cs/`) emits
+  `RegisterAuditedTypes(AuditConfigurationBuilder)` and an `AuditedTypeNames` list. No runtime
+  reflection, no assembly scan.
+- `OrionAuditOptions.UseJsonContext(JsonSerializerContext)` — routes `SnapshotBuilder` and
+  `AuditReconstructor` through a System.Text.Json source-gen context instead of reflective
+  serialisation.
+- `[RequiresUnreferencedCode]` / `[RequiresDynamicCode]` on `AuditableTypeDiscovery.Discover`
+  and `OrionAuditOptions.ScanAssembly` so trim/AOT publishes flag the reflective scan path.
 
-### Considered for v0.3
+### Scope cut: full Native AOT deferred to v0.4
 
-- Drop net8.0 once the source-gen lands cleanly on net9+ — depends on adoption signal.
+`JsonPatch.Net` — the library behind `DiffEngine` — is not AOT-compatible (`CreatePatch` and
+the `JsonPatch` type's (de)serialisation carry `[RequiresDynamicCode]`). v0.3.0 removes the
+*assembly-scan* and *snapshot-serialisation* reflection, but the *diff* path still relies on
+it. A fully AOT-clean OrionAudit needs a hand-rolled RFC 6902 emitter — that is the v0.4 theme.
 
 ---
 
-## v0.4.0 — Developer Experience *(planned)*
+## v0.4.0 — AOT-Clean Diff Engine *(planned)*
 
-Target theme: *seeing the audit trail should be as easy as writing it.*
+Theme: *replace `JsonPatch.Net` with a source-gen-friendly RFC 6902 emitter so the whole
+capture/reconstruct path is Native-AOT clean.*
+
+- **Hand-rolled JSON Patch engine.** A focused RFC 6902 compute/apply implementation over
+  `System.Text.Json.Nodes` with no `[RequiresDynamicCode]` surface, replacing the
+  `JsonPatch.Net` dependency.
+- **Native AOT smoke test in CI.** The `aot-publish-check` job + AOT probe project return —
+  the probe Native-AOT publishes OrionAudit's full capture/reconstruct surface and fails the
+  build on any `IL2*` / `IL3*` warning.
+- **`[RequiresUnreferencedCode]` cleanup.** With the diff engine AOT-safe, the remaining
+  reflective fallbacks are either annotated or eliminated; `UseJsonContext` becomes the
+  documented AOT path end-to-end.
+
+### Considered for v0.4
+
+- Drop `net8.0` once the source generator and AOT story have settled on net9+.
+
+---
+
+## v0.5.0 — Developer Experience *(planned)*
+
+Theme: *seeing the audit trail should be as easy as writing it.*
 
 - **`OrionAudit.Viewer` companion package.** Embeddable Razor Pages / Blazor component that
   renders the audit timeline for a given entity, including before/after diffs in a human-readable
@@ -113,7 +138,7 @@ Target theme: *seeing the audit trail should be as easy as writing it.*
   already has hand-rolled change tracking — bulk-import legacy history as synthetic `AuditLog`
   rows.
 
-### Considered for v0.4
+### Considered for v0.5
 
 - **Web push notifications on audit-row write.** Could ride on the v0.2 outbox hook.
 - **Per-entity / per-field UI labels** for the viewer.
@@ -145,7 +170,7 @@ These come up in conversation; we're saying no on purpose.
   for it.
 - **Cross-database / cross-system audit aggregation.** Centralising audit from N microservices
   is an infra job; OrionAudit ships one row per save in *your* DB.
-- **GUI report builder / dashboard product.** The Viewer in v0.4 is a primitive component, not a
+- **GUI report builder / dashboard product.** The Viewer in v0.5 is a primitive component, not a
   reporting suite.
 - **Replacing EF Core's change tracking.** The library lives on top of EF Core's interceptor
   surface and inherits its semantics — entities outside the change tracker (raw SQL, dapper) are
@@ -169,11 +194,12 @@ These come up in conversation; we're saying no on purpose.
 
 | Milestone | Target window                       | Driver                       |
 | --------- | ----------------------------------- | ---------------------------- |
-| v0.1.x    | initial                             | bug fixes only               |
-| v0.2.0    | ~1 quarter post-v0.1                | scale + composite keys       |
-| v0.3.0    | ~2 quarters post-v0.1               | AOT + source-gen             |
-| v0.4.0    | ~3 quarters post-v0.1               | viewer + DX                  |
-| v1.0.0    | when v0.4 is stable in production   | API freeze                   |
+| v0.1.0    | initial                             | capture + reconstruction     |
+| v0.2.0    | scale + composite keys              | reliability                  |
+| v0.3.0    | source generator                    | `[OrionAuditModule]`         |
+| v0.4.0    | AOT-clean diff engine               | replace JsonPatch.Net        |
+| v0.5.0    | viewer + DX                         | developer experience         |
+| v1.0.0    | when v0.5 is stable in production   | API freeze                   |
 
 Patch releases (`0.x.y`) ship as needed for bugs and security. Minor releases (`0.x.0`) cluster
 features around the themes above and never break documented public APIs without a deprecation

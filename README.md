@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.2.0 is here!** Composite primary keys, periodic snapshotting (O(K) reconstruction instead of O(N)), declarative retention policies with a hosted sweep, provider-aware column hints (`jsonb` / `nvarchar(max)` / `TEXT`), soft-delete capture, and `AuditScope.Push` correlation override — on top of the full v0.1.0 surface.
-> [See the v0.2.0 changelog](CHANGELOG.md#020---2026-05-19) and [what's next](ROADMAP.md).
+> **v0.3.0 is here!** A compile-time source generator: decorate a partial class with `[OrionAuditModule]` and get reflection-free `[Auditable]` discovery, plus `UseJsonContext` to route snapshot serialisation through a `JsonSerializerContext`. On top of the full v0.2.0 surface (composite keys, periodic snapshotting, retention, soft-delete, `AuditScope`).
+> [See the v0.3.0 changelog](CHANGELOG.md#030---2026-05-20) and [what's next](ROADMAP.md).
 
 ---
 
@@ -38,7 +38,8 @@
 | OpenTelemetry `ActivitySource` + Meter |    Yes     |     -     |        -         |      -      |
 | Framework-agnostic test helpers        |    Yes     |     -     |        -         |      -      |
 | Multi-targets net8 / net9 / net10      |    Yes     |    Yes    |       Yes        |    n/a      |
-| Source-gen / NativeAOT clean           |  Planned   |     -     |        -         |      -      |
+| Source-generated type discovery        |    Yes     |     -     |        -         |      -      |
+| NativeAOT clean                        |  Planned   |     -     |        -         |      -      |
 | Composite primary key support          |    Yes     |    Yes    |       Yes        |     Yes     |
 | Periodic snapshotting (O(K) replay)    |    Yes     |     -     |        -         |      -      |
 | Retention policy + background sweep    |    Yes     |     -     |        -         |      -      |
@@ -231,6 +232,33 @@ builder.Services
 | `orionaudit.entries.failed`         | Counter   | Audit rows written with diff errors               |
 | `orionaudit.capture.duration`       | Histogram | Interceptor capture duration in milliseconds      |
 | `orionaudit.reconstruct.duration`   | Histogram | Reconstruction duration in milliseconds           |
+
+### Source-generated registration (AOT-aware)
+
+Skip the runtime assembly scan entirely. Decorate a `partial class` with `[OrionAuditModule]`
+and the bundled source generator emits a `RegisterAuditedTypes` method that registers every
+`[Auditable]` type discovered at compile time.
+
+```csharp
+[OrionAuditModule]
+public partial class AppAuditModule { }
+
+// A hand-written System.Text.Json context covering your audited entities
+[JsonSerializable(typeof(Order))]
+[JsonSerializable(typeof(Customer))]
+public partial class AppJsonContext : JsonSerializerContext { }
+
+services.AddOrionAudit<AppDbContext>(o =>
+{
+    AppAuditModule.RegisterAuditedTypes(o.ConfigurationBuilder);  // generator-emitted, no reflection
+    o.UseJsonContext(AppJsonContext.Default);                     // trim-aware snapshot serialisation
+});
+```
+
+The generator ships *inside* the `OrionAudit` NuGet (`analyzers/dotnet/cs/`) — no extra
+package to install. The reflective `ScanAssembly` path still works and now carries
+`[RequiresUnreferencedCode]` so trim/AOT publishes flag it. Full Native AOT is a
+[v0.4 goal](ROADMAP.md) — it's blocked on replacing the `JsonPatch.Net` diff dependency.
 
 ### Framework-agnostic test helpers
 
