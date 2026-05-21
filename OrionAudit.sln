@@ -31,6 +31,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Moongazing.OrionAudit.Bench
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Moongazing.OrionAudit.Generators", "src\Moongazing.OrionAudit.Generators\Moongazing.OrionAudit.Generators.csproj", "{8BDD7A93-4057-4A24-BEB1-F30A5ED08C49}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "aot", "aot", "{D3107F82-A6F5-CE3A-5ADD-CE5D91A4D647}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Moongazing.OrionAudit.AotProbe", "aot\Moongazing.OrionAudit.AotProbe\Moongazing.OrionAudit.AotProbe.csproj", "{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -161,6 +165,18 @@ Global
 		{8BDD7A93-4057-4A24-BEB1-F30A5ED08C49}.Release|x64.Build.0 = Release|Any CPU
 		{8BDD7A93-4057-4A24-BEB1-F30A5ED08C49}.Release|x86.ActiveCfg = Release|Any CPU
 		{8BDD7A93-4057-4A24-BEB1-F30A5ED08C49}.Release|x86.Build.0 = Release|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Debug|x64.Build.0 = Debug|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Debug|x86.Build.0 = Debug|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Release|x64.ActiveCfg = Release|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Release|x64.Build.0 = Release|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Release|x86.ActiveCfg = Release|Any CPU
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -176,5 +192,6 @@ Global
 		{B2EF945E-A608-49FE-96C2-1072473ACE8E} = {4F9DEAE5-078F-E77A-2E4A-FEB6FFE226FF}
 		{0232BF45-347D-47B8-B3E5-982213830F4D} = {760AB15A-8938-8D9B-BEDE-5CE1484B84C3}
 		{8BDD7A93-4057-4A24-BEB1-F30A5ED08C49} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{C4BE8E05-476A-4A88-8C25-5A2987F7AE5F} = {D3107F82-A6F5-CE3A-5ADD-CE5D91A4D647}
 	EndGlobalSection
 EndGlobal
