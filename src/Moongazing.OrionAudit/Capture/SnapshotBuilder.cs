@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,22 +19,51 @@ public static class SnapshotBuilder
     /// <summary>Marker value substituted for properties marked with <see cref="RedactedAuditAttribute"/>.</summary>
     public const string RedactedMarker = "<redacted>";
 
+    private const string ReflectiveSerializationMessage =
+        "Serializes non-primitive property values with the reflection-based JsonSerializer. " +
+        "Supply a JsonSerializerContext (OrionAuditOptions.UseJsonContext) to use the trim-safe, " +
+        "Native-AOT-clean snapshot path instead.";
+
     // Snapshots run on every save: keep hot paths allocation-free where possible.
     private const int StackBufferSize = 256;
     private const int Sha256ByteCount = 32;
 
     /// <summary>
     /// Produces a <see cref="JsonObject"/> snapshot of the supplied property values, applying any
-    /// configured field rules for <paramref name="entityType"/>. When <paramref name="jsonContext"/>
-    /// is supplied, non-primitive property values are serialised through it instead of through
-    /// the reflective <c>JsonSerializer.SerializeToNode</c> fallback — trim-safe and Native-AOT
-    /// clean.
+    /// configured field rules for <paramref name="entityType"/>. Non-primitive property values are
+    /// serialised through <paramref name="jsonContext"/> — trim-safe and Native-AOT clean. A value
+    /// whose type is not registered in the context throws <see cref="OrionAuditException"/>.
     /// </summary>
     public static JsonObject Build(
         Type entityType,
         IReadOnlyDictionary<string, object?> propertyValues,
         IAuditConfiguration configuration,
-        JsonSerializerContext? jsonContext = null)
+        JsonSerializerContext jsonContext)
+    {
+        ArgumentNullException.ThrowIfNull(jsonContext);
+        return BuildCore(entityType, propertyValues, configuration,
+            value => ConvertViaContext(value, jsonContext));
+    }
+
+    /// <summary>
+    /// Produces a <see cref="JsonObject"/> snapshot of the supplied property values, applying any
+    /// configured field rules for <paramref name="entityType"/>. Non-primitive property values are
+    /// serialised with the reflection-based <see cref="JsonSerializer"/>. Use the overload that
+    /// takes a <see cref="JsonSerializerContext"/> for a trim-safe, Native-AOT-clean snapshot path.
+    /// </summary>
+    [RequiresUnreferencedCode(ReflectiveSerializationMessage)]
+    [RequiresDynamicCode(ReflectiveSerializationMessage)]
+    public static JsonObject Build(
+        Type entityType,
+        IReadOnlyDictionary<string, object?> propertyValues,
+        IAuditConfiguration configuration)
+        => BuildCore(entityType, propertyValues, configuration, ConvertViaReflection);
+
+    private static JsonObject BuildCore(
+        Type entityType,
+        IReadOnlyDictionary<string, object?> propertyValues,
+        IAuditConfiguration configuration,
+        Func<object, JsonNode?> convertNonPrimitive)
     {
         ArgumentNullException.ThrowIfNull(entityType);
         ArgumentNullException.ThrowIfNull(propertyValues);
@@ -53,11 +83,11 @@ public static class SnapshotBuilder
                     snapshot[propName] = RedactedMarker;
                     break;
                 case AuditFieldRule.Hash:
-                    snapshot[propName] = HashValue(rawValue);
+                    snapshot[propName] = HashValue(rawValue, convertNonPrimitive);
                     break;
                 case AuditFieldRule.Capture:
                 default:
-                    snapshot[propName] = ConvertToNode(rawValue, jsonContext);
+                    snapshot[propName] = ConvertValue(rawValue, convertNonPrimitive);
                     break;
             }
         }
@@ -65,13 +95,17 @@ public static class SnapshotBuilder
         return snapshot;
     }
 
-    private static string? HashValue(object? value)
+    private static string? HashValue(object? value, Func<object, JsonNode?> convertNonPrimitive)
     {
         if (value is null)
         {
             return null;
         }
-        var text = value as string ?? JsonSerializer.Serialize(value);
+        // Strings hash by their raw text (stable across versions); other values hash by their
+        // canonical JSON representation, sharing the same conversion path as captured values.
+        var text = value as string
+            ?? ConvertValue(value, convertNonPrimitive)?.ToJsonString()
+            ?? "null";
         var byteCount = Encoding.UTF8.GetByteCount(text);
 
         byte[]? rented = null;
@@ -100,13 +134,11 @@ public static class SnapshotBuilder
         }
     }
 
-    private static JsonNode? ConvertToNode(object? value, JsonSerializerContext? jsonContext)
+    private static JsonNode? ConvertValue(object? value, Func<object, JsonNode?> convertNonPrimitive)
     {
-        // Primitive fast path skips JsonSerializer's reflection machinery on every property of
-        // every audited entity. Anything not listed falls through to either the supplied
-        // source-generated context (trim-safe, AOT-clean) or — if none is configured — the
-        // reflective serializer, which is the only path that handles user-defined value types
-        // and collections without a generator.
+        // Primitive fast path skips JsonSerializer entirely on every property of every audited
+        // entity. Non-primitive values go through the supplied converter — either the
+        // source-generated context (trim-safe, AOT-clean) or the reflective serializer.
         return value switch
         {
             null => null,
@@ -131,20 +163,25 @@ public static class SnapshotBuilder
             TimeSpan ts => JsonValue.Create(ts.ToString("c", System.Globalization.CultureInfo.InvariantCulture)),
             Guid g => JsonValue.Create(g),
             byte[] bytes => JsonValue.Create(Convert.ToBase64String(bytes)),
-            _ => SerializeViaContextOrReflection(value, jsonContext),
+            _ => convertNonPrimitive(value),
         };
     }
 
-    private static JsonNode? SerializeViaContextOrReflection(object value, JsonSerializerContext? jsonContext)
+    private static JsonNode? ConvertViaContext(object value, JsonSerializerContext jsonContext)
     {
-        if (jsonContext is not null)
+        var typeInfo = jsonContext.GetTypeInfo(value.GetType());
+        if (typeInfo is null)
         {
-            var typeInfo = jsonContext.GetTypeInfo(value.GetType());
-            if (typeInfo is not null)
-            {
-                return JsonSerializer.SerializeToNode(value, typeInfo);
-            }
+            throw new OrionAuditException(
+                $"OrionAudit could not snapshot a value of type '{value.GetType()}': it is not " +
+                $"registered in the supplied JsonSerializerContext. Add " +
+                $"[JsonSerializable(typeof({value.GetType().Name}))] to the context passed to UseJsonContext.");
         }
-        return JsonSerializer.SerializeToNode(value, value.GetType());
+        return JsonSerializer.SerializeToNode(value, typeInfo);
     }
+
+    [RequiresUnreferencedCode(ReflectiveSerializationMessage)]
+    [RequiresDynamicCode(ReflectiveSerializationMessage)]
+    private static JsonNode? ConvertViaReflection(object value)
+        => JsonSerializer.SerializeToNode(value, value.GetType());
 }

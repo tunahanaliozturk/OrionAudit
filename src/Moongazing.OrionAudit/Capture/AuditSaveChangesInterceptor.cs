@@ -202,8 +202,18 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         JsonObject? afterNodeForCaller = null;
         try
         {
-            var beforeNode = SnapshotBuilder.Build(entityType, beforeValues, configuration, jsonContext);
-            var afterNode = SnapshotBuilder.Build(entityType, afterValues, configuration, jsonContext);
+            JsonObject beforeNode;
+            JsonObject afterNode;
+            if (jsonContext is not null)
+            {
+                beforeNode = SnapshotBuilder.Build(entityType, beforeValues, configuration, jsonContext);
+                afterNode = SnapshotBuilder.Build(entityType, afterValues, configuration, jsonContext);
+            }
+            else
+            {
+                beforeNode = SnapshotBuilder.Build(entityType, beforeValues, configuration);
+                afterNode = SnapshotBuilder.Build(entityType, afterValues, configuration);
+            }
             auditLog.Diff = DiffEngine.Compute(beforeNode, afterNode);
 
             if (action is AuditAction.Deleted)
