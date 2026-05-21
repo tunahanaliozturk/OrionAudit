@@ -7,6 +7,41 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-21
+
+AOT-Clean Diff Engine release. Replaces the `JsonPatch.Net` dependency with an in-house,
+reflection-free RFC 6902 engine, making OrionAudit's capture/reconstruct path Native-AOT clean.
+
+### Added
+
+- **`Json6902` engine.** A reflection-free RFC 6902 compute/apply implementation built only on
+  `System.Text.Json.Nodes`, with no `[RequiresDynamicCode]` surface. `DiffEngine` is now a thin
+  facade over it; its public `Compute` / `Apply` signatures are unchanged.
+- **Native AOT CI gate restored.** The `aot/Moongazing.OrionAudit.AotProbe` project and the
+  `aot-publish-check` workflow job return. The probe Native-AOT publishes OrionAudit's
+  reflection-free surface with `TreatWarningsAsErrors`; any `IL2*` / `IL3*` warning fails the
+  build. The `publish` job depends on it again.
+
+### Changed
+
+- `DiffEngine.Compute` / `Apply` no longer depend on `JsonPatch.Net`. `Compute` emits only
+  `add` / `remove` / `replace` operations; `Apply` supports all six RFC 6902 operations
+  (`add` / `remove` / `replace` / `move` / `copy` / `test`) so historical patches written by
+  `JsonPatch.Net` (which can carry `move` / `copy`) still replay.
+- `OrionAudit` `ActivitySource` / `Meter` version bumped to `0.4.0`.
+
+### Removed
+
+- **`JsonPatch.Net` package dependency.** OrionAudit no longer pulls in `JsonPatch.Net` or its
+  transitive `Json.Pointer` / `Json.More.Net` graph.
+
+### Migration from v0.3.0
+
+- **No code changes required.** Every v0.3.0 API works unchanged; `DiffEngine`'s public surface
+  is identical.
+- **No schema or data migration.** The persisted `AuditLog.Diff` format is unchanged RFC 6902
+  JSON. Existing audit history replays as-is.
+
 ## [0.3.0] - 2026-05-20
 
 Source Generator release. Replaces the runtime assembly scan with a compile-time generator and

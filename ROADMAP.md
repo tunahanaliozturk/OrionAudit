@@ -101,7 +101,7 @@ it. A fully AOT-clean OrionAudit needs a hand-rolled RFC 6902 emitter — that i
 
 ---
 
-## v0.4.0 — AOT-Clean Diff Engine *(planned)*
+## v0.4.0 — AOT-Clean Diff Engine *(shipped)*
 
 Theme: *replace `JsonPatch.Net` with a source-gen-friendly RFC 6902 emitter so the whole
 capture/reconstruct path is Native-AOT clean.*
@@ -197,7 +197,7 @@ These come up in conversation; we're saying no on purpose.
 | v0.1.0    | initial                             | capture + reconstruction     |
 | v0.2.0    | scale + composite keys              | reliability                  |
 | v0.3.0    | source generator                    | `[OrionAuditModule]`         |
-| v0.4.0    | AOT-clean diff engine               | replace JsonPatch.Net        |
+| v0.4.0    | shipped — AOT-clean diff engine     | replace JsonPatch.Net        |
 | v0.5.0    | viewer + DX                         | developer experience         |
 | v1.0.0    | when v0.5 is stable in production   | API freeze                   |
 

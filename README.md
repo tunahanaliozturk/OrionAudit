@@ -39,7 +39,7 @@
 | Framework-agnostic test helpers        |    Yes     |     -     |        -         |      -      |
 | Multi-targets net8 / net9 / net10      |    Yes     |    Yes    |       Yes        |    n/a      |
 | Source-generated type discovery        |    Yes     |     -     |        -         |      -      |
-| NativeAOT clean                        |  Planned   |     -     |        -         |      -      |
+| NativeAOT clean                        |    Yes     |     -     |        -         |      -      |
 | Composite primary key support          |    Yes     |    Yes    |       Yes        |     Yes     |
 | Periodic snapshotting (O(K) replay)    |    Yes     |     -     |        -         |      -      |
 | Retention policy + background sweep    |    Yes     |     -     |        -         |      -      |
@@ -111,8 +111,8 @@ await ctx.SaveChangesAsync();
 
 ### JSON Patch (RFC 6902) diffs
 
-Diffs are computed via [`JsonPatch.Net`](https://github.com/gregsdennis/json-everything) and
-stored in the `Diff` column as compact JSON. They are replayable — that's what makes time-travel
+Diffs are computed by OrionAudit's in-house, reflection-free RFC 6902 engine and stored in the
+`Diff` column as compact JSON. They are replayable — that's what makes time-travel
 reconstruction possible.
 
 ```csharp
@@ -257,8 +257,8 @@ services.AddOrionAudit<AppDbContext>(o =>
 
 The generator ships *inside* the `OrionAudit` NuGet (`analyzers/dotnet/cs/`) — no extra
 package to install. The reflective `ScanAssembly` path still works and now carries
-`[RequiresUnreferencedCode]` so trim/AOT publishes flag it. Full Native AOT is a
-[v0.4 goal](ROADMAP.md) — it's blocked on replacing the `JsonPatch.Net` diff dependency.
+`[RequiresUnreferencedCode]` so trim/AOT publishes flag it. As of v0.4.0 the diff engine is
+in-house and reflection-free, so the capture/reconstruct surface is Native-AOT clean.
 
 ### Framework-agnostic test helpers
 
@@ -352,8 +352,8 @@ and proportional allocation drop.
 - **`FindExtension<CoreOptionsExtension>()`** for the tenant resolver instead of LINQ over
   `IDbContextOptions.Extensions`.
 
-NativeAOT compatibility and source-generated `[Auditable]` discovery are on the
-[v0.3 roadmap](ROADMAP.md).
+Source-generated `[Auditable]` discovery (v0.3.0) and a reflection-free, Native-AOT-clean
+diff engine (v0.4.0) have shipped — see the [roadmap](ROADMAP.md).
 
 ---
 
