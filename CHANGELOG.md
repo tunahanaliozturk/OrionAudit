@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-05-21
 
 AOT-Clean Diff Engine release. Replaces the `JsonPatch.Net` dependency with an in-house,
-reflection-free RFC 6902 engine, making OrionAudit's capture/reconstruct path Native-AOT clean.
+reflection-free RFC 6902 engine, making the diff engine fully reflection-free and the
+snapshot-capture path Native-AOT clean when wired through `UseJsonContext`.
 
 ### Added
 
@@ -28,6 +29,17 @@ reflection-free RFC 6902 engine, making OrionAudit's capture/reconstruct path Na
   `add` / `remove` / `replace` operations; `Apply` supports all six RFC 6902 operations
   (`add` / `remove` / `replace` / `move` / `copy` / `test`) so historical patches written by
   `JsonPatch.Net` (which can carry `move` / `copy`) still replay.
+- **`SnapshotBuilder.Build` split into two overloads.** The overload taking a
+  `JsonSerializerContext` is reflection-free and Native-AOT clean (the CI AOT probe exercises
+  it end to end); the context-less overload is reflective and annotated with
+  `[RequiresUnreferencedCode]` / `[RequiresDynamicCode]`. A non-primitive value whose type is
+  not registered in the supplied context now throws `OrionAuditException` with a clear message
+  instead of silently reflecting.
+- **`AuditConfigurationBuilder` trim annotations.** `Audit<T>` / `Audit(Type)` and the
+  attribute-scan path carry `[DynamicallyAccessedMembers(PublicProperties)]`, so types
+  registered by the `[OrionAuditModule]` source generator stay trim- and AOT-safe.
+- Hashed (`[HashedAudit]`) non-string values now derive their hash from the canonical JSON
+  representation instead of reflective `JsonSerializer.Serialize`. String values are unchanged.
 - `OrionAudit` `ActivitySource` / `Meter` version bumped to `0.4.0`.
 
 ### Removed
@@ -37,10 +49,14 @@ reflection-free RFC 6902 engine, making OrionAudit's capture/reconstruct path Na
 
 ### Migration from v0.3.0
 
-- **No code changes required.** Every v0.3.0 API works unchanged; `DiffEngine`'s public surface
-  is identical.
+- **No code changes required** for typical consumers. `DiffEngine`'s public surface is
+  identical, and the standard `AddOrionAudit` / interceptor wiring is unaffected.
 - **No schema or data migration.** The persisted `AuditLog.Diff` format is unchanged RFC 6902
   JSON. Existing audit history replays as-is.
+- **`SnapshotBuilder` (low-level type) callers:** the four-argument `Build` overload now takes
+  a non-nullable `JsonSerializerContext`. Code that called `Build(type, values, config)` is
+  unaffected — it binds to the context-less overload. Code that passed an explicit `null`
+  context should drop the argument and call the three-argument overload instead.
 
 ## [0.3.0] - 2026-05-20
 

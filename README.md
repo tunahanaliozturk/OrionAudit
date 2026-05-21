@@ -258,7 +258,11 @@ services.AddOrionAudit<AppDbContext>(o =>
 The generator ships *inside* the `OrionAudit` NuGet (`analyzers/dotnet/cs/`) — no extra
 package to install. The reflective `ScanAssembly` path still works and now carries
 `[RequiresUnreferencedCode]` so trim/AOT publishes flag it. As of v0.4.0 the diff engine is
-in-house and reflection-free, so the capture/reconstruct surface is Native-AOT clean.
+in-house and fully reflection-free. The snapshot-capture path is Native-AOT clean when wired
+through `UseJsonContext`; without a context it falls back to reflective serialization, which
+is annotated with `[RequiresUnreferencedCode]` / `[RequiresDynamicCode]` so trim/AOT publishes
+flag it. A CI Native-AOT probe publishes the context-wired surface and fails the build on any
+trim/AOT warning.
 
 ### Framework-agnostic test helpers
 
