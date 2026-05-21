@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Moongazing.OrionAudit.Configuration;
@@ -13,7 +14,7 @@ public sealed class AuditConfigurationBuilder
     private readonly Dictionary<Type, string?> softDeleteByType = new();
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
-    public AuditConfigurationBuilder Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
+    public AuditConfigurationBuilder Audit<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
     {
         var entityType = typeof(T);
         var rules = GetOrCreateRules(entityType);
@@ -38,7 +39,7 @@ public sealed class AuditConfigurationBuilder
     }
 
     /// <summary>Registers a type for audit using only attribute-based rules.</summary>
-    public AuditConfigurationBuilder Audit(Type entityType)
+    public AuditConfigurationBuilder Audit([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type entityType)
     {
         ArgumentNullException.ThrowIfNull(entityType);
         var rules = GetOrCreateRules(entityType);
@@ -69,7 +70,7 @@ public sealed class AuditConfigurationBuilder
         return rules;
     }
 
-    private void ApplySoftDeleteAttribute(Type entityType)
+    private void ApplySoftDeleteAttribute([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type entityType)
     {
         var attr = entityType.GetCustomAttribute<SoftDeleteAttribute>();
         if (attr is null)
@@ -86,7 +87,7 @@ public sealed class AuditConfigurationBuilder
         softDeleteByType.TryAdd(entityType, attr.PropertyName);
     }
 
-    private static void ApplyAttributeRules(Type entityType, Dictionary<string, AuditFieldRule> rules)
+    private static void ApplyAttributeRules([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type entityType, Dictionary<string, AuditFieldRule> rules)
     {
         foreach (var prop in entityType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
         {

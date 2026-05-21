@@ -93,7 +93,8 @@ internal static class Json6902
         }
     }
 
-    private static JsonObject Op(string op, string path, JsonNode? value, bool withValue)
+#pragma warning disable CA1859 // Return type is intentionally JsonNode (not JsonObject) so JsonArray.Add uses the non-generic overload — required for Native-AOT trim safety.
+    private static JsonNode Op(string op, string path, JsonNode? value, bool withValue)
     {
         var node = new JsonObject
         {
@@ -106,6 +107,7 @@ internal static class Json6902
         }
         return node;
     }
+#pragma warning restore CA1859
 
     // ---- Apply ------------------------------------------------------------
 
