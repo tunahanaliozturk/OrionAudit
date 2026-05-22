@@ -26,6 +26,12 @@ public sealed class OrionAuditOptions
     internal RetentionSweepOptions SweepOptions { get; } = new();
     internal JsonSerializerContext? JsonContext { get; private set; }
 
+    /// <summary>True when <see cref="UseAsyncCapture"/> has been called.</summary>
+    public bool AsyncCaptureEnabled { get; private set; }
+
+    /// <summary>The async-capture tunables. Meaningful only when <see cref="AsyncCaptureEnabled"/> is true.</summary>
+    public AsyncCaptureOptions AsyncCaptureOptions { get; private set; } = new();
+
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public OrionAuditOptions Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
     {
@@ -138,6 +144,22 @@ public sealed class OrionAuditOptions
     {
         ArgumentNullException.ThrowIfNull(context);
         JsonContext = context;
+        return this;
+    }
+
+    /// <summary>
+    /// Opts into async staging-capture. The interceptor writes a lightweight
+    /// <c>OrionAudit_Capture_Queue</c> row in the consumer's transaction; a background
+    /// dispatcher computes the diff and writes the final <see cref="AuditLog"/> row shortly
+    /// after. Capture stays atomic and lossless; audit becomes eventually consistent. When
+    /// this is not called the synchronous v0.4.0 capture path is used unchanged.
+    /// </summary>
+    public OrionAuditOptions UseAsyncCapture(Action<AsyncCaptureBuilder>? configure = null)
+    {
+        var builder = new AsyncCaptureBuilder();
+        configure?.Invoke(builder);
+        AsyncCaptureOptions = builder.Options;
+        AsyncCaptureEnabled = true;
         return this;
     }
 }
