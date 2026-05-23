@@ -150,7 +150,14 @@ Theme: *make audit cheap to write under load and easy to see.*
 
 ---
 
-## v0.6.0 — Developer Experience *(planned)*
+## v0.5.1 — Logo refresh *(shipped 2026-05-23)*
+
+New minimalist family-style logo: indigo line-art `📜` document with timeline ticks in the
+Moongazing indigo (`#312E81`). No code changes; aligns OrionAudit with the rest of the family.
+
+---
+
+## v0.6.0 — Developer Experience *(planned, Q3 2026)*
 
 Theme: *adopt OrionAudit into an existing system without forking, and index whatever the
 business case demands.*
@@ -172,19 +179,94 @@ business case demands.*
 
 ---
 
-## v1.0.0 — Stable API *(planned)*
+## v0.7.0 — Outbox & polymorphic capture *(planned, Q4 2026)*
+
+Theme: *unblock downstream replication and stop bleeding TPH hierarchies at the entity-type
+boundary.*
+
+- **Outbox-style publish hook on audit write.** A first-class `IAuditEventPublisher` interface
+  invoked inside the capture transaction. Ships with an in-process `ChannelAuditEventPublisher`
+  default and a documented contract for plugging in a real broker (RabbitMQ, Azure Service Bus,
+  Kafka) from consumer code. Resolves the v0.2 "considered but not promised" item.
+- **TPH / polymorphic entity capture.** `[Auditable(BaseType = typeof(Document))]` and the
+  fluent equivalent record the runtime class on the row but allow `AuditFor<Document>()` to
+  return the full inheritance hierarchy. `EntityType` stays a stable string; a new
+  `EntityBaseType` column makes the relationship queryable.
+- **Viewer: per-entity / per-field display labels.** `o.Label<Order>(o => o.SubTotal, "Net")`
+  surfaces in the viewer table and detail panel. No schema impact — labels are configuration.
+- **Provider matrix expansion.** Add MySQL/MariaDB to the supported provider list with a
+  `MySqlText` column hint and integration tests.
+
+---
+
+## v0.8.0 — Separate audit store & operator tools *(planned, Q1 2027)*
+
+Theme: *let audit grow at its own pace, on its own iron.*
+
+- **Separate-database audit storage (`o.UseSeparateAuditDb(...)`).** Promoted out of v1.0 so
+  large-volume consumers can adopt it earlier. Audit table moves to its own connection / schema
+  / DB; primary-write throughput stops paying for audit retention growth. Single-transaction
+  capture guarantee is preserved on the primary DB; the audit-side write becomes
+  outbox-dispatched.
+- **CLI diff renderer (`dotnet orionaudit diff`).** Reads an `AuditLog.Id` (or stdin JSON) and
+  pretty-prints the patch with red/green inline rendering. Useful for CI log inspection and ops
+  scripting; designed to plug into `git show`-style workflows.
+- **Compaction job.** Background hosted-service variant of retention that merges runs of
+  small diffs into snapshot rows past a configurable age threshold. Bounds the worst-case
+  reconstruction cost without losing fidelity.
+- **Viewer auth presets.** First-class `RequirePolicy` / `RequireRole` configuration on
+  `MapOrionAuditViewer`; in-box documentation for the three common deployment shapes
+  (admin-only, tenant-scoped, read-only public).
+
+---
+
+## v0.9.0 — Documentation & AOT polish *(planned, Q1-Q2 2027)*
+
+Theme: *make OrionAudit the easiest audit library to learn, and finish the AOT story.*
+
+- **Documentation site.** Hosted reference + recipes + migration guides. Replaces the
+  repo-readme-as-docs status quo. Includes a runnable cookbook ("audit a multi-tenant SaaS",
+  "audit with TPH", "audit with a separate database").
+- **Full Native AOT pass.** `JsonPatch.Net` is already gone (v0.4); this milestone audits the
+  remaining reflective paths in the dispatcher, viewer, and reconstruction surfaces, and lifts
+  the AOT smoke test to assert *zero* `IL2*` / `IL3*` warnings on the full surface.
+- **OpenTelemetry semantic-convention pass.** Align span and metric names with the upcoming
+  OTel database / messaging semantic conventions instead of the OrionAudit-internal scheme.
+  Coordinated with [[orionguard]] / [[orionlock]] so the family ships a consistent telemetry
+  shape.
+
+---
+
+## v1.0.0 — Stable API *(planned, Q2 2027)*
 
 Target theme: *commit to the surface, slow down, support it.*
 
 - **API freeze + SemVer 2.0.0 commitment.** Public types are locked; breaking changes only on
   major version bumps from here.
-- **Separate-database audit storage.** First-class `o.UseSeparateAuditDb(...)` path so the
-  audit table lives on its own connection / schema / DB. Decouples primary write throughput
-  from audit retention growth.
 - **Strong-named assemblies.** Required by some enterprise / GAC scenarios.
 - **LTS support window** — security and correctness fixes backported to v1.x for 18 months
   after v2 ships.
-- **Documentation site** with API reference, recipes, and migration guides.
+- **Final documentation polish.** Every public type on the docs site has a runnable example;
+  migration guide from any breaking change introduced in 0.x.
+- **`net8.0` drop decision.** With net10 mainstream and net12 on the horizon, decide and
+  publish whether v1.x ships TFM `net8.0` or starts at `net9.0`. This is the last chance to
+  cut net8 before SemVer locks it in.
+
+---
+
+## Considered (no commitment yet)
+
+- **`OrionAudit.PostgresLogical`** — read change events from a Postgres logical-replication
+  slot instead of an EF Core interceptor, for consumers who can't (or won't) route writes
+  through EF.
+- **GraphQL viewer query API.** Higher-fidelity slicing of the audit trail than the current
+  REST endpoint. Only worth it if the viewer grows beyond "browse and filter".
+- **Optional row-level encryption** for `AuditLog.Diff`/`Snapshot` columns, against a
+  consumer-supplied KMS. Soft veto today (see "Out of scope") but the consumer demand signal is
+  growing; revisit before v1.
+
+If any of the above maps to a real workload you are on right now, open an issue with the
+`roadmap` label and a short description — that is how items move from *considered* to *planned*.
 
 ---
 
@@ -221,14 +303,19 @@ These come up in conversation; we're saying no on purpose.
 
 | Milestone | Target window                       | Driver                       |
 | --------- | ----------------------------------- | ---------------------------- |
-| v0.1.0    | initial                             | capture + reconstruction     |
-| v0.2.0    | scale + composite keys              | reliability                  |
-| v0.3.0    | source generator                    | `[OrionAuditModule]`         |
-| v0.4.0    | shipped — AOT-clean diff engine     | replace JsonPatch.Net        |
-| v0.5.0    | shipped — async capture + viewer    | throughput + visibility      |
-| v0.6.0    | extensible columns + import helper  | developer experience         |
-| v1.0.0    | when v0.6 is stable in production   | API freeze                   |
+| v0.1.0    | shipped                             | capture + reconstruction     |
+| v0.2.0    | shipped                             | reliability + composite keys |
+| v0.3.0    | shipped                             | source generator             |
+| v0.4.0    | shipped                             | AOT-clean diff engine        |
+| v0.5.0    | shipped                             | async capture + viewer       |
+| v0.5.1    | shipped 2026-05-23                  | logo refresh                 |
+| v0.6.0    | Q3 2026                             | developer experience         |
+| v0.7.0    | Q4 2026                             | outbox + polymorphic capture |
+| v0.8.0    | Q1 2027                             | separate audit DB + ops      |
+| v0.9.0    | Q1-Q2 2027                          | docs site + AOT polish       |
+| v1.0.0    | Q2 2027                             | API freeze                   |
 
 Patch releases (`0.x.y`) ship as needed for bugs and security. Minor releases (`0.x.0`) cluster
 features around the themes above and never break documented public APIs without a deprecation
-cycle.
+cycle. Dates are targets, not commitments. If a milestone slips by more than four weeks, the
+delay is reflected here.
