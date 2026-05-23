@@ -8,4 +8,7 @@ public interface IAuditConfiguration
 
     /// <summary>The per-type configuration, or null if the type is not audited.</summary>
     AuditableTypeConfig? GetConfig(Type entityType);
+
+    /// <summary>Assembly-qualified names of every type registered for audit. Surfaced by the viewer.</summary>
+    IReadOnlyCollection<string> AuditedTypeNames { get; }
 }
