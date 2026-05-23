@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.3.0 is here!** A compile-time source generator: decorate a partial class with `[OrionAuditModule]` and get reflection-free `[Auditable]` discovery, plus `UseJsonContext` to route snapshot serialisation through a `JsonSerializerContext`. On top of the full v0.2.0 surface (composite keys, periodic snapshotting, retention, soft-delete, `AuditScope`).
-> [See the v0.3.0 changelog](CHANGELOG.md#030---2026-05-20) and [what's next](ROADMAP.md).
+> **v0.5.0 is here — Throughput & Visibility.** Opt-in async staging-capture moves the diff/snapshot work off the `SaveChanges` hot path without weakening atomic, lossless capture (the queue row commits with the data change; the dispatcher writes the final `AuditLog` row shortly after). And `OrionAudit.Viewer` — `app.MapOrionAuditViewer<TDbContext>("/audit")` — drops a read-only audit-trail UI into any ASP.NET Core host with no Blazor dependency and no build step. On top of v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the v0.5.0 changelog](CHANGELOG.md#050---2026-05-23) and [what's next](ROADMAP.md).
 
 ---
 
@@ -45,6 +45,8 @@
 | Retention policy + background sweep    |    Yes     |     -     |        -         |      -      |
 | Soft-delete capture (distinct action)  |    Yes     |     -     |        -         |      -      |
 | Provider column hints (jsonb / nvarchar(max)) | Yes  |     -     |        -         |      -      |
+| Opt-in async staging-capture (atomic, lossless) | Yes |    -     |        -         |      -      |
+| Embedded audit-trail UI (no Blazor, no build step) | Yes |   -     |        -         |      -      |
 
 ---
 
@@ -91,7 +93,83 @@ same transaction.
 | ------------------------ | ---------------------------------------------- | -------------------------------------------------- |
 | `OrionAudit`             | `dotnet add package OrionAudit`                | Core library — interceptor, diff, reconstruction   |
 | `OrionAudit.AspNetCore`  | `dotnet add package OrionAudit.AspNetCore`     | `HttpContextAuditUserResolver` + DI helpers        |
+| `OrionAudit.Viewer`      | `dotnet add package OrionAudit.Viewer`         | Embedded read-only audit-trail UI (`MapOrionAuditViewer`) |
 | `OrionAudit.Testing`     | `dotnet add package OrionAudit.Testing`        | `AuditCapture` + fluent assertions, framework-free |
+
+---
+
+## What's new in v0.5.0
+
+### Async staging-capture — atomic, lossless, off the hot path
+
+Synchronous capture (the default since v0.1.0) writes the `AuditLog` row in the same
+transaction as the originating change. Under high write load the diff computation and the
+extra row become measurable overhead. Opt-in `UseAsyncCapture()` keeps the atomicity guarantee
+but defers the heavy work:
+
+```csharp
+services.AddOrionAudit<AppDbContext>(o => o
+    .Audit<Order>()
+    .UseAsyncCapture(q => q
+        .PollInterval(TimeSpan.FromSeconds(2))
+        .BatchSize(500)
+        .MaxAttempts(5)));
+```
+
+- The interceptor writes a lightweight `OrionAudit_Capture_Queue` row **in the same
+  transaction** as the data change — capture stays atomic and lossless.
+- `AuditDispatcherHostedService` polls the queue, computes diffs, and writes the final
+  `AuditLog` rows. Inserts and deletes commit together → exactly-once.
+- A row that throws is retried up to `MaxAttempts` and then dead-lettered (`Error` column
+  set; surfaced via `orionaudit.dispatch.rows_deadlettered` telemetry).
+- `IAuditDispatcher.FlushPendingAsync(ct)` force-drains the queue for tests and
+  read-after-write call sites. A no-op implementation is registered in synchronous mode so
+  the dependency is always resolvable.
+
+**Trade-off to know:** in async mode `AuditFor<T>()` sees only dispatched rows, so audit is
+eventually consistent. Use `FlushPendingAsync` where you need read-after-write.
+
+### `OrionAudit.Viewer` — read-only audit UI, one line to embed
+
+```csharp
+app.MapOrionAuditViewer<AppDbContext>("/audit", o => o.RequireAuthorization("AuditViewers"));
+```
+
+That single registration mounts a JSON API (`GET /audit/api/log`, `/audit/api/{type}/{key}`,
+`/audit/api/meta`) plus a built-in vanilla-JS single-page UI served from `/audit`. No Blazor
+dependency, no build step — drops into any ASP.NET Core host. Authorization is required by
+default; an explicit `AllowAnonymous()` opts out (dev use only).
+
+Tenant filtering is honoured automatically: the API reads through `db.AuditLog()`, which
+applies the registered `IAuditTenantResolver`.
+
+### Benchmark — the honest story
+
+`InterceptorBench` (in-memory SQLite, .NET 10 — `bench/Moongazing.OrionAudit.Bench`):
+
+| Scenario                | Batch | Mean (µs) | Ratio | Allocated         |
+| ----------------------- | ----- | --------: | :---: | ----------------- |
+| `SaveChanges_NoAudit`        | 1     |     277 | 1.00× | 71 KB             |
+| `SaveChanges_WithAudit`      | 1     |     769 | 2.82× | 96 KB (1.35×)     |
+| `SaveChanges_WithAsyncAudit` | 1     |   1 311 | 4.80× | 95 KB (1.34×)     |
+| `SaveChanges_NoAudit`        | 10    |     957 | 1.00× | 141 KB            |
+| `SaveChanges_WithAudit`      | 10    |   3 936 | 4.18× | 335 KB (2.37×)    |
+| `SaveChanges_WithAsyncAudit` | 10    |   3 414 | 3.62× | 343 KB (2.43×)    |
+| `SaveChanges_NoAudit`        | 100   |   6 023 | 1.00× | 819 KB            |
+| `SaveChanges_WithAudit`      | 100   |  13 720 | 2.36× | 2.7 MB (3.31×)    |
+| `SaveChanges_WithAsyncAudit` | 100   |  14 259 | 2.45× | 2.8 MB (3.45×)    |
+
+In-memory SQLite is unkind to async-mode bookkeeping — the `ExecuteUpdateAsync` claim plus
+the queue insert show up as raw cost without the network round-trip latency a real DB has.
+On a production SQL Server or Postgres, two things change in async mode's favour: the
+baseline `SaveChanges` carries network IO that absorbs sync mode's diff CPU into a much
+larger denominator, and the deferred `SnapshotCursor` lookup (a per-update DB query inside
+the consumer's transaction) genuinely leaves the hot path. Treat async capture as a
+correctness-preserving way to move materialisation off the consumer's transaction; it's a
+*throughput* feature, not a microbenchmark win.
+
+The capture-queue depth is exposed as `orionaudit.capture.queue_depth` (observable gauge) so
+operators can watch dispatch lag in their dashboards.
 
 ---
 

@@ -122,26 +122,53 @@ capture/reconstruct path is Native-AOT clean.*
 
 ---
 
-## v0.5.0 — Developer Experience *(planned)*
+## v0.5.0 — Throughput & Visibility *(shipped)*
 
-Theme: *seeing the audit trail should be as easy as writing it.*
+Theme: *make audit cheap to write under load and easy to see.*
 
-- **`OrionAudit.Viewer` companion package.** Embeddable Razor Pages / Blazor component that
-  renders the audit timeline for a given entity, including before/after diffs in a human-readable
-  format.
-- **CLI diff renderer.** `dotnet tool` that pretty-prints an `AuditLog.Diff` against a target
-  type from any DB connection string.
-- **Extensible `AuditLog` row.** Opt-in fluent surface for adding columns
-  (`o.AddColumn<int>("WorkflowStepId", e => ...)`) so consumers can index custom dimensions
-  without a fork.
-- **Migration helpers.** Templates and helpers for adopting OrionAudit into a system that
-  already has hand-rolled change tracking — bulk-import legacy history as synthetic `AuditLog`
-  rows.
+- **Async staging-capture (`UseAsyncCapture`).** Opt-in. The interceptor writes a lightweight
+  `OrionAudit_Capture_Queue` row in the consumer's transaction; a new background dispatcher
+  (`AuditDispatcherHostedService`) computes the diff and writes the final `AuditLog` row
+  shortly after. Capture stays atomic and lossless; audit becomes eventually consistent under
+  this mode. Dispatch is exactly-once via single-transaction insert + delete; a malformed row
+  is dead-lettered after `MaxAttempts`.
+- **`OrionAudit.Viewer` companion package.** `app.MapOrionAuditViewer<TDbContext>("/audit")`
+  mounts a read-only JSON API and a built-in embedded single-page UI. No Blazor dependency,
+  no build step, authorization-required by default.
+- **Audit view render core.** `AuditViewRenderer` / `AuditEntryView` / `FieldChange` in
+  core OrionAudit — pure, type-agnostic, used by the viewer and available to any consumer.
+- **Telemetry.** `OrionAudit.Dispatch` activity, processed/dead-lettered counters, a batch
+  duration histogram, and an observable `orionaudit.capture.queue_depth` gauge.
 
-### Considered for v0.5
+### Deferred to v0.6
 
-- **Web push notifications on audit-row write.** Could ride on the v0.2 outbox hook.
+- **Extensible `AuditLog` row (`o.AddColumn<int>(...)`).** Real EF shadow-property columns
+  for custom indexable dimensions. Polished feature in its own right; held back so this release
+  could ship two large items at quality.
+- **Legacy import (`AuditImportBuilder`).** Fluent bulk-import of hand-rolled change history
+  as synthetic `AuditLog` rows.
+
+---
+
+## v0.6.0 — Developer Experience *(planned)*
+
+Theme: *adopt OrionAudit into an existing system without forking, and index whatever the
+business case demands.*
+
+- **Extensible `AuditLog` row.** `o.AddColumn<int>("WorkflowStepId", ctx => ...)` adds real,
+  tipped, indexable EF shadow-property columns. Each `AddColumn` requires one consumer-side
+  migration; indexing is left to the consumer's migration so they can choose.
+- **Legacy import helper.** Fluent `AuditImportBuilder` writes synthetic, idempotent
+  `AuditLog` rows from a hand-rolled change-tracking source — diff produced by the same
+  `Json6902` engine the capture path uses, so imported history is byte-for-byte compatible.
+
+### Considered for v0.6
+
+- **CLI diff renderer.** A `dotnet tool` that pretty-prints an `AuditLog.Diff`. With the
+  viewer covering "see the audit trail" the value/maintenance trade-off is marginal; ship only
+  if a clear use case (CI log inspection, ops scripting) lands.
 - **Per-entity / per-field UI labels** for the viewer.
+- **Web push notifications on audit-row write.** Could ride on the v0.2 outbox hook.
 
 ---
 
@@ -170,8 +197,8 @@ These come up in conversation; we're saying no on purpose.
   for it.
 - **Cross-database / cross-system audit aggregation.** Centralising audit from N microservices
   is an infra job; OrionAudit ships one row per save in *your* DB.
-- **GUI report builder / dashboard product.** The Viewer in v0.5 is a primitive component, not a
-  reporting suite.
+- **GUI report builder / dashboard product.** The v0.5.0 Viewer is a primitive component, not
+  a reporting suite.
 - **Replacing EF Core's change tracking.** The library lives on top of EF Core's interceptor
   surface and inherits its semantics — entities outside the change tracker (raw SQL, dapper) are
   not captured.
@@ -198,8 +225,9 @@ These come up in conversation; we're saying no on purpose.
 | v0.2.0    | scale + composite keys              | reliability                  |
 | v0.3.0    | source generator                    | `[OrionAuditModule]`         |
 | v0.4.0    | shipped — AOT-clean diff engine     | replace JsonPatch.Net        |
-| v0.5.0    | viewer + DX                         | developer experience         |
-| v1.0.0    | when v0.5 is stable in production   | API freeze                   |
+| v0.5.0    | shipped — async capture + viewer    | throughput + visibility      |
+| v0.6.0    | extensible columns + import helper  | developer experience         |
+| v1.0.0    | when v0.6 is stable in production   | API freeze                   |
 
 Patch releases (`0.x.y`) ship as needed for bugs and security. Minor releases (`0.x.0`) cluster
 features around the themes above and never break documented public APIs without a deprecation

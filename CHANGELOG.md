@@ -7,6 +7,57 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-23
+
+Throughput & Visibility release. Adds an opt-in async staging-capture mode that moves
+diff/snapshot work off the `SaveChanges` hot path without weakening atomic, lossless capture,
+plus `OrionAudit.Viewer` — a self-contained, Blazor-free audit-trail viewer.
+
+### Added
+
+- **Async staging-capture (`UseAsyncCapture`).** Opt-in. The interceptor writes a lightweight
+  `OrionAudit_Capture_Queue` row in the consumer's transaction; the new
+  `AuditDispatcherHostedService` background dispatcher computes the diff and writes the final
+  `AuditLog` row shortly after. Capture stays atomic and lossless — the queue row commits with
+  the data change — while audit becomes eventually consistent. Dispatch is exactly-once
+  (`AuditLog` inserts and queue-row deletes commit in one transaction). A malformed row is
+  dead-lettered after `MaxAttempts`.
+- **`IAuditDispatcher`** with `FlushPendingAsync` (force-drain the queue — tests and
+  read-after-write call sites) and `GetQueueDepthAsync`. A no-op implementation is registered
+  in synchronous mode so the dependency is always resolvable.
+- **`OrionAudit.Viewer` package.** `app.MapOrionAuditViewer<TDbContext>("/audit")` mounts a
+  read-only JSON API plus a built-in embedded single-page UI. No Blazor dependency; drops into
+  any ASP.NET Core host. Authorization is required by default.
+- **Audit view render core.** `AuditViewRenderer` / `AuditEntryView` / `FieldChange` in
+  `Moongazing.OrionAudit.Read` turn an `AuditLog` row and its RFC 6902 diff into a structured,
+  human-readable view model. A consumer can render their own UI; the Viewer is its first client.
+- **Telemetry.** `OrionAudit.Dispatch` activity; counters `orionaudit.dispatch.rows_processed`
+  / `orionaudit.dispatch.rows_deadlettered`; histogram `orionaudit.dispatch.batch.duration`;
+  observable gauge `orionaudit.capture.queue_depth`. `ActivitySource` / `Meter` version → 0.5.0.
+
+### Changed
+
+- `ApplyOrionAuditConfigurations` now also maps the `OrionAudit_Capture_Queue` companion table
+  (a new optional `captureQueueTableName` parameter overrides its name). Harmless when async
+  capture is not configured — the table simply stays empty.
+- `IAuditConfiguration` gained an `AuditedTypeNames` collection so the viewer's `/api/meta`
+  endpoint can surface the registered audited types.
+- `AuditEntryView.Action` and `FieldChange.ChangeKind` serialize as JSON strings rather than
+  integer enum values so the embedded viewer UI (and any other consumer) sees `"Inserted"`
+  rather than `0`.
+
+### Migration from v0.4.0
+
+- **Synchronous consumers:** no code change. The capture path is byte-for-byte identical.
+- **Schema:** adopting v0.5.0 requires one EF migration creating `OrionAudit_Capture_Queue`.
+  The table stays empty unless `UseAsyncCapture` is called — the v0.2.0
+  `OrionAudit_Snapshot_Cursors` precedent.
+- **Opting into async capture:** call `o.UseAsyncCapture(...)` in `AddOrionAudit`. Be aware
+  that audit becomes eventually consistent — `AuditFor<T>()` sees only dispatched rows. Use
+  `IAuditDispatcher.FlushPendingAsync` where read-after-write is required.
+- **The Viewer** is a separate, optional package. Installing it changes nothing until
+  `MapOrionAuditViewer` is called.
+
 ## [0.4.0] - 2026-05-21
 
 AOT-Clean Diff Engine release. Replaces the `JsonPatch.Net` dependency with an in-house,
