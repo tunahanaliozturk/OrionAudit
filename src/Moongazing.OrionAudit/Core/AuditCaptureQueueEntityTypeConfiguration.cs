@@ -39,16 +39,19 @@ public sealed class AuditCaptureQueueEntityTypeConfiguration : IEntityTypeConfig
         builder.Property(x => x.Action).IsRequired();
         builder.Property(x => x.BeforeJson).IsRequired();
         builder.Property(x => x.AfterJson).IsRequired();
-        builder.Property(x => x.UserId).HasMaxLength(256);
+        // User / tenant / correlation column lengths match AuditLogEntityTypeConfiguration
+        // exactly — the dispatcher copies these fields verbatim onto the AuditLog row, so a
+        // wider queue column could admit a value that later fails the AuditLog insert.
+        builder.Property(x => x.UserId).HasMaxLength(128);
         builder.Property(x => x.UserDisplay).HasMaxLength(256);
-        builder.Property(x => x.UserType).HasMaxLength(64);
+        builder.Property(x => x.UserType).HasMaxLength(32);
         builder.Property(x => x.TenantId).HasMaxLength(128);
-        builder.Property(x => x.CorrelationId).HasMaxLength(256);
+        builder.Property(x => x.CorrelationId).HasMaxLength(64);
         builder.Property(x => x.OccurredOnUtc).IsRequired();
         builder.Property(x => x.Attempts).IsRequired();
         builder.Property(x => x.ClaimToken).HasMaxLength(64);
 
-        // The dispatcher's claim query filters on (Error, ClaimToken, ClaimedUtc) and orders by Id.
+        // The dispatcher's claim query filters unclaimed, non-dead-lettered rows and orders by Id.
         builder.HasIndex(x => new { x.Error, x.ClaimToken });
     }
 }
