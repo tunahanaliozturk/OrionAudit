@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OrionAudit Viewer</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; background: #0f1115; color: #e6e6e6; }
+  header { padding: 14px 20px; background: #161922; border-bottom: 1px solid #2a2f3a; display: flex; align-items: center; gap: 12px; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #2a2f3a; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  .entry { border: 1px solid #2a2f3a; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .entry-head { padding: 10px 14px; background: #161922; display: flex; gap: 12px; }
+  .action { font-weight: 600; }
+  .change { padding: 6px 14px; border-top: 1px solid #2a2f3a; display: grid; grid-template-columns: 1fr 80px 1fr; gap: 10px; }
+  .path { color: #8ab4f8; }
+  .old { color: #f28b82; } .new { color: #81c995; }
+  .kind { text-transform: uppercase; font-size: 11px; opacity: .7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OrionAudit Viewer</h1>
+  <span class="badge" id="queue">queue: …</span>
+</header>
+<main id="log">Loading…</main>
+<script>
+const base = location.pathname.replace(/\/$/, "");
+async function load() {
+  const meta = await fetch(base + "/api/meta").then(r => r.json());
+  document.getElementById("queue").textContent =
+    "pending: " + (meta.queueDepth ?? 0);
+  const page = await fetch(base + "/api/log?page=1&size=50").then(r => r.json());
+  const root = document.getElementById("log");
+  root.innerHTML = "";
+  for (const e of page.entries) {
+    const div = document.createElement("div");
+    div.className = "entry";
+    const head = document.createElement("div");
+    head.className = "entry-head";
+    head.innerHTML = '<span class="action">' + e.action + '</span>' +
+      '<span>' + new Date(e.occurredOnUtc).toLocaleString() + '</span>' +
+      '<span>' + (e.userDisplay ?? "—") + '</span>';
+    div.appendChild(head);
+    for (const c of e.changes) {
+      const row = document.createElement("div");
+      row.className = "change";
+      row.innerHTML = '<span class="path">' + c.propertyPath + '</span>' +
+        '<span class="kind">' + c.changeKind + '</span>' +
+        '<span><span class="old">' + (c.oldValue ?? "") + '</span> ' +
+        '<span class="new">' + (c.newValue ?? "") + '</span></span>';
+      div.appendChild(row);
+    }
+    root.appendChild(div);
+  }
+  if (!page.entries.length) root.textContent = "No audit entries yet.";
+}
+load().catch(err => document.getElementById("log").textContent = "Error: " + err);
+</script>
+</body>
+</html>

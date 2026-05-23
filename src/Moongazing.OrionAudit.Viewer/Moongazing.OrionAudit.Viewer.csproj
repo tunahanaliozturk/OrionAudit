@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>OrionAudit.Viewer</PackageId>
+    <Description>Embeddable, framework-agnostic audit-trail viewer for OrionAudit. One endpoint registration (MapOrionAuditViewer) serves a JSON API and a built-in static UI. No Blazor dependency.</Description>
+    <PackageTags>orionaudit;audit;audit-trail;viewer;efcore;aspnetcore</PackageTags>
+    <PackageReadmeFile>docs/README.md</PackageReadmeFile>
+    <!-- The ASP.NET Core RouteHandlerAnalyzer (AD0001) NREs on some minimal-API delegate
+         shapes; suppress its analyzer-crash diagnostic so TreatWarningsAsErrors does not
+         block the build. We still get route-handler runtime correctness from the framework. -->
+    <NoWarn>$(NoWarn);AD0001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot\**\*" />
+  </ItemGroup>
+</Project>
