@@ -454,7 +454,7 @@ so you can scan the output instead of reading source.
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md) — what's planned for v0.2, v0.3, v0.4, and v1.0
+- [Roadmap](ROADMAP.md) — twelve-month forward plan through v1.0.0 (Q2 2027): v0.6.0 developer experience, v0.7.0 outbox + polymorphic capture, v0.8.0 separate-DB audit store, v0.9.0 docs site + AOT polish, then API freeze.
 - [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)
