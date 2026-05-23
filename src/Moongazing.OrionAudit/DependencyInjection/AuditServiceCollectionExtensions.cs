@@ -52,6 +52,13 @@ public static class AuditServiceCollectionExtensions
             services.AddHostedService<AuditRetentionHostedService<TDbContext>>();
         }
 
+        if (options.AsyncCaptureEnabled)
+        {
+            // The interceptor's presence-check on AsyncCaptureOptions is how it switches into
+            // async mode. Dispatcher + hosted service are registered in Task 9's full wiring.
+            services.TryAddSingleton(options.AsyncCaptureOptions);
+        }
+
         if (options.UserResolverType is not null)
         {
             services.TryAddScoped(typeof(IAuditUserResolver), options.UserResolverType);

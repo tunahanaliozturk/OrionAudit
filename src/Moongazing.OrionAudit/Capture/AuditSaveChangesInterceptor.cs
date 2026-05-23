@@ -37,6 +37,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var ctx = eventData.Context!;
         var configuration = serviceProvider.GetRequiredService<IAuditConfiguration>();
         var clock = serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+        var asyncCapture = serviceProvider.GetService<AsyncCaptureOptions>();
 
         // State check is a struct compare; IsAudited is a FrozenDictionary lookup. Both are cheap,
         // but state-first lets us skip the dictionary lookup for entities that aren't being saved.
@@ -70,6 +71,21 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         var snapshotPolicy = serviceProvider.GetService<SnapshotPolicy>() ?? SnapshotPolicy.Never;
         var jsonContext = serviceProvider.GetService<JsonSerializerContext>();
+
+        // Async-capture mode: write a lightweight queue row per audited entity instead of an
+        // AuditLog row. The diff and final AuditLog row are produced later by the dispatcher.
+        if (asyncCapture is not null)
+        {
+            foreach (var entry in auditedEntries)
+            {
+                ctx.Add(BuildQueueEntry(entry, configuration, user, tenantId, correlationId, occurredOn, jsonContext));
+            }
+            OrionAuditTelemetry.EntriesWritten.Add(auditedEntries.Count);
+            OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+        }
+
         var snapshotsTaken = 0;
 
         var writtenCount = 0;
@@ -85,7 +101,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 && snapshotPolicy is not SnapshotPolicy.NeverPolicy
                 && afterNode is not null)
             {
-                if (ShouldSnapshot(ctx, snapshotPolicy, auditLog, occurredOn))
+                if (SnapshotPolicyEvaluator.ShouldSnapshot(ctx, snapshotPolicy, auditLog, occurredOn))
                 {
                     auditLog.Snapshot = afterNode.ToJsonString();
                     snapshotsTaken++;
@@ -110,40 +126,6 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         activity?.SetStatus(ActivityStatusCode.Ok);
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static bool ShouldSnapshot(DbContext ctx, SnapshotPolicy policy, AuditLog row, DateTime occurredOn)
-    {
-        var cursor = ctx.Set<SnapshotCursor>().Find(row.EntityType, row.EntityId, row.TenantId ?? string.Empty);
-        if (cursor is null)
-        {
-            cursor = new SnapshotCursor
-            {
-                EntityType = row.EntityType,
-                EntityId = row.EntityId,
-                TenantId = row.TenantId ?? string.Empty,
-                UpdatesSinceLast = 0,
-                LastSnapshotUtc = null,
-            };
-            ctx.Add(cursor);
-        }
-
-        cursor.UpdatesSinceLast++;
-        var shouldSnapshot = policy switch
-        {
-            SnapshotPolicy.EveryNthPolicy n => cursor.UpdatesSinceLast >= n.Updates,
-            SnapshotPolicy.EveryDurationPolicy d =>
-                cursor.LastSnapshotUtc is null
-                || (occurredOn - cursor.LastSnapshotUtc.Value) >= d.Elapsed,
-            _ => false,
-        };
-
-        if (shouldSnapshot)
-        {
-            cursor.UpdatesSinceLast = 0;
-            cursor.LastSnapshotUtc = occurredOn;
-        }
-        return shouldSnapshot;
     }
 
     private static (AuditLog Log, JsonObject? AfterNode) BuildAuditLog(
@@ -237,6 +219,70 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         }
 
         return (auditLog, afterNodeForCaller);
+    }
+
+    // Async-capture counterpart of BuildAuditLog: builds the same rule-applied before/after
+    // snapshot nodes (so [Hashed]/[Redacted]/[NotAuditable] are honoured before anything is
+    // persisted) but defers diff computation to the dispatcher. A SnapshotBuilder failure for
+    // an unregistered type propagates and rolls back the consumer's SaveChanges — the same
+    // contract the synchronous path has.
+    private static AuditCaptureQueueEntry BuildQueueEntry(
+        EntityEntry entry,
+        IAuditConfiguration configuration,
+        AuditUser? user,
+        string? tenantId,
+        string? correlationId,
+        DateTime occurredOn,
+        JsonSerializerContext? jsonContext)
+    {
+        var entityType = entry.Entity.GetType();
+        var typeConfig = configuration.GetConfig(entityType);
+
+        var action = entry.State switch
+        {
+            EntityState.Added => AuditAction.Inserted,
+            EntityState.Modified => AuditAction.Updated,
+            EntityState.Deleted => AuditAction.Deleted,
+            _ => throw new InvalidOperationException($"Unsupported entry state {entry.State}.")
+        };
+        if (action == AuditAction.Updated && typeConfig?.SoftDeleteProperty is { } softDeleteProp)
+        {
+            var property = entry.Properties.FirstOrDefault(p => p.Metadata.Name == softDeleteProp);
+            if (property is not null && property.OriginalValue is false && property.CurrentValue is true)
+            {
+                action = AuditAction.SoftDeleted;
+            }
+        }
+
+        var beforeValues = entry.State == EntityState.Added
+            ? new Dictionary<string, object?>()
+            : SnapshotValues(entry, useOriginal: true);
+        var afterValues = entry.State == EntityState.Deleted
+            ? new Dictionary<string, object?>()
+            : SnapshotValues(entry, useOriginal: false);
+
+        JsonObject beforeNode = jsonContext is not null
+            ? SnapshotBuilder.Build(entityType, beforeValues, configuration, jsonContext)
+            : SnapshotBuilder.Build(entityType, beforeValues, configuration);
+        JsonObject afterNode = jsonContext is not null
+            ? SnapshotBuilder.Build(entityType, afterValues, configuration, jsonContext)
+            : SnapshotBuilder.Build(entityType, afterValues, configuration);
+
+        return new AuditCaptureQueueEntry
+        {
+            EntityType = entityType.AssemblyQualifiedName!,
+            EntityId = ExtractPrimaryKey(entry),
+            Action = action,
+            BeforeJson = beforeNode.ToJsonString(),
+            AfterJson = afterNode.ToJsonString(),
+            UserId = user?.Id,
+            UserDisplay = user?.DisplayName,
+            UserType = user?.Type,
+            TenantId = tenantId,
+            CorrelationId = correlationId,
+            OccurredOnUtc = occurredOn,
+            Attempts = 0,
+        };
     }
 
     private static Dictionary<string, object?> SnapshotValues(EntityEntry entry, bool useOriginal)
