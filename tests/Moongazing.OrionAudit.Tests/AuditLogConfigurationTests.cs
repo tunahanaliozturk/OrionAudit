@@ -26,6 +26,24 @@ public class AuditLogConfigurationTests
         Assert.Equal("MyAuditLog", entity.GetTableName());
     }
 
+    private sealed class FullConfigContext : DbContext
+    {
+        public FullConfigContext(DbContextOptions<FullConfigContext> options) : base(options) { }
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+            => modelBuilder.ApplyOrionAuditConfigurations();
+    }
+
+    [Fact]
+    public void ApplyOrionAuditConfigurations_Maps_CaptureQueueTable()
+    {
+        var opts = new DbContextOptionsBuilder<FullConfigContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        using var ctx = new FullConfigContext(opts);
+        var et = ctx.Model.FindEntityType(typeof(AuditCaptureQueueEntry));
+        Assert.NotNull(et);
+        Assert.Equal("OrionAudit_Capture_Queue", et!.GetTableName());
+    }
+
     [Fact]
     public void AuditLog_HasExpectedColumns()
     {

@@ -58,4 +58,31 @@ public class OrionAuditTelemetryTests
             && count == 1);
         Assert.NotNull(activity);
     }
+
+    [Fact]
+    public void Meter_Exposes_DispatchInstruments()
+    {
+        // Force the static type initializer so every internal instrument field is constructed
+        // before the MeterListener.Start() callback enumerates published instruments. Touching
+        // OrionAuditTelemetry.MeterName alone does not trigger initialization — const fields
+        // are compiled inline.
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
+            typeof(OrionAuditTelemetry).TypeHandle);
+
+        var names = new List<string>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == OrionAuditTelemetry.MeterName)
+            {
+                names.Add(instrument.Name);
+            }
+        };
+        listener.Start();
+
+        Assert.Contains("orionaudit.dispatch.rows_processed", names);
+        Assert.Contains("orionaudit.dispatch.rows_deadlettered", names);
+        Assert.Contains("orionaudit.dispatch.batch.duration", names);
+        Assert.Contains("orionaudit.capture.queue_depth", names);
+    }
 }

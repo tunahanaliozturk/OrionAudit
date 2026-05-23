@@ -69,6 +69,7 @@ jobs:
         run: |
           dotnet pack src/Moongazing.OrionAudit/Moongazing.OrionAudit.csproj --no-build --configuration Release -o ./nupkgs
           dotnet pack src/Moongazing.OrionAudit.AspNetCore/Moongazing.OrionAudit.AspNetCore.csproj --no-build --configuration Release -o ./nupkgs
+          dotnet pack src/Moongazing.OrionAudit.Viewer/Moongazing.OrionAudit.Viewer.csproj --no-build --configuration Release -o ./nupkgs
           dotnet pack src/Moongazing.OrionAudit.Testing/Moongazing.OrionAudit.Testing.csproj --no-build --configuration Release -o ./nupkgs
       - name: Push to NuGet.org
         run: dotnet nuget push "./nupkgs/*.nupkg" --api-key ${{ secrets.NUGET }} --source https://api.nuget.org/v3/index.json --skip-duplicate

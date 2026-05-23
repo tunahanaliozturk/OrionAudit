@@ -18,7 +18,8 @@ Pass `--filter "*"` to run all, or e.g. `--filter "*DiffEngine*"` to run a subse
 | --------------------- | ------------------------------------------------------------------ |
 | `SnapshotBuilderBench`| Per-entity JSON snapshot build, with and without Hash/Redact rules |
 | `DiffEngineBench`     | JSON Patch Compute and Apply across 4 / 16 / 64 properties         |
-| `InterceptorBench`    | EF SaveChanges with vs. without OrionAudit, batch sizes 1/10/100   |
+| `InterceptorBench`    | EF SaveChanges with no audit / sync audit / async audit, batch 1/10/100 |
+| `DispatcherBench`     | Async dispatcher throughput draining 100 / 1000 queued rows        |
 | `ReconstructorBench`  | `ReconstructAsync` over 10 / 100 / 1000 audit rows                 |
 
 ## Reading the output

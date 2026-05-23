@@ -12,8 +12,8 @@ public static class OrionAuditTelemetry
     /// <summary>The Meter name registered for audit metrics.</summary>
     public const string MeterName = "OrionAudit";
 
-    internal static readonly ActivitySource ActivitySource = new(ActivitySourceName, "0.4.0");
-    internal static readonly Meter Meter = new(MeterName, "0.4.0");
+    internal static readonly ActivitySource ActivitySource = new(ActivitySourceName, "0.5.0");
+    internal static readonly Meter Meter = new(MeterName, "0.5.0");
 
     internal static readonly Counter<long> EntriesWritten = Meter.CreateCounter<long>(
         "orionaudit.entries.written", unit: "entries", description: "Audit entries successfully written.");
@@ -35,4 +35,23 @@ public static class OrionAuditTelemetry
 
     internal static readonly Histogram<double> RetentionSweepDuration = Meter.CreateHistogram<double>(
         "orionaudit.retention.sweep.duration", unit: "ms", description: "Retention sweep duration per cycle.");
+
+    internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
+
+    internal static readonly Counter<long> DispatchRowsDeadLettered = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.rows_deadlettered", unit: "rows", description: "Capture-queue rows dead-lettered after exhausting dispatch attempts.");
+
+    internal static readonly Histogram<double> DispatchBatchDuration = Meter.CreateHistogram<double>(
+        "orionaudit.dispatch.batch.duration", unit: "ms", description: "Dispatcher batch duration per cycle.");
+
+    private static long dispatchQueueDepth;
+
+    /// <summary>Last observed capture-queue depth; updated by the dispatcher each cycle.</summary>
+    internal static void SetQueueDepth(long depth) => Interlocked.Exchange(ref dispatchQueueDepth, depth);
+
+    internal static readonly ObservableGauge<long> DispatchQueueDepth = Meter.CreateObservableGauge<long>(
+        "orionaudit.capture.queue_depth",
+        () => Interlocked.Read(ref dispatchQueueDepth),
+        unit: "rows", description: "Capture-queue rows awaiting dispatch, as last observed by the dispatcher.");
 }

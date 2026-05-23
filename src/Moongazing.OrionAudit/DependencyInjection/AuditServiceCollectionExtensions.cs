@@ -52,6 +52,23 @@ public static class AuditServiceCollectionExtensions
             services.AddHostedService<AuditRetentionHostedService<TDbContext>>();
         }
 
+        if (options.AsyncCaptureEnabled)
+        {
+            // The interceptor's presence-check on AsyncCaptureOptions is how it switches into
+            // async mode. The dispatcher is registered as a concrete singleton so both the
+            // IAuditDispatcher resolution and the hosted service share one instance.
+            services.TryAddSingleton(options.AsyncCaptureOptions);
+            services.TryAddSingleton<Capture.AuditDispatcher<TDbContext>>();
+            services.TryAddSingleton<Capture.IAuditDispatcher>(sp =>
+                sp.GetRequiredService<Capture.AuditDispatcher<TDbContext>>());
+            services.AddHostedService<Capture.AuditDispatcherHostedService<TDbContext>>();
+        }
+        else
+        {
+            // Always-resolvable so test code can call FlushPendingAsync unconditionally.
+            services.TryAddSingleton<Capture.IAuditDispatcher, Capture.NoOpAuditDispatcher>();
+        }
+
         if (options.UserResolverType is not null)
         {
             services.TryAddScoped(typeof(IAuditUserResolver), options.UserResolverType);

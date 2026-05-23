@@ -31,6 +31,9 @@ public class InterceptorBench
     private SqliteConnection plainConn = null!;
     private ServiceProvider plainSp = null!;
 
+    private SqliteConnection asyncConn = null!;
+    private ServiceProvider asyncSp = null!;
+
     [GlobalSetup]
     public async Task Setup()
     {
@@ -60,6 +63,22 @@ public class InterceptorBench
         {
             await scope.ServiceProvider.GetRequiredService<PlainDb>().Database.EnsureCreatedAsync();
         }
+
+        // Async-capture context — measures the hot-path cost only (queue-row write); the
+        // dispatcher's deferred work is measured separately by DispatcherBench.
+        asyncConn = new SqliteConnection("DataSource=:memory:");
+        await asyncConn.OpenAsync();
+        var asyncServices = new ServiceCollection();
+        asyncServices.AddLogging();
+        asyncServices.AddOrionAudit<AuditDb>(o => o.Audit<Row>().UseAsyncCapture());
+        asyncServices.AddSingleton(asyncConn);
+        asyncServices.AddDbContext<AuditDb>((sp, o) =>
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        asyncSp = asyncServices.BuildServiceProvider();
+        await using (var scope = asyncSp.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AuditDb>().Database.EnsureCreatedAsync();
+        }
     }
 
     [GlobalCleanup]
@@ -69,6 +88,8 @@ public class InterceptorBench
         await auditConn.DisposeAsync();
         await plainSp.DisposeAsync();
         await plainConn.DisposeAsync();
+        await asyncSp.DisposeAsync();
+        await asyncConn.DisposeAsync();
     }
 
     [Benchmark(Baseline = true)]
@@ -87,6 +108,18 @@ public class InterceptorBench
     public async Task<int> SaveChanges_WithAudit()
     {
         await using var scope = auditSp.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<AuditDb>();
+        for (var i = 0; i < BatchSize; i++)
+        {
+            ctx.Rows.Add(new Row { Name = $"r{i}", Amount = i });
+        }
+        return await ctx.SaveChangesAsync();
+    }
+
+    [Benchmark]
+    public async Task<int> SaveChanges_WithAsyncAudit()
+    {
+        await using var scope = asyncSp.CreateAsyncScope();
         var ctx = scope.ServiceProvider.GetRequiredService<AuditDb>();
         for (var i = 0; i < BatchSize; i++)
         {

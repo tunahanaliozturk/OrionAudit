@@ -6,12 +6,16 @@ namespace Moongazing.OrionAudit.Configuration;
 public sealed class AuditConfiguration : IAuditConfiguration
 {
     private readonly FrozenDictionary<Type, AuditableTypeConfig> byType;
+    private readonly IReadOnlyCollection<string> auditedTypeNames;
 
     /// <summary>Initializes a new configuration. Intended to be called only by <see cref="AuditConfigurationBuilder"/>.</summary>
     public AuditConfiguration(IDictionary<Type, AuditableTypeConfig> byType)
     {
         ArgumentNullException.ThrowIfNull(byType);
         this.byType = byType.ToFrozenDictionary();
+        auditedTypeNames = this.byType.Keys
+            .Select(t => t.AssemblyQualifiedName!)
+            .ToArray();
     }
 
     /// <inheritdoc />
@@ -21,4 +25,7 @@ public sealed class AuditConfiguration : IAuditConfiguration
     /// <inheritdoc />
     public AuditableTypeConfig? GetConfig(Type entityType)
         => byType.TryGetValue(entityType, out var config) ? config : null;
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string> AuditedTypeNames => auditedTypeNames;
 }
