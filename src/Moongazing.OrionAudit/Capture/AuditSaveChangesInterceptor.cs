@@ -109,6 +109,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             }
 
             ctx.Add(auditLog);
+            ApplyCustomColumns(ctx, auditLog, entry, configuration,
+                auditLog.Action, user, tenantId);
             if (auditLog.Error is null)
             {
                 writtenCount++;
@@ -126,6 +128,41 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         activity?.SetStatus(ActivityStatusCode.Ok);
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Runs after ctx.Add(auditLog) in the sync path. For each registered custom column the
+    // provider is invoked; the result is written to the AuditLog's shadow property. Provider
+    // failures degrade to NULL on that column plus an Error annotation — never abort the save.
+    private static void ApplyCustomColumns(
+        DbContext ctx,
+        AuditLog auditLog,
+        EntityEntry entry,
+        IAuditConfiguration configuration,
+        AuditAction action,
+        AuditUser? user,
+        string? tenantId)
+    {
+        if (configuration.CustomColumns.Count == 0)
+        {
+            return;
+        }
+        var auditCtx = new AuditColumnContext(entry.Entity, entry, action, user, tenantId);
+        foreach (var column in configuration.CustomColumns)
+        {
+            try
+            {
+                var value = column.Provider(auditCtx);
+                ctx.Entry(auditLog).Property(column.Name).CurrentValue = value;
+            }
+#pragma warning disable CA1031 // a single bad provider must not abort the save
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                auditLog.Error = string.IsNullOrEmpty(auditLog.Error)
+                    ? $"AddColumn '{column.Name}': {ex.Message}"
+                    : auditLog.Error + $"; AddColumn '{column.Name}': {ex.Message}";
+            }
+        }
     }
 
     private static (AuditLog Log, JsonObject? AfterNode) BuildAuditLog(
