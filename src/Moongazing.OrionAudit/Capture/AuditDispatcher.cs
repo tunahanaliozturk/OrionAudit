@@ -141,6 +141,8 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         OrionAuditTelemetry.DispatchRowsProcessed.Add(processed);
         OrionAuditTelemetry.DispatchRowsDeadLettered.Add(deadLettered);
         OrionAuditTelemetry.DispatchBatchDuration.Record(sw.Elapsed.TotalMilliseconds);
+        OrionAuditTelemetry.SetQueueDepth(await ctx.Set<AuditCaptureQueueEntry>()
+            .CountAsync(q => q.Error == null, cancellationToken).ConfigureAwait(false));
         activity?.SetTag("orionaudit.dispatch.rows_processed", processed);
         activity?.SetStatus(ActivityStatusCode.Ok);
         return processed;

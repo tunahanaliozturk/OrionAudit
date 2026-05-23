@@ -44,4 +44,14 @@ public static class OrionAuditTelemetry
 
     internal static readonly Histogram<double> DispatchBatchDuration = Meter.CreateHistogram<double>(
         "orionaudit.dispatch.batch.duration", unit: "ms", description: "Dispatcher batch duration per cycle.");
+
+    private static long dispatchQueueDepth;
+
+    /// <summary>Last observed capture-queue depth; updated by the dispatcher each cycle.</summary>
+    internal static void SetQueueDepth(long depth) => Interlocked.Exchange(ref dispatchQueueDepth, depth);
+
+    internal static readonly ObservableGauge<long> DispatchQueueDepth = Meter.CreateObservableGauge<long>(
+        "orionaudit.capture.queue_depth",
+        () => Interlocked.Read(ref dispatchQueueDepth),
+        unit: "rows", description: "Capture-queue rows awaiting dispatch, as last observed by the dispatcher.");
 }
