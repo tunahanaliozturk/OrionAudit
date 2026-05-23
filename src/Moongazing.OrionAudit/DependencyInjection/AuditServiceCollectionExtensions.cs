@@ -33,6 +33,7 @@ public static class AuditServiceCollectionExtensions
             ScanAndRegister(options);
         }
 
+        options.ConfigurationBuilder.RegisterCustomColumns(options.CustomColumns);
         var configuration = options.ConfigurationBuilder.Build();
         services.TryAddSingleton(configuration);
         services.TryAddSingleton(options.SnapshotPolicy);

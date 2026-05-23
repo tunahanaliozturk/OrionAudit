@@ -12,6 +12,11 @@ public sealed class AuditConfigurationBuilder
 {
     private readonly Dictionary<Type, Dictionary<string, AuditFieldRule>> rulesByType = new();
     private readonly Dictionary<Type, string?> softDeleteByType = new();
+    private IReadOnlyList<CustomColumn> customColumns = Array.Empty<CustomColumn>();
+
+    /// <summary>Set by <c>AddOrionAudit</c> from <c>OrionAuditOptions.CustomColumns</c>.</summary>
+    internal void RegisterCustomColumns(IReadOnlyList<CustomColumn> columns)
+        => customColumns = columns ?? Array.Empty<CustomColumn>();
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public AuditConfigurationBuilder Audit<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
@@ -57,7 +62,7 @@ public sealed class AuditConfigurationBuilder
                 kvp.Key,
                 kvp.Value,
                 softDeleteByType.TryGetValue(kvp.Key, out var sd) ? sd : null));
-        return new AuditConfiguration(configsByType);
+        return new AuditConfiguration(configsByType, customColumns);
     }
 
     private Dictionary<string, AuditFieldRule> GetOrCreateRules(Type entityType)

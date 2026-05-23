@@ -11,4 +11,7 @@ public interface IAuditConfiguration
 
     /// <summary>Assembly-qualified names of every type registered for audit. Surfaced by the viewer.</summary>
     IReadOnlyCollection<string> AuditedTypeNames { get; }
+
+    /// <summary>Custom columns registered via <c>OrionAuditOptions.AddColumn</c>.</summary>
+    IReadOnlyList<CustomColumn> CustomColumns { get; }
 }
