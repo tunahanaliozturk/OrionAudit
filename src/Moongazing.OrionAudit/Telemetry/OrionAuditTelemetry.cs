@@ -35,4 +35,13 @@ public static class OrionAuditTelemetry
 
     internal static readonly Histogram<double> RetentionSweepDuration = Meter.CreateHistogram<double>(
         "orionaudit.retention.sweep.duration", unit: "ms", description: "Retention sweep duration per cycle.");
+
+    internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
+
+    internal static readonly Counter<long> DispatchRowsDeadLettered = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.rows_deadlettered", unit: "rows", description: "Capture-queue rows dead-lettered after exhausting dispatch attempts.");
+
+    internal static readonly Histogram<double> DispatchBatchDuration = Meter.CreateHistogram<double>(
+        "orionaudit.dispatch.batch.duration", unit: "ms", description: "Dispatcher batch duration per cycle.");
 }

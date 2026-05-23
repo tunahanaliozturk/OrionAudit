@@ -55,8 +55,12 @@ public static class AuditServiceCollectionExtensions
         if (options.AsyncCaptureEnabled)
         {
             // The interceptor's presence-check on AsyncCaptureOptions is how it switches into
-            // async mode. Dispatcher + hosted service are registered in Task 9's full wiring.
+            // async mode. The dispatcher is registered as a concrete singleton so both the
+            // IAuditDispatcher resolution and the (later-task) hosted service share one instance.
             services.TryAddSingleton(options.AsyncCaptureOptions);
+            services.TryAddSingleton<Capture.AuditDispatcher<TDbContext>>();
+            services.TryAddSingleton<Capture.IAuditDispatcher>(sp =>
+                sp.GetRequiredService<Capture.AuditDispatcher<TDbContext>>());
         }
 
         if (options.UserResolverType is not null)
