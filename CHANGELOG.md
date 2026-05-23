@@ -7,6 +7,12 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-23
+
+### Changed
+
+- New minimalist family-style logo (magnifying glass with an Orion star inside the lens, indigo line-art, no badge ring) replaces the previous emblem. Applied to the README and to every published package's NuGet icon. The Viewer package now also carries `PackageIcon` (previously the only packable project without one).
+
 ## [0.5.0] - 2026-05-23
 
 Throughput & Visibility release. Adds an opt-in async staging-capture mode that moves
