@@ -26,6 +26,15 @@ public sealed class OrionAuditOptions
     internal RetentionSweepOptions SweepOptions { get; } = new();
     internal JsonSerializerContext? JsonContext { get; private set; }
 
+    private readonly List<CustomColumn> customColumns = new();
+
+    /// <summary>
+    /// The custom columns registered on <see cref="AuditLog"/> via <see cref="AddColumn{T}"/>.
+    /// Read by <c>AuditLogEntityTypeConfiguration</c> (shadow-property mapping), the
+    /// interceptor (value capture), and the dispatcher (async-mode value application).
+    /// </summary>
+    public IReadOnlyList<CustomColumn> CustomColumns => customColumns;
+
     /// <summary>True when <see cref="UseAsyncCapture"/> has been called.</summary>
     public bool AsyncCaptureEnabled { get; private set; }
 
@@ -160,6 +169,34 @@ public sealed class OrionAuditOptions
         configure?.Invoke(builder);
         AsyncCaptureOptions = builder.Options;
         AsyncCaptureEnabled = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a custom column on <see cref="AuditLog"/>. The column is materialised as a
+    /// real, nullable, tipped EF shadow property (queryable via <c>EF.Property&lt;T&gt;</c>).
+    /// The provider runs inside the capture transaction with the audited entity in scope.
+    /// In async-capture mode the value rides through <c>OrionAudit_Capture_Queue.CustomColumnsJson</c>
+    /// and is applied by the dispatcher.
+    /// </summary>
+    public OrionAuditOptions AddColumn<T>(string name, Func<AuditColumnContext, object?> provider)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(provider);
+
+        if (!CustomColumn.IsSupportedColumnType(typeof(T)))
+        {
+            throw new OrionAuditConfigurationException(
+                $"AddColumn '{name}': type '{typeof(T)}' is not an EF-mappable scalar.");
+        }
+        if (customColumns.Any(c => string.Equals(c.Name, name, StringComparison.Ordinal)))
+        {
+            throw new OrionAuditConfigurationException(
+                $"AddColumn '{name}': a column with this name is already registered.");
+        }
+
+        customColumns.Add(new CustomColumn(name, typeof(T), provider));
         return this;
     }
 }
