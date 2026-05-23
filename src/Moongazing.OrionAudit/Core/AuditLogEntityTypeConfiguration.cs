@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Moongazing.OrionAudit.Configuration;
 
 namespace Moongazing.OrionAudit;
 
@@ -15,19 +16,34 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
 
     private readonly string tableName;
     private readonly OrionAuditColumnHints columnHints;
+    private readonly IReadOnlyList<CustomColumn> customColumns;
 
     /// <summary>Initializes a new configuration using <see cref="DefaultTableName"/> and <see cref="OrionAuditColumnHints.Auto"/>.</summary>
-    public AuditLogEntityTypeConfiguration() : this(DefaultTableName, OrionAuditColumnHints.Auto) { }
+    public AuditLogEntityTypeConfiguration()
+        : this(DefaultTableName, OrionAuditColumnHints.Auto, Array.Empty<CustomColumn>()) { }
 
     /// <summary>Initializes a new configuration with a custom table name.</summary>
-    public AuditLogEntityTypeConfiguration(string tableName) : this(tableName, OrionAuditColumnHints.Auto) { }
+    public AuditLogEntityTypeConfiguration(string tableName)
+        : this(tableName, OrionAuditColumnHints.Auto, Array.Empty<CustomColumn>()) { }
 
     /// <summary>Initializes a new configuration with a custom table name and provider column hint.</summary>
     public AuditLogEntityTypeConfiguration(string tableName, OrionAuditColumnHints columnHints)
+        : this(tableName, columnHints, Array.Empty<CustomColumn>()) { }
+
+    /// <summary>
+    /// Initializes a new configuration with a custom table name, provider column hint, and
+    /// the list of <see cref="CustomColumn"/>s to materialise as shadow properties.
+    /// </summary>
+    public AuditLogEntityTypeConfiguration(
+        string tableName,
+        OrionAuditColumnHints columnHints,
+        IReadOnlyList<CustomColumn> customColumns)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        ArgumentNullException.ThrowIfNull(customColumns);
         this.tableName = tableName;
         this.columnHints = columnHints;
+        this.customColumns = customColumns;
     }
 
     /// <inheritdoc />
@@ -69,5 +85,24 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
             .HasDatabaseName("IX_OrionAudit_TenantTimeline");
         builder.HasIndex(x => new { x.UserId, x.OccurredOnUtc })
             .HasDatabaseName("IX_OrionAudit_UserActivity");
+
+        // Consumer-registered custom columns become tipped, nullable shadow properties.
+        // String columns default to HasMaxLength(512); other types use EF's defaults.
+        // Non-nullable value types are lifted to Nullable<T> so EF can mark the property
+        // optional. Indexes are intentionally left to the consumer's migration — they know
+        // which columns they'll filter on.
+        foreach (var column in customColumns)
+        {
+            var effectiveClrType = column.ClrType.IsValueType
+                && Nullable.GetUnderlyingType(column.ClrType) is null
+                ? typeof(Nullable<>).MakeGenericType(column.ClrType)
+                : column.ClrType;
+            var prop = builder.Property(effectiveClrType, column.Name);
+            prop.IsRequired(false);
+            if (column.ClrType == typeof(string))
+            {
+                prop.HasMaxLength(512);
+            }
+        }
     }
 }
