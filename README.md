@@ -516,6 +516,17 @@ so you can scan the output instead of reading source.
 
 ---
 
+## More from the Orion family
+
+OrionAudit is one of a set of standalone .NET libraries:
+
+- [OrionGuard](https://github.com/tunahanaliozturk/OrionGuard) - guard clauses, validation, DDD primitives.
+- [OrionKey](https://github.com/tunahanaliozturk/OrionKey) - source-generated strongly-typed IDs.
+- [OrionLock](https://github.com/tunahanaliozturk/OrionLock) - distributed locking.
+- [OrionPatch](https://github.com/tunahanaliozturk/OrionPatch) - transactional outbox for EF Core (enqueue inside SaveChanges, dispatch at-least-once through a pluggable sink).
+
+---
+
 ## Contributing
 
 Contributions are welcome. Please read the [Contributing Guide](CONTRIBUTING.md) before

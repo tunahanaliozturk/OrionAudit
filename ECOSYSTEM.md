@@ -37,18 +37,14 @@ them.
 | -------------- | ------- | -------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | **OrionGuard** | v6.2    | [tunahanaliozturk/OrionGuard](https://github.com/tunahanaliozturk/OrionGuard) | Fluent guard clauses, validation, security guards, DDD primitives, 9 sub-packages |
 | **OrionAudit** | v0.6.0  | [tunahanaliozturk/OrionAudit](https://github.com/tunahanaliozturk/OrionAudit) | EF Core change audit trail (JSON Patch diffs, AOT-clean, async staging-capture, embedded viewer, extensible columns + import) |
-
-### Next up
-
-| Package        | Status  | Headline                                                                                                                                    |
-| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OrionKey**   | beta    | Source-generated strongly-typed IDs (Guid, ULID, Snowflake, NanoId) with EF Core / JSON / TypeConverter / IParsable wiring all auto-emitted |
+| **OrionKey**   | v0.4.0  | [tunahanaliozturk/OrionKey](https://github.com/tunahanaliozturk/OrionKey) | Source-generated strongly-typed IDs (Guid, ULID, Snowflake, NanoId) with EF Core / JSON / TypeConverter / IParsable wiring all auto-emitted |
+| **OrionLock**  | v0.1    | [tunahanaliozturk/OrionLock](https://github.com/tunahanaliozturk/OrionLock) | Distributed locks: Redis (`SET NX PX`), EF Core lock table, SQL Server `sp_getapplock`, in-memory test provider |
+| **OrionPatch** | v0.1.0  | [tunahanaliozturk/OrionPatch](https://github.com/tunahanaliozturk/OrionPatch) | Transactional outbox for EF Core: enqueue inside SaveChanges, dispatch at-least-once through a pluggable sink. In-process Channels sink in v0.1; broker sinks on the v0.2+ roadmap |
 
 ### Planned (already on the family roadmap)
 
 | Package         | Status  | Headline                                                                                              |
 | --------------- | ------- | ----------------------------------------------------------------------------------------------------- |
-| **OrionPatch**  | planned | Transactional outbox & inbox. JSON Patch diffs match OrionAudit's shape (same format, different sink) |
 | **OrionTrace**  | planned | Correlation / causation / tenant / user context propagation across HTTP, MediatR, EF, RabbitMQ, gRPC  |
 | **OrionCache**  | planned | Memory + Redis 2-tier cache with entity-change-driven invalidation (Audit-style interceptor)          |
 | **OrionFlow**   | planned | Saga orchestration with typed steps, compensations, and OrionTrace-aware correlation                  |
