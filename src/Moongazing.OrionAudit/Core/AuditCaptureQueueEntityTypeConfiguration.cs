@@ -50,6 +50,7 @@ public sealed class AuditCaptureQueueEntityTypeConfiguration : IEntityTypeConfig
         builder.Property(x => x.OccurredOnUtc).IsRequired();
         builder.Property(x => x.Attempts).IsRequired();
         builder.Property(x => x.ClaimToken).HasMaxLength(64);
+        builder.Property(x => x.CustomColumnsJson);
 
         // The dispatcher's claim query filters unclaimed, non-dead-lettered rows and orders by Id.
         builder.HasIndex(x => new { x.Error, x.ClaimToken });

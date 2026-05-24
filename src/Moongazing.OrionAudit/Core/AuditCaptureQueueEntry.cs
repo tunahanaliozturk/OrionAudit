@@ -55,4 +55,12 @@ public sealed class AuditCaptureQueueEntry
 
     /// <summary>UTC time the current claim was taken; used with the claim lease to reclaim abandoned rows.</summary>
     public DateTime? ClaimedUtc { get; set; }
+
+    /// <summary>
+    /// JSON object mapping custom-column name → captured value. Populated by the interceptor's
+    /// async branch when <c>OrionAuditOptions.AddColumn</c> registrations are present; the
+    /// dispatcher deserialises and applies each value to the final <see cref="AuditLog"/>.
+    /// Null when no custom columns are configured (or all providers returned null).
+    /// </summary>
+    public string? CustomColumnsJson { get; set; }
 }
