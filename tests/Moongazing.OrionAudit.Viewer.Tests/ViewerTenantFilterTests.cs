@@ -46,6 +46,10 @@ public class ViewerTenantFilterTests
                     s.AddAuthorization();
                     s.AddSingleton(conn);
                     s.AddScoped<IAuditTenantResolver, FixedTenant>();
+                    // Empty config — this test is about tenant filtering, not custom columns.
+                    s.AddSingleton<Moongazing.OrionAudit.Configuration.IAuditConfiguration>(
+                        new Moongazing.OrionAudit.Configuration.AuditConfiguration(
+                            new Dictionary<Type, Moongazing.OrionAudit.Configuration.AuditableTypeConfig>()));
                     s.AddDbContext<TenantDb>((sp, o) =>
                         o.UseSqlite(sp.GetRequiredService<SqliteConnection>()));
                 })
