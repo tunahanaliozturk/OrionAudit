@@ -12,8 +12,8 @@ public static class OrionAuditTelemetry
     /// <summary>The Meter name registered for audit metrics.</summary>
     public const string MeterName = "OrionAudit";
 
-    internal static readonly ActivitySource ActivitySource = new(ActivitySourceName, "0.5.0");
-    internal static readonly Meter Meter = new(MeterName, "0.5.0");
+    internal static readonly ActivitySource ActivitySource = new(ActivitySourceName, "0.6.0");
+    internal static readonly Meter Meter = new(MeterName, "0.6.0");
 
     internal static readonly Counter<long> EntriesWritten = Meter.CreateCounter<long>(
         "orionaudit.entries.written", unit: "entries", description: "Audit entries successfully written.");
