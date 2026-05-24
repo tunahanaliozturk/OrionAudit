@@ -36,7 +36,7 @@ them.
 | Package        | Version | Repo                                                     | Headline                                                                          |
 | -------------- | ------- | -------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | **OrionGuard** | v6.2    | [tunahanaliozturk/OrionGuard](https://github.com/tunahanaliozturk/OrionGuard) | Fluent guard clauses, validation, security guards, DDD primitives, 9 sub-packages |
-| **OrionAudit** | v0.5.0  | [tunahanaliozturk/OrionAudit](https://github.com/tunahanaliozturk/OrionAudit) | EF Core change audit trail (JSON Patch diffs, AOT-clean, opt-in async staging-capture, embedded viewer) |
+| **OrionAudit** | v0.6.0  | [tunahanaliozturk/OrionAudit](https://github.com/tunahanaliozturk/OrionAudit) | EF Core change audit trail (JSON Patch diffs, AOT-clean, async staging-capture, embedded viewer, extensible columns + import) |
 
 ### Next up
 

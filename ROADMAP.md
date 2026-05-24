@@ -157,7 +157,7 @@ Moongazing indigo (`#312E81`). No code changes; aligns OrionAudit with the rest 
 
 ---
 
-## v0.6.0 — Developer Experience *(planned, Q3 2026)*
+## v0.6.0 — Developer Experience *(shipped)*
 
 Theme: *adopt OrionAudit into an existing system without forking, and index whatever the
 business case demands.*
