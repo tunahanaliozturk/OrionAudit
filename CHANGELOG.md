@@ -7,6 +7,58 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-24
+
+Developer Experience release. Two opt-in additions that unlock common adoption scenarios:
+extensible `AuditLog` rows for custom indexable dimensions, and bulk legacy-history import
+with byte-equal diffs.
+
+### Added
+
+- **`o.AddColumn<T>(name, ctx => value)`.** Registers tipped, indexable EF shadow-property
+  columns on `AuditLog`. Value provider receives an `AuditColumnContext` with the audited
+  entity, EF entry, action, user, and tenant. Provider failures degrade to NULL plus an
+  `AuditLog.Error` annotation — never abort the save.
+- **Async-mode integration for custom columns.** `OrionAudit_Capture_Queue` gains a nullable
+  `CustomColumnsJson` column; the interceptor's async branch serialises provider values, the
+  dispatcher deserialises and applies them to the final `AuditLog` row.
+- **`AuditImportBuilder`.** Fluent bulk-import of hand-rolled change history as synthetic
+  `AuditLog` rows via `db.CreateAuditImport(o => o.ImportBatch = "tag")`. Diff produced by
+  the same `Json6902` engine the capture path uses (byte-equal parity verified by test).
+  Mandatory `ImportBatch` tag stamped into `CorrelationId` gives per-record idempotency via
+  `SourceId`; re-running `SaveAsync` is safe and reports duplicate rows as `Skipped`.
+  Always writes `AuditLog` directly — bypasses the capture queue in both sync and async modes.
+- **Read-side `AuditEntryView.CustomColumns`** (`IReadOnlyDictionary<string, object?>`)
+  projected by the Viewer API into `/api/log` and `/api/{entityType}/{key}` responses; the
+  embedded SPA renders each non-null custom column as a header badge. `/api/meta` adds a
+  `customColumnNames` list.
+- **Import telemetry.** `OrionAudit.Import` activity, counters
+  `orionaudit.import.rows_written` / `orionaudit.import.rows_skipped` /
+  `orionaudit.import.rows_deadlettered`, histogram `orionaudit.import.batch.duration`.
+
+### Changed
+
+- `ApplyOrionAuditConfigurations` gained a `(this, this)` DbContext-aware overload that
+  picks up registered `CustomColumn`s automatically from the application service provider.
+  The parameter-list overload also gained a `customColumns` parameter for advanced scenarios.
+- `IAuditConfiguration` gained a `CustomColumns` collection.
+- `AuditDispatcher` now resolves `IAuditConfiguration` from DI to apply custom columns
+  during dispatch.
+- `OrionAudit` `ActivitySource` / `Meter` version bumped to `0.6.0`.
+
+### Migration from v0.5.x
+
+- **Sync consumers not using `AddColumn` or import:** no code change.
+- **Schema:** one EF migration adds `OrionAudit_Capture_Queue.CustomColumnsJson` (nullable
+  text). The column is always mapped; it stays NULL when empty. Same precedent as v0.2.0's
+  `SnapshotCursor` and v0.5.0's queue table.
+- **Adopting `AddColumn`:** one EF migration per column on `OrionAudit_Log`. Pair with
+  `migrationBuilder.CreateIndex(...)` if you'll filter on it. Switch `OnModelCreating` to
+  `modelBuilder.ApplyOrionAuditConfigurations(this);` so registered columns are picked up
+  automatically.
+- **Adopting `AuditImportBuilder`:** opt-in API; no schema impact beyond the queue-column
+  migration above. `ImportBatch` is mandatory — pick a stable per-import string.
+
 ## [0.5.1] - 2026-05-23
 
 ### Changed

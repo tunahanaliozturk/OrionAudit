@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.5.0 is here — Throughput & Visibility.** Opt-in async staging-capture moves the diff/snapshot work off the `SaveChanges` hot path without weakening atomic, lossless capture (the queue row commits with the data change; the dispatcher writes the final `AuditLog` row shortly after). And `OrionAudit.Viewer` — `app.MapOrionAuditViewer<TDbContext>("/audit")` — drops a read-only audit-trail UI into any ASP.NET Core host with no Blazor dependency and no build step. On top of v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
-> [See the v0.5.0 changelog](CHANGELOG.md#050---2026-05-23) and [what's next](ROADMAP.md).
+> **v0.6.0 is here — Developer Experience.** Two opt-in additions that unblock common adoption scenarios. `o.AddColumn<int>("WorkflowStepId", ctx => ...)` registers tipped, indexable EF shadow-property columns on `AuditLog` — write fast LINQ filters instead of scanning JSON. `db.CreateAuditImport(o => o.ImportBatch = "legacy-2026")` bulk-imports hand-rolled change history as idempotent `AuditLog` rows whose diffs are byte-for-byte identical to native capture. On top of v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the v0.6.0 changelog](CHANGELOG.md#060---2026-05-24) and [what's next](ROADMAP.md).
 
 ---
 
@@ -95,6 +95,59 @@ same transaction.
 | `OrionAudit.AspNetCore`  | `dotnet add package OrionAudit.AspNetCore`     | `HttpContextAuditUserResolver` + DI helpers        |
 | `OrionAudit.Viewer`      | `dotnet add package OrionAudit.Viewer`         | Embedded read-only audit-trail UI (`MapOrionAuditViewer`) |
 | `OrionAudit.Testing`     | `dotnet add package OrionAudit.Testing`        | `AuditCapture` + fluent assertions, framework-free |
+
+---
+
+## What's new in v0.6.0
+
+### `AddColumn` — tipped, indexable custom columns
+
+```csharp
+services.AddOrionAudit<AppDbContext>(o => o
+    .Audit<Order>()
+    .AddColumn<int>("WorkflowStepId", ctx => (ctx.Entity as IHasWorkflow)?.StepId)
+    .AddColumn<string>("Source", ctx => ctx.Action == AuditAction.Inserted ? "import" : "app"));
+
+// OnModelCreating: pick up registered columns automatically.
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+    => modelBuilder.ApplyOrionAuditConfigurations(this);
+
+// LINQ filter on a real, indexable column:
+var fromStep3 = await db.AuditLog()
+    .Where(a => EF.Property<int?>(a, "WorkflowStepId") == 3)
+    .ToListAsync();
+```
+
+Add a `CreateIndex` in your EF migration for any column you'll filter on. The provider runs
+inside the capture transaction with the audited entity in scope; failure annotates
+`AuditLog.Error` and leaves the column NULL. In async-capture mode the value rides through
+the queue's new `CustomColumnsJson` column and lands on the final `AuditLog` after dispatch.
+
+### `AuditImportBuilder` — bulk historical import, idempotent
+
+```csharp
+var import = db.CreateAuditImport(o =>
+{
+    o.BatchSize = 1000;
+    o.ImportBatch = "legacy-orders-2026";   // REQUIRED — drives idempotency
+});
+
+import.Add<Order>(e => e
+    .Key(legacy.OrderId)
+    .Action(AuditAction.Updated)
+    .Before(oldState).After(newState)
+    .By("u-123", "Legacy User")
+    .At(legacy.ChangedAtUtc)
+    .SourceId(legacy.RowId));
+
+var result = await import.SaveAsync();
+// result.Written / Skipped / DeadLettered
+```
+
+`ImportBatch` is mandatory — it stamps `AuditLog.CorrelationId` so re-running `SaveAsync` is
+safe (rows already present report as `Skipped`). Imported diffs are byte-for-byte equal to the
+diffs the live capture path produces (a parity test enforces this). Import always writes
+`AuditLog` directly, bypassing the async-capture queue.
 
 ---
 

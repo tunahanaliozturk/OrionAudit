@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +29,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
     private readonly IServiceScopeFactory scopeFactory;
     private readonly AsyncCaptureOptions options;
     private readonly SnapshotPolicy snapshotPolicy;
+    private readonly IAuditConfiguration configuration;
     private readonly TimeProvider clock;
     private readonly ILogger<AuditDispatcher<TDbContext>> logger;
 
@@ -36,12 +38,14 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         IServiceScopeFactory scopeFactory,
         AsyncCaptureOptions options,
         SnapshotPolicy snapshotPolicy,
+        IAuditConfiguration configuration,
         TimeProvider clock,
         ILogger<AuditDispatcher<TDbContext>> logger)
     {
         this.scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.snapshotPolicy = snapshotPolicy ?? throw new ArgumentNullException(nameof(snapshotPolicy));
+        this.configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -115,6 +119,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
             {
                 var auditLog = BuildAuditLog(ctx, row);
                 ctx.Add(auditLog);
+                ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
                 processed++;
             }
@@ -146,6 +151,51 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         activity?.SetTag("orionaudit.dispatch.rows_processed", processed);
         activity?.SetStatus(ActivityStatusCode.Ok);
         return processed;
+    }
+
+    // Deserialises the queue row's CustomColumnsJson and writes each registered column's value
+    // to the AuditLog's shadow property. Names registered after the queue row was written are
+    // simply absent from the JSON and stay NULL; names present in the JSON but no longer
+    // registered are ignored (forward-compatible drift).
+    private void ApplyCustomColumnsFromQueue(TDbContext ctx, AuditLog auditLog, AuditCaptureQueueEntry row)
+    {
+        if (configuration.CustomColumns.Count == 0 || string.IsNullOrEmpty(row.CustomColumnsJson))
+        {
+            return;
+        }
+        JsonNode? node;
+        try
+        {
+            node = JsonNode.Parse(row.CustomColumnsJson);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+        if (node is not JsonObject customs)
+        {
+            return;
+        }
+        foreach (var column in configuration.CustomColumns)
+        {
+            if (customs[column.Name] is not JsonValue v)
+            {
+                continue;
+            }
+            try
+            {
+                var clr = v.Deserialize(column.ClrType, JsonSerializerOptions.Default);
+                ctx.Entry(auditLog).Property(column.Name).CurrentValue = clr;
+            }
+#pragma warning disable CA1031 // a malformed value must not abort the batch
+            catch
+#pragma warning restore CA1031
+            {
+                auditLog.Error = string.IsNullOrEmpty(auditLog.Error)
+                    ? $"AddColumn '{column.Name}': dispatch deserialize failed"
+                    : auditLog.Error + $"; AddColumn '{column.Name}': dispatch deserialize failed";
+            }
+        }
     }
 
     private AuditLog BuildAuditLog(TDbContext ctx, AuditCaptureQueueEntry row)

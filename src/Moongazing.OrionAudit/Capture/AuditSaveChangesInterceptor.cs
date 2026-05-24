@@ -109,6 +109,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             }
 
             ctx.Add(auditLog);
+            ApplyCustomColumns(ctx, auditLog, entry, configuration,
+                auditLog.Action, user, tenantId);
             if (auditLog.Error is null)
             {
                 writtenCount++;
@@ -126,6 +128,41 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         activity?.SetStatus(ActivityStatusCode.Ok);
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Runs after ctx.Add(auditLog) in the sync path. For each registered custom column the
+    // provider is invoked; the result is written to the AuditLog's shadow property. Provider
+    // failures degrade to NULL on that column plus an Error annotation — never abort the save.
+    private static void ApplyCustomColumns(
+        DbContext ctx,
+        AuditLog auditLog,
+        EntityEntry entry,
+        IAuditConfiguration configuration,
+        AuditAction action,
+        AuditUser? user,
+        string? tenantId)
+    {
+        if (configuration.CustomColumns.Count == 0)
+        {
+            return;
+        }
+        var auditCtx = new AuditColumnContext(entry.Entity, entry, action, user, tenantId);
+        foreach (var column in configuration.CustomColumns)
+        {
+            try
+            {
+                var value = column.Provider(auditCtx);
+                ctx.Entry(auditLog).Property(column.Name).CurrentValue = value;
+            }
+#pragma warning disable CA1031 // a single bad provider must not abort the save
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                auditLog.Error = string.IsNullOrEmpty(auditLog.Error)
+                    ? $"AddColumn '{column.Name}': {ex.Message}"
+                    : auditLog.Error + $"; AddColumn '{column.Name}': {ex.Message}";
+            }
+        }
     }
 
     private static (AuditLog Log, JsonObject? AfterNode) BuildAuditLog(
@@ -268,6 +305,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             ? SnapshotBuilder.Build(entityType, afterValues, configuration, jsonContext)
             : SnapshotBuilder.Build(entityType, afterValues, configuration);
 
+        var customsJson = SerializeCustomColumns(entry, configuration, user, tenantId, action);
+
         return new AuditCaptureQueueEntry
         {
             EntityType = entityType.AssemblyQualifiedName!,
@@ -282,7 +321,46 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             CorrelationId = correlationId,
             OccurredOnUtc = occurredOn,
             Attempts = 0,
+            CustomColumnsJson = customsJson,
         };
+    }
+
+    // Async-mode counterpart of ApplyCustomColumns. Invokes each registered provider with the
+    // audited entity in scope and serialises (name → value) into a JSON object. The dispatcher
+    // deserialises and applies the values to the final AuditLog row. Provider failures are
+    // swallowed — the column lands NULL on the AuditLog. (The sync path annotates Error on
+    // failure; the async path can't reach the not-yet-written AuditLog from here, so this
+    // path is the documented trade-off for async users.)
+    private static string? SerializeCustomColumns(
+        EntityEntry entry,
+        IAuditConfiguration configuration,
+        AuditUser? user,
+        string? tenantId,
+        AuditAction action)
+    {
+        if (configuration.CustomColumns.Count == 0)
+        {
+            return null;
+        }
+        var auditCtx = new AuditColumnContext(entry.Entity, entry, action, user, tenantId);
+        var obj = new JsonObject();
+        var hasAny = false;
+        foreach (var column in configuration.CustomColumns)
+        {
+            try
+            {
+                var value = column.Provider(auditCtx);
+                obj[column.Name] = value is null ? null : JsonValue.Create(value);
+                hasAny = true;
+            }
+#pragma warning disable CA1031 // single bad provider must not abort the save
+            catch
+#pragma warning restore CA1031
+            {
+                // Column ends up missing from the JSON → dispatcher leaves it NULL.
+            }
+        }
+        return hasAny ? obj.ToJsonString() : null;
     }
 
     private static Dictionary<string, object?> SnapshotValues(EntityEntry entry, bool useOriginal)

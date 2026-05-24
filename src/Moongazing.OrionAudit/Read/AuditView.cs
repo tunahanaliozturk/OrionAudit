@@ -55,6 +55,14 @@ public sealed class AuditEntryView
 
     /// <summary>Field-level changes extracted from the row's diff.</summary>
     public IReadOnlyList<FieldChange> Changes { get; init; } = Array.Empty<FieldChange>();
+
+    /// <summary>
+    /// Consumer-registered custom columns (from <c>OrionAuditOptions.AddColumn</c>), projected
+    /// from the underlying <see cref="AuditLog"/> row's shadow properties. Empty when no
+    /// columns are configured.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?> CustomColumns { get; init; }
+        = new Dictionary<string, object?>(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -75,6 +83,23 @@ public static class AuditViewRenderer
             UserDisplay = row.UserDisplay,
             CorrelationId = row.CorrelationId,
             Changes = ParseChanges(row.Diff),
+        };
+    }
+
+    /// <summary>Renders one audit row, attaching the supplied custom-column values.</summary>
+    public static AuditEntryView Render(AuditLog row, IReadOnlyDictionary<string, object?> customColumns)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(customColumns);
+        return new AuditEntryView
+        {
+            Id = row.Id,
+            Action = row.Action,
+            OccurredOnUtc = row.OccurredOnUtc,
+            UserDisplay = row.UserDisplay,
+            CorrelationId = row.CorrelationId,
+            Changes = ParseChanges(row.Diff),
+            CustomColumns = customColumns,
         };
     }
 

@@ -42,6 +42,15 @@ async function load() {
     head.innerHTML = '<span class="action">' + e.action + '</span>' +
       '<span>' + new Date(e.occurredOnUtc).toLocaleString() + '</span>' +
       '<span>' + (e.userDisplay ?? "—") + '</span>';
+    if (e.customColumns) {
+      for (const [k, v] of Object.entries(e.customColumns)) {
+        if (v === null || v === undefined) continue;
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = k + ': ' + v;
+        head.appendChild(badge);
+      }
+    }
     div.appendChild(head);
     for (const c of e.changes) {
       const row = document.createElement("div");
