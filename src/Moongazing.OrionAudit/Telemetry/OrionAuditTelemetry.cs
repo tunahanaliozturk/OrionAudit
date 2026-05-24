@@ -54,4 +54,16 @@ public static class OrionAuditTelemetry
         "orionaudit.capture.queue_depth",
         () => Interlocked.Read(ref dispatchQueueDepth),
         unit: "rows", description: "Capture-queue rows awaiting dispatch, as last observed by the dispatcher.");
+
+    internal static readonly Counter<long> ImportRowsWritten = Meter.CreateCounter<long>(
+        "orionaudit.import.rows_written", unit: "rows", description: "Audit rows written by the bulk importer.");
+
+    internal static readonly Counter<long> ImportRowsSkipped = Meter.CreateCounter<long>(
+        "orionaudit.import.rows_skipped", unit: "rows", description: "Bulk-import rows skipped via idempotency tag.");
+
+    internal static readonly Counter<long> ImportRowsDeadLettered = Meter.CreateCounter<long>(
+        "orionaudit.import.rows_deadlettered", unit: "rows", description: "Bulk-import rows written with Error populated.");
+
+    internal static readonly Histogram<double> ImportBatchDuration = Meter.CreateHistogram<double>(
+        "orionaudit.import.batch.duration", unit: "ms", description: "AuditImportBuilder SaveAsync duration.");
 }
