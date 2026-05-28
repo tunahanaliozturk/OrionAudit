@@ -527,6 +527,15 @@ OrionAudit is one of a set of standalone .NET libraries:
 
 ---
 
+### See it in a real app
+
+[Moongazing.OrionShowcase](https://github.com/tunahanaliozturk/OrionShowcase) is a production-shaped banking sample integrating all six Orion packages end-to-end. OrionAudit captures Account/Customer/Transaction entity diffs automatically via SaveChangesInterceptor. Concrete usage in the showcase:
+
+- [src/Moongazing.OrionShowcase.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs](https://github.com/tunahanaliozturk/OrionShowcase/blob/main/src/Moongazing.OrionShowcase.Infrastructure/DependencyInjection/InfrastructureServiceCollectionExtensions.cs)
+- [src/Moongazing.OrionShowcase.Infrastructure/Persistence/BankingDbContext.cs](https://github.com/tunahanaliozturk/OrionShowcase/blob/main/src/Moongazing.OrionShowcase.Infrastructure/Persistence/BankingDbContext.cs)
+
+---
+
 ## Contributing
 
 Contributions are welcome. Please read the [Contributing Guide](CONTRIBUTING.md) before
