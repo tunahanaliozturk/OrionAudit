@@ -24,6 +24,47 @@
 
 ---
 
+## How it works
+
+A SaveChangesInterceptor sits in EF Core's pipeline. For every `[Auditable]` entity in `Added`, `Modified`, or `Deleted` state it builds a snapshot, runs the diff engine against the previous snapshot (loaded from `AuditLog` history or a periodic snapshot), and writes one `AuditLog` row in the same transaction as the data change. Synchronous mode writes the final row directly; async mode writes a lightweight queue row instead and lets a dispatcher hosted service materialize the diff off the hot path.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Application code
+    participant EF as DbContext
+    participant Int as OrionAudit<br/>SaveChangesInterceptor
+    participant Snap as SnapshotBuilder
+    participant Diff as DiffEngine<br/>(RFC 6902)
+    participant DB as AuditLog table<br/>(same DB, same tx)
+    participant Disp as AuditDispatcher<br/>(async mode only)
+
+    App->>EF: SaveChangesAsync()
+    EF->>Int: SavingChanges
+    loop each tracked Added/Modified/Deleted entity
+        Int->>Snap: Build(entity)
+        Snap-->>Int: JsonNode (current state)
+        Int->>Diff: Compute(previous, current)
+        Diff-->>Int: JSON Patch operations
+        alt sync mode (default)
+            Int->>DB: INSERT AuditLog row<br/>(Action, EntityId, Diff, UserId, TenantId)
+        else async mode (UseAsyncCapture)
+            Int->>DB: INSERT OrionAudit_Capture_Queue row<br/>(same transaction, atomic)
+            Note right of Disp: Later, off the hot path:
+            Disp->>DB: claim queue rows
+            Disp->>Diff: re-materialize diff if needed
+            Disp->>DB: INSERT final AuditLog rows
+        end
+    end
+    EF->>DB: INSERT/UPDATE/DELETE domain rows
+    DB-->>EF: COMMIT (atomic)
+    EF-->>App: rows affected
+```
+
+The diagram makes the two key guarantees visible. In sync mode the `AuditLog` row and the domain rows commit together: either both exist or neither does. In async mode the same atomicity holds for the `Capture_Queue` row, and the dispatcher's "claim, materialize, insert final" trio is itself one transaction so deferred rows are exactly-once.
+
+---
+
 ## Why OrionAudit?
 
 | Feature                                | OrionAudit | Audit.NET | EFCore.Triggered | DIY pattern |
@@ -419,76 +460,17 @@ or any other runner — no transitive `FluentAssertions` / `Shouldly` choice for
 
 ---
 
-## Performance
+## Benchmarks
 
-OrionAudit is benchmarked with [BenchmarkDotNet](https://benchmarkdotnet.org/) on each release
-([`bench/Moongazing.OrionAudit.Bench`](bench/Moongazing.OrionAudit.Bench)). Numbers below come
-from `BenchmarkDotNet v0.15.8` on Windows 11, .NET 10.0.5, Intel i7-7820HQ (Kaby Lake, 4C/8T).
+See [benchmarks.md](benchmarks.md) for the full BenchmarkDotNet run, environment, and per-scenario interpretation (snapshot build, JSON Patch compute vs. apply, EF Core SaveChanges overhead, time-travel reconstruction). Headline numbers from the last measured run on an Intel i7-7820HQ (Kaby Lake), .NET 10.0.5, BenchmarkDotNet 0.15.8:
 
-### Per-entity snapshot
+- Snapshot build of a 7-property entity: ~677 ns, ~984 B allocated.
+- JSON Patch compute on 16 properties: ~96 us, ~88 KB.
+- JSON Patch apply on the same diff: ~36 us, ~15 KB (about 5x cheaper than compute).
+- SaveChanges overhead on in-memory Sqlite: 3.5x for single-row, 4.2x for 100-row batches; drops into the 5-15 percent range on a real DB where round-trip dominates.
+- Reconstruction at depth 1000: ~9 ms, ~4.3 MB (O(N) without snapshotting).
 
-A 7-property entity, single snapshot build:
-
-| Method                  |    Mean | Ratio | Allocated |
-| ----------------------- | ------: | ----: | --------: |
-| Build_AttributesOnly    |  677 ns |  1.00 |     984 B |
-| Build_WithHashAndRedact | 1.74 μs |  2.57 |     984 B |
-
-`Hash` and `Redact` pay for one SHA-256 invocation per hashed field. The UTF-8 input buffer is
-stack-allocated for inputs under 256 bytes and rented from `ArrayPool<byte>` above that, with
-stack-allocated SHA-256 output — zero heap allocation for the cryptographic path itself.
-
-### JSON Patch diff (Compute vs. Apply)
-
-| Properties | Compute (Mean / Alloc) | Apply (Mean / Alloc) | Apply ratio |
-| ---------: | ---------------------: | -------------------: | ----------: |
-|          4 |    25.4 μs / 24.0 KB   |    24.9 μs / 4.4 KB  |        0.18 |
-|         16 |    95.6 μs / 88.5 KB   |    35.8 μs / 15.3 KB |        0.17 |
-|         64 |   330.0 μs / 351 KB    |   136.5 μs / —       |        0.41 |
-
-`Apply` is consistently 2.5–5× cheaper than `Compute` and allocates 5–6× less — replaying audit
-history (reconstruction) is the cheap side.
-
-### EF Core SaveChanges overhead
-
-In-memory Sqlite, vs. a baseline `SaveChanges` with no audit hooked up:
-
-| Batch size | NoAudit (Mean) | WithAudit (Mean) | Slowdown | Alloc ratio |
-| ---------: | -------------: | ---------------: | -------: | ----------: |
-|          1 |        197 μs  |         679 μs   |     3.5× |        1.5× |
-|         10 |        474 μs  |       2.38 ms    |     5.0× |        3.2× |
-|        100 |       2.59 ms  |       10.8 ms    |     4.2× |        4.6× |
-
-Sqlite in-memory has near-zero per-row write cost, which makes the audit overhead look large in
-ratio. Against a real Postgres or SQL Server deployment the DB round-trip dominates total
-latency and the audit overhead drops into the **5–15% range**. Run the bench against your own
-provider for the number that matters to you.
-
-### Time-travel reconstruction (replay cost)
-
-| History depth | Mean    | Allocated |
-| ------------: | ------: | --------: |
-|            10 | 1.09 ms |   126 KB  |
-|           100 | 2.76 ms |   506 KB  |
-|          1000 | 8.95 ms |   4.3 MB  |
-
-Reconstruction is O(N) in audit-row count: every diff is applied in sequence from the Insert
-forward. **Periodic snapshotting** (v0.2 roadmap) turns this into O(K) where K = updates since
-the last snapshot — for `SnapshotEvery(100)` against the 1000-depth case, expect a 10× speedup
-and proportional allocation drop.
-
-### Design notes
-
-- **Primitive fast path** — `SnapshotBuilder.ConvertToNode` switches on the runtime type and
-  calls `JsonValue.Create` directly for primitives, skipping `JsonSerializer.SerializeToNode`'s
-  reflection. User-defined types still fall through to the reflective path.
-- **FrozenDictionary lookups** — `IAuditConfiguration.IsAudited` is a frozen-dictionary
-  `ContainsKey`; the interceptor short-circuits on entity state before doing the type lookup.
-- **`FindExtension<CoreOptionsExtension>()`** for the tenant resolver instead of LINQ over
-  `IDbContextOptions.Extensions`.
-
-Source-generated `[Auditable]` discovery (v0.3.0) and a reflection-free, Native-AOT-clean
-diff engine (v0.4.0) have shipped — see the [roadmap](ROADMAP.md).
+Reproduce with `dotnet run -c Release --project bench/Moongazing.OrionAudit.Bench`.
 
 ---
 
