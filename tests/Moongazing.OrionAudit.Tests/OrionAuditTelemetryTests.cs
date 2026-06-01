@@ -85,4 +85,25 @@ public class OrionAuditTelemetryTests
         Assert.Contains("orionaudit.dispatch.batch.duration", names);
         Assert.Contains("orionaudit.capture.queue_depth", names);
     }
+
+    [Fact]
+    public void Meter_Exposes_PublishInstruments()
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
+            typeof(OrionAuditTelemetry).TypeHandle);
+
+        var names = new List<string>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == OrionAuditTelemetry.MeterName)
+            {
+                names.Add(instrument.Name);
+            }
+        };
+        listener.Start();
+
+        Assert.Contains("orionaudit.events.published", names);
+        Assert.Contains("orionaudit.events.dropped", names);
+    }
 }

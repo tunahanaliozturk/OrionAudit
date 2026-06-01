@@ -12,8 +12,8 @@ public static class OrionAuditTelemetry
     /// <summary>The Meter name registered for audit metrics.</summary>
     public const string MeterName = "OrionAudit";
 
-    internal static readonly ActivitySource ActivitySource = new(ActivitySourceName, "0.6.0");
-    internal static readonly Meter Meter = new(MeterName, "0.6.0");
+    internal static readonly ActivitySource ActivitySource = new(ActivitySourceName, "0.7.0");
+    internal static readonly Meter Meter = new(MeterName, "0.7.0");
 
     internal static readonly Counter<long> EntriesWritten = Meter.CreateCounter<long>(
         "orionaudit.entries.written", unit: "entries", description: "Audit entries successfully written.");
@@ -66,4 +66,10 @@ public static class OrionAuditTelemetry
 
     internal static readonly Histogram<double> ImportBatchDuration = Meter.CreateHistogram<double>(
         "orionaudit.import.batch.duration", unit: "ms", description: "AuditImportBuilder SaveAsync duration.");
+
+    internal static readonly Counter<long> EventsPublished = Meter.CreateCounter<long>(
+        "orionaudit.events.published", unit: "events", description: "Audit events handed to IAuditEventPublisher.");
+
+    internal static readonly Counter<long> EventsDropped = Meter.CreateCounter<long>(
+        "orionaudit.events.dropped", unit: "events", description: "Audit events dropped by the publisher (handler exception or shutdown abandonment).");
 }

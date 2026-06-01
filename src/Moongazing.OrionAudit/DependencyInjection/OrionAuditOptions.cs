@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text.Json.Serialization;
 using Moongazing.OrionAudit.Configuration;
+using Moongazing.OrionAudit.Publishing;
 
 namespace Moongazing.OrionAudit;
 
@@ -40,6 +41,23 @@ public sealed class OrionAuditOptions
 
     /// <summary>The async-capture tunables. Meaningful only when <see cref="AsyncCaptureEnabled"/> is true.</summary>
     public AsyncCaptureOptions AsyncCaptureOptions { get; private set; } = new();
+
+    /// <summary>
+    /// The publisher type to register as <see cref="IAuditEventPublisher"/>. Null means the default
+    /// <see cref="NullAuditEventPublisher"/> is registered (no behaviour change for existing consumers).
+    /// </summary>
+    internal Type? EventPublisherType { get; private set; }
+
+    /// <summary>
+    /// When non-null, a <see cref="ChannelAuditEventPublisher"/> is registered as
+    /// <see cref="IAuditEventPublisher"/> using this handler and <see cref="ChannelPublisherOptions"/>.
+    /// </summary>
+    internal Func<AuditLogEvent, CancellationToken, ValueTask>? ChannelPublisherHandler { get; private set; }
+
+    /// <summary>
+    /// Options for the channel-based publisher when registered via <see cref="UseChannelEventPublisher"/>.
+    /// </summary>
+    internal ChannelAuditEventPublisherOptions ChannelPublisherOptions { get; } = new();
 
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public OrionAuditOptions Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
@@ -197,6 +215,37 @@ public sealed class OrionAuditOptions
         }
 
         customColumns.Add(new CustomColumn(name, typeof(T), provider));
+        return this;
+    }
+
+    /// <summary>
+    /// Registers <typeparamref name="TPublisher"/> as the <see cref="IAuditEventPublisher"/>
+    /// singleton. The publisher is invoked from inside the capture transaction (sync mode) or
+    /// the dispatcher transaction (async mode); a publisher exception aborts that transaction.
+    /// </summary>
+    public OrionAuditOptions UseEventPublisher<TPublisher>() where TPublisher : class, IAuditEventPublisher
+    {
+        EventPublisherType = typeof(TPublisher);
+        ChannelPublisherHandler = null;
+        return this;
+    }
+
+    /// <summary>
+    /// Registers the in-process <see cref="ChannelAuditEventPublisher"/> as the
+    /// <see cref="IAuditEventPublisher"/> singleton, with <paramref name="handler"/> as the
+    /// per-event delegate the background reader invokes. Intentionally toy-grade. Suitable for
+    /// monoliths and tests; production deployments that need at-least-once delivery to a real
+    /// broker should write a custom <see cref="IAuditEventPublisher"/> against their broker SDK
+    /// and call <see cref="UseEventPublisher{TPublisher}"/> instead.
+    /// </summary>
+    public OrionAuditOptions UseChannelEventPublisher(
+        Func<AuditLogEvent, CancellationToken, ValueTask> handler,
+        Action<ChannelAuditEventPublisherOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        ChannelPublisherHandler = handler;
+        configure?.Invoke(ChannelPublisherOptions);
+        EventPublisherType = null;
         return this;
     }
 }

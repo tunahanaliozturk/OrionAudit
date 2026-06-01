@@ -3,7 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Moongazing.OrionAudit.Configuration;
+using Moongazing.OrionAudit.Publishing;
 using Moongazing.OrionAudit.Read;
 using Moongazing.OrionAudit.Retention;
 
@@ -79,7 +81,38 @@ public static class AuditServiceCollectionExtensions
             services.TryAddScoped(typeof(IAuditTenantResolver), options.TenantResolverType);
         }
 
+        RegisterEventPublisher(services, options);
+
         return services;
+    }
+
+    // Publisher registration order:
+    //   1) UseEventPublisher<TPublisher>() wins if set
+    //   2) Otherwise UseChannelEventPublisher(...) registers ChannelAuditEventPublisher with the
+    //      consumer's delegate and options
+    //   3) Otherwise the NullAuditEventPublisher singleton is registered so existing consumers
+    //      see zero behaviour change
+    // All three are registered as singletons. ChannelAuditEventPublisher implements IAsyncDisposable
+    // so the DI container drains it on shutdown.
+    private static void RegisterEventPublisher(IServiceCollection services, OrionAuditOptions options)
+    {
+        if (options.EventPublisherType is not null)
+        {
+            services.TryAddSingleton(typeof(IAuditEventPublisher), options.EventPublisherType);
+            return;
+        }
+
+        if (options.ChannelPublisherHandler is { } handler)
+        {
+            services.TryAddSingleton<IAuditEventPublisher>(sp =>
+                new ChannelAuditEventPublisher(
+                    handler,
+                    options.ChannelPublisherOptions,
+                    sp.GetService<ILogger<ChannelAuditEventPublisher>>()));
+            return;
+        }
+
+        services.TryAddSingleton<IAuditEventPublisher>(NullAuditEventPublisher.Instance);
     }
 
     // ScanAndRegister wraps the reflective Discover call. AddOrionAudit only reaches here when

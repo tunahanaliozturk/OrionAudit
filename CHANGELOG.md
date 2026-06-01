@@ -7,6 +7,75 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-01
+
+Minor release focused on the publisher hook from the original v0.7.0 theme ("Outbox &
+polymorphic capture"). The other three items on that roadmap entry are deferred to follow-on
+patches so this release ships at quality. See `### Deferred from v0.7.0` below for the new
+target versions.
+
+### Added
+
+- **`IAuditEventPublisher` hook.** First-class extension point invoked from inside the capture
+  transaction (sync mode) or the dispatcher transaction (async-capture mode). Consumers can fan
+  `AuditLog` rows out to downstream pipelines (message broker, search indexer, webhook) without
+  writing a custom `SaveChangesInterceptor`. A publisher exception aborts the same transaction
+  that holds the audit write, so either both the row exists and the publisher was called, or
+  neither. Resolves the v0.2.0 "considered but not promised" outbox hook item.
+- **`AuditLogEvent` wire shape.** Public record mirroring `AuditLog` columns. Stays decoupled
+  from the EF entity type so downstream consumers (broker bindings, indexers) do not depend on
+  the persisted entity.
+- **`NullAuditEventPublisher`.** Default registration when nothing is wired. Allocation-free
+  no-op; existing consumers see zero behaviour change.
+- **`ChannelAuditEventPublisher`.** In-process default backed by a bounded
+  `System.Threading.Channels.Channel<AuditLogEvent>` with `BoundedChannelFullMode.Wait` and a
+  single dedicated reader task that invokes a consumer-supplied
+  `Func<AuditLogEvent, CancellationToken, ValueTask>` delegate per event. Intentionally
+  toy-grade: suitable for monoliths and tests; production deployments that need at-least-once
+  delivery to a real broker should write their own `IAuditEventPublisher` against RabbitMQ /
+  Azure Service Bus / Kafka / etc. and call `UseEventPublisher<TPublisher>()`. Implements
+  `IAsyncDisposable` so the DI container drains it on shutdown.
+- **DI builder methods.** `o.UseEventPublisher<TPublisher>()` registers a custom publisher as
+  a singleton; `o.UseChannelEventPublisher((evt, ct) => ..., opts => ...)` registers the
+  channel-based default with a consumer-supplied per-event delegate. Both are mutually
+  exclusive; the latter call wins if both are made.
+- **Publisher telemetry.** Counter `orionaudit.events.published` bumps on every published
+  event; counter `orionaudit.events.dropped` bumps on handler exceptions in
+  `ChannelAuditEventPublisher` and on shutdown-abandoned events. ActivitySource span
+  `OrionAudit.Publish` wraps every per-event handler invocation in the channel publisher.
+
+### Changed
+
+- `AuditSaveChangesInterceptor` calls `IAuditEventPublisher.PublishAsync` BEFORE returning
+  from `SavingChangesAsync` in sync-capture mode, so a publisher exception aborts the consumer
+  transaction.
+- `AuditDispatcher` calls `IAuditEventPublisher.PublishAsync` BEFORE its own `SaveChangesAsync`
+  in async-capture mode, so a publisher exception aborts the dispatcher batch (the queue rows
+  stay claimed-but-undeleted and become available for retry after `ClaimLease`).
+- `OrionAudit` `ActivitySource` / `Meter` version bumped to `0.7.0`.
+
+### Deferred from v0.7.0
+
+The original v0.7.0 roadmap entry listed four items. Three are deferred to keep this release
+focused on the publisher hook:
+
+- **TPH / polymorphic entity capture** retargeted to **v0.7.1**. `[Auditable(BaseType = typeof(Document))]`
+  plus a new `EntityBaseType` column on `AuditLog` so `AuditFor<Document>()` can return the
+  full inheritance hierarchy.
+- **Viewer per-entity / per-field display labels** retargeted to **v0.7.2**.
+  `o.Label<Order>(o => o.SubTotal, "Net")` and the viewer surface to render it.
+- **MySQL / MariaDB provider matrix** retargeted to **v0.7.3**. `MySqlText` column hint plus
+  integration tests against the provider.
+
+### Migration from v0.6.x
+
+- **Existing consumers:** no code change required. The default `NullAuditEventPublisher`
+  registration means `AddOrionAudit` callers who do not opt into a publisher see zero behaviour
+  change.
+- **Adopting the publisher hook:** add `o.UseChannelEventPublisher(...)` for the in-process
+  default, or implement `IAuditEventPublisher` and call `o.UseEventPublisher<MyPublisher>()`.
+  No schema impact.
+
 ## [0.6.2] - 2026-05-26
 
 ### Fixed

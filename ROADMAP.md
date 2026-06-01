@@ -179,23 +179,55 @@ business case demands.*
 
 ---
 
-## v0.7.0 — Outbox & polymorphic capture *(planned, Q4 2026)*
+## v0.7.0 — Outbox publish hook *(shipped 2026-06-01)*
 
-Theme: *unblock downstream replication and stop bleeding TPH hierarchies at the entity-type
-boundary.*
+Theme: *unblock downstream replication without committing to a broker binding.*
 
-- **Outbox-style publish hook on audit write.** A first-class `IAuditEventPublisher` interface
-  invoked inside the capture transaction. Ships with an in-process `ChannelAuditEventPublisher`
-  default and a documented contract for plugging in a real broker (RabbitMQ, Azure Service Bus,
-  Kafka) from consumer code. Resolves the v0.2 "considered but not promised" item.
-- **TPH / polymorphic entity capture.** `[Auditable(BaseType = typeof(Document))]` and the
-  fluent equivalent record the runtime class on the row but allow `AuditFor<Document>()` to
-  return the full inheritance hierarchy. `EntityType` stays a stable string; a new
-  `EntityBaseType` column makes the relationship queryable.
-- **Viewer: per-entity / per-field display labels.** `o.Label<Order>(o => o.SubTotal, "Net")`
+Scope was reduced from the original four-item entry so the publisher hook could ship at quality.
+The other three items are retargeted below (v0.7.1, v0.7.2, v0.7.3).
+
+- **`IAuditEventPublisher` hook.** First-class extension point invoked inside the capture
+  transaction (sync mode) or the dispatcher transaction (async mode). A publisher exception
+  aborts the same transaction that holds the audit write. Resolves the v0.2 "considered but
+  not promised" outbox item.
+- **`AuditLogEvent` wire shape.** Public record mirroring `AuditLog` columns; decoupled from
+  the EF entity so downstream consumers do not depend on the persisted entity type.
+- **`NullAuditEventPublisher`.** Default registration when nothing is wired — zero behaviour
+  change for existing consumers.
+- **`ChannelAuditEventPublisher`.** Intentionally toy-grade in-process default with bounded
+  buffering and an `IAsyncDisposable` drain. Suitable for monoliths and tests; production
+  deployments write a custom `IAuditEventPublisher` against their broker.
+- **Telemetry.** `OrionAudit.Publish` ActivitySource span, `orionaudit.events.published` /
+  `orionaudit.events.dropped` counters.
+
+---
+
+## v0.7.1 — TPH / polymorphic entity capture *(planned, Q4 2026)*
+
+Retargeted from v0.7.0.
+
+- `[Auditable(BaseType = typeof(Document))]` and the fluent equivalent record the runtime class
+  on the row but allow `AuditFor<Document>()` to return the full inheritance hierarchy.
+  `EntityType` stays a stable string; a new `EntityBaseType` column makes the relationship
+  queryable.
+
+---
+
+## v0.7.2 — Viewer labels *(planned, Q4 2026)*
+
+Retargeted from v0.7.0.
+
+- **Viewer per-entity / per-field display labels.** `o.Label<Order>(o => o.SubTotal, "Net")`
   surfaces in the viewer table and detail panel. No schema impact — labels are configuration.
-- **Provider matrix expansion.** Add MySQL/MariaDB to the supported provider list with a
-  `MySqlText` column hint and integration tests.
+
+---
+
+## v0.7.3 — MySQL / MariaDB provider matrix *(planned, Q4 2026)*
+
+Retargeted from v0.7.0.
+
+- Add MySQL / MariaDB to the supported provider list with a `MySqlText` column hint and
+  integration tests.
 
 ---
 
@@ -310,7 +342,10 @@ These come up in conversation; we're saying no on purpose.
 | v0.5.0    | shipped                             | async capture + viewer       |
 | v0.5.1    | shipped 2026-05-23                  | logo refresh                 |
 | v0.6.0    | Q3 2026                             | developer experience         |
-| v0.7.0    | Q4 2026                             | outbox + polymorphic capture |
+| v0.7.0    | shipped 2026-06-01                  | publisher hook               |
+| v0.7.1    | Q4 2026                             | TPH / polymorphic capture    |
+| v0.7.2    | Q4 2026                             | viewer labels                |
+| v0.7.3    | Q4 2026                             | MySQL / MariaDB matrix       |
 | v0.8.0    | Q1 2027                             | separate audit DB + ops      |
 | v0.9.0    | Q1-Q2 2027                          | docs site + AOT polish       |
 | v1.0.0    | Q2 2027                             | API freeze                   |
