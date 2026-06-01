@@ -1,112 +1,71 @@
 # Contributing to OrionAudit
 
-Thanks for your interest! OrionAudit is a small, focused library — clarity and stability matter
-more than feature breadth. The bar for changes is high, but the surface area is small, so most
-contributions can be reviewed quickly.
+Thanks for taking the time to look at this. OrionAudit captures EF Core entity changes as RFC 6902 JSON Patch documents in an audit log table. The project is small and the bar for contributions is "does it make the package clearer, faster, or safer without expanding the public surface needlessly."
 
-## Ground rules
+## Before you open a PR
 
-- One change per PR. Refactors, bug fixes, and new features ship separately.
-- Tests are not optional. Every behavioural change ships with a test that fails before and passes
-  after.
-- No new public surface without a release note in `CHANGELOG.md` (under `[Unreleased]`).
-- No drive-by reformatting. Style is enforced by `.editorconfig`; respect it but don't reformat
-  files unrelated to your change.
+For anything beyond a typo, a docs tweak, or a one-line fix, please open an issue first. Five minutes of alignment up front saves an afternoon of rework later. State:
 
-## Getting set up
+- The use case you are trying to solve
+- What you tried that did not work
+- Whether you want to send the patch yourself or are flagging the gap
 
-Requirements:
+For typos, docs polish, comment fixes, single-line changes, please skip the issue and send a PR directly. Title it `docs: ...` or `chore: ...` so it is obvious from the queue.
 
-- .NET SDKs **8.0**, **9.0**, **10.0** (multi-targeting; CI builds against all three).
-- A SQL provider for integration work — Sqlite ships in-tree via `Microsoft.Data.Sqlite`; no
-  external server needed.
-
-Clone, restore, build, test:
+## Local development
 
 ```bash
-git clone https://github.com/tunahanaliozturk/OrionAudit.git
+git clone https://github.com/tunahanaliozturk/OrionAudit
 cd OrionAudit
-dotnet restore OrionAudit.sln
-dotnet build OrionAudit.sln -c Debug
-dotnet test OrionAudit.sln
+dotnet restore
+dotnet build -c Release
+dotnet test
 ```
 
-To run the sample console end-to-end:
+.NET 8 SDK is required. Multi-target builds may need 9.0 / 10.0 SDKs installed; the multi-target dimension is intentional and not optional.
 
-```bash
-dotnet run --project sample/OrionAudit.Sample.Console
-```
+Branch from `master`. Name the branch after intent: `feat/...`, `fix/...`, `docs/...`, `refactor/...`, `chore/...`, `test/...`.
 
-To run the benchmark (Release-only, sub-second):
+## Pull request shape
 
-```bash
-dotnet run --project bench/OrionAudit.Bench -c Release
-```
+- One conceptual change per PR. Refactors and behaviour changes go in separate PRs even if the diff feels small.
+- Conventional Commits style commit subject (`feat:`, `fix:`, `docs:`, etc.).
+- New behaviour comes with tests. Bug fixes come with a failing-before, passing-after test.
+- Public API additions need XML doc comments. Breaking changes need a CHANGELOG entry.
+- No `Co-Authored-By` trailers. The author of the PR is the author of the work.
 
-## Layout
+## Coding style
 
-```
-src/
-  OrionAudit/                 # core library (multi-target net8/9/10)
-  OrionAudit.AspNetCore/      # HttpContext-based user resolver
-  OrionAudit.Testing/         # framework-agnostic test helpers
-tests/
-  OrionAudit.Tests/           # core unit tests
-  OrionAudit.AspNetCore.Tests/
-  OrionAudit.Testing.Tests/
-  OrionAudit.IntegrationTests/  # Sqlite end-to-end + multi-tenant isolation
-sample/
-  OrionAudit.Sample.Console/  # runnable demo
-bench/
-  OrionAudit.Bench/           # BenchmarkDotNet harness
-```
+- The repo enforces analyzer warnings as errors and `AllEnabledByDefault` analysis mode. Treat warnings as bugs.
+- Match the surrounding code style. The repo does not have a separate STYLE.md; if the existing code does X, do X.
+- Names are spelled out. No `mgr`, `svc`, `ctx`. The exceptions are well-known abbreviations (`Id`, `Db`, `Url`, `Json`).
+- Comments explain why, not what. The code already says what.
 
-## Test framework
+## Tests
 
-Tests use **xUnit v3** with **Microsoft Testing Platform**. Each test project is an executable
-(`<OutputType>Exe</OutputType>`) and is invoked directly:
+- xUnit + FluentAssertions.
+- Test names are sentences with underscores: `Account_withdraw_throws_when_insufficient_funds`.
+- Integration tests that need infrastructure go in a separate test project, gated by Testcontainers or `Skip` attributes when the infrastructure is unavailable.
+- Coverage is a side effect of writing tests for behaviour, not a target in itself.
 
-```bash
-./tests/OrionAudit.Tests/bin/Debug/net10.0/OrionAudit.Tests.exe
-```
+## Reporting bugs
 
-`dotnet test` also works (the MTP integration is auto-detected on .NET 10). Tests run in parallel
-within a class by default.
+Open an issue with:
 
-## Code style
+- A minimal reproduction (one file, one method, ideally less than 50 lines)
+- The actual behaviour vs the expected behaviour
+- The runtime (`dotnet --info` output) and the package version
 
-- Braces on every `if` / `else` (enforced — IDE0011).
-- `var` for `new T(...)` and other apparent types; explicit type elsewhere if it aids reading.
-- No comments restating what the code does. Comments explain *why* — non-obvious constraints,
-  prior incidents, invariants.
-- XML doc comments on every public type and member (enforced via `GenerateDocumentationFile` and
-  CS1591 in `NoWarn` only for tests).
+If the bug has security implications, please email the maintainer privately before opening a public issue.
 
-## Commit / PR conventions
+## Security
 
-- Conventional commit prefixes: `feat:`, `fix:`, `test:`, `build:`, `docs:`, `ci:`, `chore:`,
-  `perf:`. Optional scope, e.g. `feat(capture): ...`.
-- PR title mirrors the commit subject; PR description explains *why* and lists notable trade-offs.
-- Rebase your branch onto `master` before opening the PR — no merge commits.
-- No `Co-Authored-By` trailers unless a real co-author actually authored part of the diff.
+Do not file public issues for vulnerabilities. Contact the maintainer directly. See [SECURITY.md](SECURITY.md) if present, otherwise email the address listed in the package NuGet metadata.
 
-## Release process
+## Conduct
 
-Releases are cut by maintainers from `master`:
+Be kind. We follow the [Code of Conduct](CODE_OF_CONDUCT.md). Disagreement is fine; rudeness is not.
 
-1. Bump `<Version>` in `Directory.Build.props`.
-2. Move `[Unreleased]` entries under a dated heading in `CHANGELOG.md`.
-3. Tag `vX.Y.Z` and create a GitHub Release.
-4. The `release` event in `.github/workflows/ci-cd.yml` publishes the three packages to
-   nuget.org and GitHub Packages.
+## License
 
-## Reporting bugs / asking questions
-
-Open a GitHub issue with:
-
-- The OrionAudit version, EF Core version, and .NET version.
-- A minimal repro (csproj + Program.cs in a single gist is ideal).
-- Expected vs. actual behaviour.
-
-Security issues should be reported privately to the package author — see the `Authors` field in
-`Directory.Build.props`.
+By submitting a pull request, you agree your contribution is licensed under the repo's [MIT License](LICENSE).

@@ -520,8 +520,7 @@ OrionAudit is one of a set of standalone .NET libraries:
 
 ## Contributing
 
-Contributions are welcome. Please read the [Contributing Guide](CONTRIBUTING.md) before
-submitting a pull request.
+Issues and pull requests welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening one.
 
 ## License
 
