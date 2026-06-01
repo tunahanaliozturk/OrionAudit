@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.6.0 is here — Developer Experience.** Two opt-in additions that unblock common adoption scenarios. `o.AddColumn<int>("WorkflowStepId", ctx => ...)` registers tipped, indexable EF shadow-property columns on `AuditLog` — write fast LINQ filters instead of scanning JSON. `db.CreateAuditImport(o => o.ImportBatch = "legacy-2026")` bulk-imports hand-rolled change history as idempotent `AuditLog` rows whose diffs are byte-for-byte identical to native capture. On top of v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
-> [See the v0.6.0 changelog](CHANGELOG.md#060---2026-05-24) and [what's next](ROADMAP.md).
+> **v0.7.0 is here — Publisher hook.** New `IAuditEventPublisher` extension point fires inside the capture transaction (sync mode) or the dispatcher transaction (async mode), so audit rows fan out to downstream pipelines (broker, search indexer, webhook) atomically with the audit write itself. Ships with a `NullAuditEventPublisher` default (zero behaviour change) and a toy-grade in-process `ChannelAuditEventPublisher` for monoliths and tests. Production deployments write a custom `IAuditEventPublisher` against their broker. On top of v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the v0.7.0 changelog](CHANGELOG.md#070---2026-06-01) and [what's next](ROADMAP.md).
 
 ---
 
