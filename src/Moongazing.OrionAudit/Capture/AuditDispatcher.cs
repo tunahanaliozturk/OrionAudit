@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moongazing.OrionAudit.Configuration;
+using Moongazing.OrionAudit.Publishing;
 
 namespace Moongazing.OrionAudit.Capture;
 
@@ -113,6 +114,11 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
 
         var processed = 0;
         var deadLettered = 0;
+        var publisher = scope.ServiceProvider.GetService<IAuditEventPublisher>();
+        var publishEvents = publisher is null or NullAuditEventPublisher
+            ? null
+            : new List<AuditLogEvent>(claimed.Count);
+
         foreach (var row in claimed)
         {
             try
@@ -122,6 +128,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
                 processed++;
+                publishEvents?.Add(AuditSaveChangesInterceptor.ToEvent(auditLog));
             }
 #pragma warning disable CA1031 // a single bad row must not abort the batch
             catch (Exception ex)
@@ -138,6 +145,14 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                     LogRowDeadLettered(row.Id, row.Attempts);
                 }
             }
+        }
+
+        // Publish BEFORE the dispatcher's SaveChanges so a publisher exception aborts the same
+        // transaction that holds the AuditLog insert + queue-row delete. Keeps the v0.5 dispatch
+        // contract: either the AuditLog row exists AND the publisher was called, or neither.
+        if (publisher is not null && publishEvents is { Count: > 0 })
+        {
+            await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
         }
 
         // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.

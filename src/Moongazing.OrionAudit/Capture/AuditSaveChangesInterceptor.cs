@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Moongazing.OrionAudit.Configuration;
+using Moongazing.OrionAudit.Publishing;
 
 namespace Moongazing.OrionAudit.Capture;
 
@@ -74,6 +75,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         // Async-capture mode: write a lightweight queue row per audited entity instead of an
         // AuditLog row. The diff and final AuditLog row are produced later by the dispatcher.
+        // The publisher is intentionally NOT called here in async mode — the dispatcher fires
+        // it from its own transaction once the AuditLog row exists (see AuditDispatcher).
         if (asyncCapture is not null)
         {
             foreach (var entry in auditedEntries)
@@ -90,6 +93,13 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         var writtenCount = 0;
         var failedCount = 0;
+        // Built per-row so we can hand the events to IAuditEventPublisher after the loop. Only
+        // sized when a publisher is actually wired (NullAuditEventPublisher skips the allocation).
+        var publisher = serviceProvider.GetService<IAuditEventPublisher>();
+        var publishEvents = publisher is null or NullAuditEventPublisher
+            ? null
+            : new List<AuditLogEvent>(auditedEntries.Count);
+
         foreach (var entry in auditedEntries)
         {
             var (auditLog, afterNode) = BuildAuditLog(entry, configuration, user, tenantId, correlationId, occurredOn, jsonContext);
@@ -119,6 +129,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             {
                 failedCount++;
             }
+
+            publishEvents?.Add(ToEvent(auditLog));
         }
 
         OrionAuditTelemetry.EntriesWritten.Add(writtenCount);
@@ -127,8 +139,29 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
         activity?.SetStatus(ActivityStatusCode.Ok);
 
+        // Publish BEFORE SaveChanges so a publisher exception aborts the consumer transaction.
+        // A NullAuditEventPublisher has nothing to publish and was filtered out above.
+        if (publisher is not null && publishEvents is { Count: > 0 })
+        {
+            await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+        }
+
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
+
+    // Mirrors AuditLog to AuditLogEvent. Centralised so the dispatcher's call-site projects the
+    // same shape. DateTimeOffset is constructed from the UTC DateTime + TimeSpan.Zero so the
+    // wire shape is timezone-explicit even though AuditLog stores UTC DateTime.
+    internal static AuditLogEvent ToEvent(AuditLog log) => new(
+        AuditLogId: log.Id,
+        EntityType: log.EntityType,
+        EntityKey: log.EntityId,
+        Action: log.Action.ToString(),
+        At: new DateTimeOffset(log.OccurredOnUtc, TimeSpan.Zero),
+        TenantId: log.TenantId,
+        UserId: log.UserId,
+        CorrelationId: log.CorrelationId,
+        Diff: string.Equals(log.Diff, "[]", StringComparison.Ordinal) ? null : log.Diff);
 
     // Runs after ctx.Add(auditLog) in the sync path. For each registered custom column the
     // provider is invoked; the result is written to the AuditLog's shadow property. Provider
