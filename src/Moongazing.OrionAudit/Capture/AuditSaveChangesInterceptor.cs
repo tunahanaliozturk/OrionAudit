@@ -137,14 +137,20 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         OrionAuditTelemetry.EntriesFailed.Add(failedCount);
         OrionAuditTelemetry.SnapshotsWritten.Add(snapshotsTaken);
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
-        activity?.SetStatus(ActivityStatusCode.Ok);
 
         // Publish BEFORE SaveChanges so a publisher exception aborts the consumer transaction.
         // A NullAuditEventPublisher has nothing to publish and was filtered out above.
+        // Strict outbox-style semantics (publish-after-durable-commit with retry) are tracked
+        // in the v0.7.x roadmap; until then consumers MUST treat AuditLogEvent as an
+        // at-least-once notification and dedupe on AuditLogId.
         if (publisher is not null && publishEvents is { Count: > 0 })
         {
             await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
         }
+
+        // Status is set only once everything (capture + publish) has succeeded so a publisher
+        // exception is correctly reflected as a failure span.
+        activity?.SetStatus(ActivityStatusCode.Ok);
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }

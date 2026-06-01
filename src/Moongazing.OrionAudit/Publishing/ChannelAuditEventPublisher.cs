@@ -154,7 +154,9 @@ public sealed partial class ChannelAuditEventPublisher : IAuditEventPublisher, I
             shutdownCts.Cancel();
             try
             {
-                await readerTask.ConfigureAwait(false);
+                // Cap the cancel-and-await window with the same drain budget so a handler that
+                // ignores its CancellationToken cannot stall host shutdown indefinitely.
+                await readerTask.WaitAsync(drainTimeout).ConfigureAwait(false);
             }
 #pragma warning disable CA1031 // we are tearing down; do not let reader teardown rethrow
             catch
