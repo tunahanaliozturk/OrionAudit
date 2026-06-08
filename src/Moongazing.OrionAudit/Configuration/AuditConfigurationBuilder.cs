@@ -62,7 +62,10 @@ public sealed class AuditConfigurationBuilder
 
     private void ApplyBaseTypeAttribute(Type entityType)
     {
-        var attr = entityType.GetCustomAttribute<AuditableAttribute>(inherit: false);
+        // AuditableAttribute is declared Inherited = true, so a derived class can rely on a
+        // [Auditable(typeof(TBase))] placed on a base. Honour that contract by walking the
+        // inheritance chain rather than only looking at the declared type.
+        var attr = entityType.GetCustomAttribute<AuditableAttribute>(inherit: true);
         if (attr?.BaseType is not null)
         {
             baseTypeByType[entityType] = attr.BaseType;

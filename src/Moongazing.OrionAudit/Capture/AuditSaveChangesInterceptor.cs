@@ -356,6 +356,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         return new AuditCaptureQueueEntry
         {
             EntityType = entityType.AssemblyQualifiedName!,
+            EntityBaseType = typeConfig?.BaseType?.FullName,
             EntityId = ExtractPrimaryKey(entry),
             Action = action,
             BeforeJson = beforeNode.ToJsonString(),

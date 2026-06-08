@@ -35,6 +35,7 @@ public sealed class AuditCaptureQueueEntityTypeConfiguration : IEntityTypeConfig
         builder.Property(x => x.Id).ValueGeneratedOnAdd();
 
         builder.Property(x => x.EntityType).IsRequired().HasMaxLength(512);
+        builder.Property(x => x.EntityBaseType).HasMaxLength(512);
         builder.Property(x => x.EntityId).IsRequired().HasMaxLength(128);
         builder.Property(x => x.Action).IsRequired();
         builder.Property(x => x.BeforeJson).IsRequired();
