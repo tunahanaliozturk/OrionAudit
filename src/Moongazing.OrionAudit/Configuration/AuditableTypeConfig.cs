@@ -24,13 +24,15 @@ public sealed class AuditableTypeConfig
     public AuditableTypeConfig(
         Type entityType,
         IDictionary<string, AuditFieldRule> rules,
-        string? softDeleteProperty = null)
+        string? softDeleteProperty = null,
+        Type? baseType = null)
     {
         ArgumentNullException.ThrowIfNull(entityType);
         ArgumentNullException.ThrowIfNull(rules);
         EntityType = entityType;
         this.rules = rules.ToFrozenDictionary(StringComparer.Ordinal);
         SoftDeleteProperty = softDeleteProperty;
+        BaseType = baseType;
     }
 
     /// <summary>The audited entity CLR type.</summary>
@@ -41,6 +43,13 @@ public sealed class AuditableTypeConfig
     /// <see cref="AuditAction.SoftDeleted"/>. Null when no soft-delete rule is configured.
     /// </summary>
     public string? SoftDeleteProperty { get; }
+
+    /// <summary>
+    /// Declared base type for TPH / polymorphic capture, or <see langword="null"/> when the
+    /// configured type stands alone. Stamped on <see cref="AuditLog.EntityBaseType"/> by the
+    /// capture interceptor.
+    /// </summary>
+    public Type? BaseType { get; }
 
     /// <summary>
     /// Returns the rule for a given property name. Properties without an explicit rule are

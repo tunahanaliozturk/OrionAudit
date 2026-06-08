@@ -244,9 +244,16 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             ? new Dictionary<string, object?>()
             : SnapshotValues(entry, useOriginal: false);
 
+        // TPH / polymorphic capture: when the type config declares a base type, stamp its
+        // FullName on EntityBaseType so a future inheritance-aware AuditFor<TBase>() (v0.7.2)
+        // can return the full hierarchy. Stays null when no base type is configured, which
+        // preserves the v0.7.0 schema shape for existing consumers.
+        var entityBaseType = configuration.GetConfig(entityType)?.BaseType?.FullName;
+
         var auditLog = new AuditLog
         {
             EntityType = entityType.AssemblyQualifiedName!,
+            EntityBaseType = entityBaseType,
             EntityId = primaryKey,
             Action = action,
             OccurredOnUtc = occurredOn,
