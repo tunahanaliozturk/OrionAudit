@@ -14,6 +14,13 @@ public sealed class AuditCaptureQueueEntry
     /// <summary>Assembly-qualified name of the audited entity type.</summary>
     public string EntityType { get; set; } = default!;
 
+    /// <summary>
+    /// Optional base type for TPH / polymorphic capture, carried through the async-capture
+    /// queue so the dispatcher can stamp it on the final <see cref="AuditLog.EntityBaseType"/>.
+    /// Null when the audited type has no declared base type.
+    /// </summary>
+    public string? EntityBaseType { get; set; }
+
     /// <summary>Serialized primary key of the audited entity (canonical <see cref="AuditKey"/> form).</summary>
     public string EntityId { get; set; } = default!;
 

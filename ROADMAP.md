@@ -202,29 +202,33 @@ The other three items are retargeted below (v0.7.1, v0.7.2, v0.7.3).
 
 ---
 
-## v0.7.1 — TPH / polymorphic entity capture *(planned, Q4 2026)*
+## v0.7.1 — TPH / polymorphic capture (first slice) *(shipped 2026-06-04)*
 
-Retargeted from v0.7.0.
+Ships the schema column + capture-side stamping. Inheritance-aware querying lands in v0.7.2.
 
-- `[Auditable(BaseType = typeof(Document))]` and the fluent equivalent record the runtime class
-  on the row but allow `AuditFor<Document>()` to return the full inheritance hierarchy.
-  `EntityType` stays a stable string; a new `EntityBaseType` column makes the relationship
-  queryable.
+- New `AuditLog.EntityBaseType` nullable column.
+- `[Auditable(typeof(TBase))]` constructor overload + fluent `AuditTypeBuilder<T>.UseBaseType<TBase>()`.
+- `AuditableTypeConfig.BaseType` public read-only property.
+- Capture interceptor stamps `EntityBaseType` from the resolved config when present.
 
 ---
 
-## v0.7.2 — Viewer labels *(planned, Q4 2026)*
+## v0.7.2 — TPH inheritance-aware query *(planned, retargeted from original v0.7.1)*
 
-Retargeted from v0.7.0.
+- `AuditFor<TBase>()` consults `EntityBaseType` alongside `EntityType` so a query for a base
+  type returns rows for the whole hierarchy. Existing queries for concrete types stay byte-for-byte
+  identical.
+
+---
+
+## v0.7.3 — Viewer labels *(planned, retargeted from v0.7.2)*
 
 - **Viewer per-entity / per-field display labels.** `o.Label<Order>(o => o.SubTotal, "Net")`
   surfaces in the viewer table and detail panel. No schema impact — labels are configuration.
 
 ---
 
-## v0.7.3 — MySQL / MariaDB provider matrix *(planned, Q4 2026)*
-
-Retargeted from v0.7.0.
+## v0.7.4 — MySQL / MariaDB provider matrix *(planned, retargeted from v0.7.3)*
 
 - Add MySQL / MariaDB to the supported provider list with a `MySqlText` column hint and
   integration tests.

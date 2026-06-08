@@ -12,6 +12,7 @@ public sealed class AuditConfigurationBuilder
 {
     private readonly Dictionary<Type, Dictionary<string, AuditFieldRule>> rulesByType = new();
     private readonly Dictionary<Type, string?> softDeleteByType = new();
+    private readonly Dictionary<Type, Type> baseTypeByType = new();
     private IReadOnlyList<CustomColumn> customColumns = Array.Empty<CustomColumn>();
 
     /// <summary>Set by <c>AddOrionAudit</c> from <c>OrionAuditOptions.CustomColumns</c>.</summary>
@@ -25,6 +26,7 @@ public sealed class AuditConfigurationBuilder
         var rules = GetOrCreateRules(entityType);
         ApplyAttributeRules(entityType, rules);
         ApplySoftDeleteAttribute(entityType);
+        ApplyBaseTypeAttribute(entityType);
 
         if (configure is not null)
         {
@@ -38,6 +40,10 @@ public sealed class AuditConfigurationBuilder
             {
                 softDeleteByType[entityType] = typeBuilder.SoftDeleteProperty;
             }
+            if (typeBuilder.BaseType is not null)
+            {
+                baseTypeByType[entityType] = typeBuilder.BaseType;
+            }
         }
 
         return this;
@@ -50,7 +56,20 @@ public sealed class AuditConfigurationBuilder
         var rules = GetOrCreateRules(entityType);
         ApplyAttributeRules(entityType, rules);
         ApplySoftDeleteAttribute(entityType);
+        ApplyBaseTypeAttribute(entityType);
         return this;
+    }
+
+    private void ApplyBaseTypeAttribute(Type entityType)
+    {
+        // AuditableAttribute is declared Inherited = true, so a derived class can rely on a
+        // [Auditable(typeof(TBase))] placed on a base. Honour that contract by walking the
+        // inheritance chain rather than only looking at the declared type.
+        var attr = entityType.GetCustomAttribute<AuditableAttribute>(inherit: true);
+        if (attr?.BaseType is not null)
+        {
+            baseTypeByType[entityType] = attr.BaseType;
+        }
     }
 
     /// <summary>Freezes accumulated rules into a runtime <see cref="IAuditConfiguration"/>.</summary>
@@ -61,7 +80,8 @@ public sealed class AuditConfigurationBuilder
             kvp => new AuditableTypeConfig(
                 kvp.Key,
                 kvp.Value,
-                softDeleteByType.TryGetValue(kvp.Key, out var sd) ? sd : null));
+                softDeleteByType.TryGetValue(kvp.Key, out var sd) ? sd : null,
+                baseTypeByType.TryGetValue(kvp.Key, out var bt) ? bt : null));
         return new AuditConfiguration(configsByType, customColumns);
     }
 

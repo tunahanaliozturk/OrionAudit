@@ -12,6 +12,18 @@ public sealed class AuditLog
     /// <summary>Assembly-qualified name of the audited entity type.</summary>
     public string EntityType { get; set; } = default!;
 
+    /// <summary>
+    /// Optional name of the base type for TPH / polymorphic capture. When the captured entity's
+    /// configuration declares a base type via <c>[Auditable(typeof(TBase))]</c> or
+    /// <c>AuditTypeBuilder.UseBaseType&lt;TBase&gt;()</c>, this column carries the base type's
+    /// <see cref="Type.FullName"/>; otherwise it stays <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// v0.7.1 ships the capture-side stamping and the schema column. Inheritance-aware querying
+    /// (so <c>AuditFor&lt;Document&gt;()</c> returns rows for every subclass) lands in v0.7.2.
+    /// </remarks>
+    public string? EntityBaseType { get; set; }
+
     /// <summary>Serialized primary key of the audited entity (<c>key.ToString()</c>).</summary>
     public string EntityId { get; set; } = default!;
 

@@ -15,6 +15,26 @@ public sealed class AuditTypeBuilder<T> where T : class
     internal string? SoftDeleteProperty { get; private set; }
 
     /// <summary>
+    /// Declared base type for TPH / polymorphic capture, or <see langword="null"/> when the
+    /// captured type stands alone. Stamped on <see cref="AuditLog.EntityBaseType"/> by the
+    /// capture interceptor.
+    /// </summary>
+    internal Type? BaseType { get; private set; }
+
+    /// <summary>
+    /// Declares <typeparamref name="TBase"/> as the base type for TPH / polymorphic capture.
+    /// The runtime CLR type still gets stamped on <see cref="AuditLog.EntityType"/>; the base
+    /// type's full name is stamped on <see cref="AuditLog.EntityBaseType"/> so a future
+    /// <c>AuditFor&lt;TBase&gt;()</c> query (v0.7.2) can return the full hierarchy.
+    /// Equivalent to the class-level <c>[Auditable(typeof(TBase))]</c> constructor overload.
+    /// </summary>
+    public AuditTypeBuilder<T> UseBaseType<TBase>() where TBase : class
+    {
+        BaseType = typeof(TBase);
+        return this;
+    }
+
+    /// <summary>
     /// Declares the boolean property whose flip from <c>false</c> to <c>true</c> is captured
     /// as <see cref="AuditAction.SoftDeleted"/> rather than <see cref="AuditAction.Updated"/>.
     /// Equivalent to the class-level <c>[SoftDelete(nameof(...))]</c> attribute.

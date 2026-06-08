@@ -229,6 +229,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         var auditLog = new AuditLog
         {
             EntityType = row.EntityType,
+            EntityBaseType = row.EntityBaseType,
             EntityId = row.EntityId,
             Action = row.Action,
             OccurredOnUtc = row.OccurredOnUtc,
