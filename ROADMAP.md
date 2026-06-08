@@ -213,11 +213,11 @@ Ships the schema column + capture-side stamping. Inheritance-aware querying land
 
 ---
 
-## v0.7.2 — TPH inheritance-aware query *(planned, retargeted from original v0.7.1)*
+## v0.7.2 — TPH inheritance-aware query *(shipped 2026-06-09)*
 
 - `AuditFor<TBase>()` consults `EntityBaseType` alongside `EntityType` so a query for a base
   type returns rows for the whole hierarchy. Existing queries for concrete types stay byte-for-byte
-  identical.
+  identical; pre-v0.7.1 rows with null `EntityBaseType` continue to match only via the exact-type predicate.
 
 ---
 

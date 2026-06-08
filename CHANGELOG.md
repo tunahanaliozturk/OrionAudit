@@ -7,6 +7,32 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-06-09
+
+### Added
+
+#### `AuditFor<TBase>()` inheritance-aware query
+
+Completes the TPH/polymorphic capture pipeline: rows stamped with the new `AuditLog.EntityBaseType` column (v0.7.1) are now reachable through the existing query API by passing the base type. The runtime CLR type stays on `AuditLog.EntityType`, so consumers can still narrow to a concrete subclass.
+
+- `AuditFor<T>(this DbContext, bool crossTenant = false)` now matches when **either** `EntityType` equals the AQN of `T` **or** `EntityBaseType` equals the `FullName` of `T`. A row stamped `EntityType=MyApp.Invoice` + `EntityBaseType=MyApp.Document` returns from both `AuditFor<Invoice>()` (concrete-type narrow) and `AuditFor<Document>()` (hierarchy roll-up).
+- Pre-v0.7.1 rows carry `EntityBaseType=null` and continue to match only via the exact-type predicate, preserving v0.7.0 query semantics for legacy data.
+
+xmldoc on `AuditFor<T>` documents the resolution rule, the legacy-row behaviour, and the relationship to the `[Auditable(typeof(TBase))]` / `UseBaseType<TBase>()` declarations from v0.7.1.
+
+### Deferred
+
+Remaining v0.7.x items keep their previously published targets:
+
+- Viewer per-entity / per-field labels -> v0.7.3
+- MySQL / MariaDB provider matrix -> v0.7.4
+
+`ROADMAP.md` already reflects these targets.
+
+### Migration from v0.7.1
+
+Source-compatible. `AuditFor<T>` extends the WHERE predicate from `EntityType == typeof(T).AQN` to `EntityType == typeof(T).AQN || EntityBaseType == typeof(T).FullName`. Existing concrete-type queries continue to return the same rows; only base-type queries gain the new hierarchy roll-up.
+
 ## [0.7.1] - 2026-06-04
 
 ### Added
