@@ -27,6 +27,13 @@ public static class AuditQueryExtensions
     /// of <typeparamref name="T"/>. Pre-v0.7.1 rows carry no <see cref="AuditLog.EntityBaseType"/>
     /// value and continue to match only via the exact-type predicate, preserving v0.7.0 query
     /// semantics for legacy data.
+    /// <para>
+    /// The base-type predicate uses <see cref="Type.FullName"/> to stay byte-compatible with
+    /// the value the v0.7.1 capture path stamped. In the rare case where two loaded assemblies
+    /// define the same namespace-qualified base type, rows from both assemblies satisfy the
+    /// predicate. This matches what the v0.7.1 storage layer recorded; strict cross-assembly
+    /// disambiguation is considered for a future minor that introduces an AQN variant.
+    /// </para>
     /// </remarks>
     public static IQueryable<AuditLog> AuditFor<T>(this DbContext context, bool crossTenant = false)
     {
