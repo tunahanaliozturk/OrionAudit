@@ -7,6 +7,43 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-06-04
+
+### Added
+
+#### TPH / polymorphic capture (first slice)
+
+The TPH / polymorphic-entity-capture promise from v0.7.0 lands in v0.7.1 with the schema column and capture-side stamping. Inheritance-aware querying (so `AuditFor<TBase>()` returns the full hierarchy) lands in v0.7.2.
+
+- **`AuditLog.EntityBaseType`** new nullable column. Holds the declared base type's `Type.FullName` for entities whose configuration declares a base, otherwise stays null. The capture interceptor stamps it; the EF Core configuration maps it as a nullable `string` with `HasMaxLength(512)`.
+- **`AuditableAttribute(Type baseType)`** new constructor overload. Declarative path: `[Auditable(typeof(Document))]` on a derived entity records the base type for capture.
+- **`AuditTypeBuilder<T>.UseBaseType<TBase>()`** new fluent method. Programmatic path: `o.Audit<Invoice>(b => b.UseBaseType<Document>())` records the base type without touching the entity class.
+- **`AuditableTypeConfig.BaseType`** new public read-only property carrying the declared base type, accessible to consumers building custom capture extensions.
+- **`AuditConfigurationBuilder`** picks up the base type from both paths (attribute and fluent) at `Build()` time so the resolved configuration is uniform.
+
+### Migration from v0.7.0
+
+The new `EntityBaseType` column is **nullable**; existing audit rows leave it null. Consumers should add a column migration for the new property:
+
+```csharp
+migrationBuilder.AddColumn<string>(
+    name: "EntityBaseType",
+    table: "OrionAudit_Log",
+    type: "character varying(512)",
+    maxLength: 512,
+    nullable: true);
+```
+
+Existing capture behaviour stays unchanged for entities that do not declare a base type. The new column carries values only for entities decorated with the new `[Auditable(typeof(TBase))]` or the new `UseBaseType<TBase>()` fluent call.
+
+### Deferred from v0.7.1
+
+- **`AuditFor<TBase>()` inheritance-aware querying** -> v0.7.2. The current reconstructor + read API stays at the runtime CLR type; the v0.7.2 work adds an inheritance filter that consults `EntityBaseType` alongside `EntityType`.
+- **Viewer per-entity / per-field labels** -> v0.7.3.
+- **MySQL / MariaDB provider matrix** -> v0.7.4.
+
+`ROADMAP.md` reflects the new targets.
+
 ## [0.7.0] - 2026-06-01
 
 Minor release focused on the publisher hook from the original v0.7.0 theme ("Outbox &
