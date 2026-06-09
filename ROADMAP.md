@@ -221,10 +221,12 @@ Ships the schema column + capture-side stamping. Inheritance-aware querying land
 
 ---
 
-## v0.7.3 — Viewer labels *(planned, retargeted from v0.7.2)*
+## v0.7.3 — Viewer labels *(shipped 2026-06-09)*
 
-- **Viewer per-entity / per-field display labels.** `o.Label<Order>(o => o.SubTotal, "Net")`
-  surfaces in the viewer table and detail panel. No schema impact — labels are configuration.
+- **`AuditTypeBuilder<T>.Label<TProp>(selector, label)`** + **`Label(label)`** for entity-level labels.
+- **`AuditableTypeConfig.EntityLabel`** + **`AuditableTypeConfig.FieldLabel(propertyName)`** public read-only accessors.
+- **`AuditViewRenderer.Render(AuditLog, IAuditConfiguration)`** + customColumns overload that decorate the view with labels.
+- **`AuditEntryView.EntityDisplayLabel`** + **`FieldChange.DisplayLabel`** populated when a label is configured. Nested property changes inherit their root property's label. No schema impact.
 
 ---
 
