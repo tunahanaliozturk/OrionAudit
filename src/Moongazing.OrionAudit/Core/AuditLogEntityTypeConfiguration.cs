@@ -71,6 +71,8 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
             OrionAuditColumnHints.SqlServerNvarcharMax => "nvarchar(max)",
             OrionAuditColumnHints.PostgresJsonb => "jsonb",
             OrionAuditColumnHints.SqliteText => "TEXT",
+            OrionAuditColumnHints.MySqlJson => "json",
+            OrionAuditColumnHints.MySqlLongText => "longtext",
             _ => null,
         };
         if (hintedType is not null)

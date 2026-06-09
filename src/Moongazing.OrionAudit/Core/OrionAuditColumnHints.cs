@@ -22,4 +22,20 @@ public enum OrionAuditColumnHints
 
     /// <summary>Map <c>Diff</c> and <c>Snapshot</c> to <c>TEXT</c> (SQLite; this is the default for strings, kept for clarity).</summary>
     SqliteText = 3,
+
+    /// <summary>
+    /// Map <c>Diff</c> and <c>Snapshot</c> to <c>JSON</c> (MySQL 5.7+ and MariaDB 10.2+).
+    /// On MySQL the <c>JSON</c> type is validated at write time and queryable with
+    /// <c>JSON_EXTRACT</c>; on MariaDB <c>JSON</c> is an alias for <c>LONGTEXT</c> but
+    /// participates in the same SQL-level functions. Both providers also accept
+    /// <see cref="MySqlLongText"/> if the consumer prefers free-form text storage.
+    /// </summary>
+    MySqlJson = 4,
+
+    /// <summary>
+    /// Map <c>Diff</c> and <c>Snapshot</c> to <c>LONGTEXT</c> (MySQL / MariaDB). Use this
+    /// when the consumer is on a MySQL build without native JSON validation or wants to
+    /// store non-JSON content (rare for OrionAudit diffs but supported for compatibility).
+    /// </summary>
+    MySqlLongText = 5,
 }
