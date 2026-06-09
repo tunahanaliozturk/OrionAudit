@@ -7,6 +7,39 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-06-09
+
+### Added
+
+#### `Moongazing.OrionAudit.MySql` (NEW PACKAGE) - MySQL / MariaDB integration
+
+Adds MySQL / MariaDB-aware entity configuration so consumers on the Pomelo or Oracle EF Core providers can apply OrionAudit with one call instead of hand-rolling column types.
+
+- **`OrionAuditColumnHints.MySqlJson`** (= 4) maps `Diff` and `Snapshot` to native `json` columns (MySQL 5.7+, MariaDB 10.2+). The native `json` type validates payload shape at write time and is queryable with `JSON_EXTRACT`. On MariaDB it is an alias for `LONGTEXT` but still participates in the JSON SQL functions.
+- **`OrionAuditColumnHints.MySqlLongText`** (= 5) maps both columns to `longtext` for legacy MySQL builds without native JSON validation. Existing Sql Server / Postgres / Sqlite hints unchanged.
+- **`OrionAuditMySqlModelBuilderExtensions.ApplyOrionAuditMySqlConfigurations(this ModelBuilder, DbContext, useLongText, ...)`** forwards through to the existing DbContext-aware `ApplyOrionAuditConfigurations` overload with the right hint pre-selected. Default `useLongText: false` uses `MySqlJson`; pass `true` for the LONGTEXT variant.
+- Existing custom column / table-name overrides flow through unchanged.
+
+### Deferred
+
+Remaining v0.7.x items keep their targets:
+
+- LDAP / IdP user resolution hooks -> v0.7.5
+
+### Migration from v0.7.3
+
+Source-compatible. Adopt the new entity hint by either:
+
+```csharp
+// One-call DbContext-aware overload (recommended):
+modelBuilder.ApplyOrionAuditMySqlConfigurations(this, useLongText: false);
+
+// OR explicit hint via the existing API (no extra package needed):
+modelBuilder.ApplyOrionAuditConfigurations(this, columnHints: OrionAuditColumnHints.MySqlJson);
+```
+
+Consumers staying on SQL Server / Postgres / Sqlite see no behaviour change.
+
 ## [0.7.3] - 2026-06-09
 
 ### Added
