@@ -104,17 +104,39 @@ public sealed class AuditTypeBuilder<T> where T : class
         return this;
     }
 
+    /// <summary>
+    /// Returns the property name from a top-level selector (<c>x =&gt; x.Foo</c>). Throws on
+    /// nested selectors (<c>x =&gt; x.Foo.Bar</c>) because the renderer resolves labels by
+    /// root property path; a nested selector would silently never match. Nested label
+    /// support is on the roadmap.
+    /// </summary>
     private static string PropertyName<TProp>(Expression<Func<T, TProp>> selector)
     {
         if (selector.Body is MemberExpression member && member.Member is PropertyInfo prop)
         {
+            EnsureTopLevel(member, selector);
             return prop.Name;
         }
         if (selector.Body is UnaryExpression { Operand: MemberExpression inner } && inner.Member is PropertyInfo innerProp)
         {
+            EnsureTopLevel(inner, selector);
             return innerProp.Name;
         }
         throw new OrionAuditConfigurationException(
             $"Expression '{selector}' is not a simple property accessor.");
+    }
+
+    // Reject nested selectors like x => x.Foo.Bar. The renderer resolves labels by the root
+    // path segment, so a nested selector would silently never match. Surface a configuration
+    // exception at registration time so the mistake is caught immediately.
+    private static void EnsureTopLevel<TProp>(MemberExpression member, Expression<Func<T, TProp>> selector)
+    {
+        if (member.Expression is not ParameterExpression)
+        {
+            throw new OrionAuditConfigurationException(
+                $"Expression '{selector}' is a nested property selector. Audit rules and labels only " +
+                $"support top-level properties; the renderer resolves nested-property changes via the " +
+                $"root's label. Configure the root property instead.");
+        }
     }
 }
