@@ -7,6 +7,35 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-06-09
+
+### Added
+
+#### Viewer per-entity / per-field display labels
+
+Consumer-friendly labels flow through the existing `AuditViewRenderer` so the viewer can show `"Net"` for a property captured as `SubTotal`, `"Sales Order"` for the `Order` CLR type, etc. without renaming the entity or the schema.
+
+- **`AuditTypeBuilder<T>.Label<TProp>(selector, displayLabel)`** - assigns a per-property label. Example: `o.Audit<Order>(b => b.Label(o => o.SubTotal, "Net"));`
+- **`AuditTypeBuilder<T>.Label(displayLabel)`** - assigns an entity-level label. Example: `b.Label("Sales Order")`.
+- **`AuditableTypeConfig.EntityLabel`** + **`AuditableTypeConfig.FieldLabel(propertyName)`** - public read-only accessors so consumers building custom viewers can resolve labels directly.
+- **`AuditViewRenderer.Render(AuditLog, IAuditConfiguration)`** + **`Render(AuditLog, IAuditConfiguration, customColumns)`** - new overloads that decorate the view with labels. The existing parameterless `Render` overloads are unchanged; consumers who do not want labels see no behaviour change.
+- **`AuditEntryView.EntityDisplayLabel`** + **`FieldChange.DisplayLabel`** - new optional properties on the view types. Null when no label is configured; the viewer falls back to the property path / CLR type name.
+
+### Label resolution
+
+- Labels resolve through the row's `EntityType` AQN via `Type.GetType`. When the type cannot be resolved (legacy row from another assembly, AQN missing) labels fall back to null - the viewer surfaces the raw property path / type name and never throws.
+- Nested property changes (`/ShippingAddress/Street`) inherit their root property's label so a single `b.Label(o => o.ShippingAddress, "Ship-to")` covers `Street` / `City` / `PostalCode` together.
+
+### Deferred
+
+Remaining v0.7.x items keep their previously published targets:
+
+- MySQL / MariaDB provider matrix -> v0.7.4
+
+### Migration from v0.7.2
+
+Source-compatible. The new `Label(...)` builder methods and `Render(..., config)` overloads are additive; existing `Render(AuditLog)` callers see byte-for-byte identical output.
+
 ## [0.7.2] - 2026-06-09
 
 ### Added

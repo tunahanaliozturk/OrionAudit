@@ -32,6 +32,14 @@ public sealed class FieldChange
     /// <summary>Whether this field was added, removed, or modified. Serialized as a string for UI consumers.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter<ChangeKind>))]
     public ChangeKind ChangeKind { get; init; }
+
+    /// <summary>
+    /// Optional consumer-friendly display label for the property (v0.7.3). Populated by the
+    /// <see cref="AuditViewRenderer"/> overloads that accept an <see cref="Configuration.IAuditConfiguration"/>;
+    /// the default <c>Render</c> overload leaves it null. Falls back to <see cref="PropertyPath"/>
+    /// when no label is configured, so the viewer can always show something readable.
+    /// </summary>
+    public string? DisplayLabel { get; init; }
 }
 
 /// <summary>Human-readable view of a single <see cref="AuditLog"/> row.</summary>
@@ -63,6 +71,13 @@ public sealed class AuditEntryView
     /// </summary>
     public IReadOnlyDictionary<string, object?> CustomColumns { get; init; }
         = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Optional consumer-friendly display label for the entity type (v0.7.3). Populated when
+    /// the renderer receives an <see cref="Configuration.IAuditConfiguration"/> with a
+    /// declared label; null otherwise so the viewer falls back to the CLR type name.
+    /// </summary>
+    public string? EntityDisplayLabel { get; init; }
 }
 
 /// <summary>
@@ -110,7 +125,77 @@ public static class AuditViewRenderer
         return rows.OrderBy(r => r.OccurredOnUtc).Select(Render).ToList();
     }
 
+    /// <summary>
+    /// Renders one audit row and decorates the view with consumer-friendly labels read from
+    /// the supplied <paramref name="configuration"/> (v0.7.3). Per-property labels surface as
+    /// <see cref="FieldChange.DisplayLabel"/>; the entity-level label surfaces as
+    /// <see cref="AuditEntryView.EntityDisplayLabel"/>. Resolution: the renderer looks up
+    /// the configured <see cref="System.Type"/> by <see cref="AuditLog.EntityType"/>'s assembly-qualified
+    /// name, then asks the <see cref="Configuration.AuditableTypeConfig"/> for labels. When the
+    /// type cannot be resolved (legacy row from another assembly, AQN missing) labels fall
+    /// back to null and the viewer surfaces the raw property path / type name.
+    /// </summary>
+    public static AuditEntryView Render(AuditLog row, Configuration.IAuditConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var typeConfig = TryGetTypeConfig(row, configuration);
+        return new AuditEntryView
+        {
+            Id = row.Id,
+            Action = row.Action,
+            OccurredOnUtc = row.OccurredOnUtc,
+            UserDisplay = row.UserDisplay,
+            CorrelationId = row.CorrelationId,
+            EntityDisplayLabel = typeConfig?.EntityLabel,
+            Changes = ParseChanges(row.Diff, typeConfig),
+        };
+    }
+
+    /// <summary>
+    /// Renders one audit row with consumer-friendly labels (see the
+    /// <see cref="Render(AuditLog, Configuration.IAuditConfiguration)"/> overload) AND attached
+    /// custom-column values.
+    /// </summary>
+    public static AuditEntryView Render(
+        AuditLog row,
+        Configuration.IAuditConfiguration configuration,
+        IReadOnlyDictionary<string, object?> customColumns)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(customColumns);
+
+        var typeConfig = TryGetTypeConfig(row, configuration);
+        return new AuditEntryView
+        {
+            Id = row.Id,
+            Action = row.Action,
+            OccurredOnUtc = row.OccurredOnUtc,
+            UserDisplay = row.UserDisplay,
+            CorrelationId = row.CorrelationId,
+            EntityDisplayLabel = typeConfig?.EntityLabel,
+            Changes = ParseChanges(row.Diff, typeConfig),
+            CustomColumns = customColumns,
+        };
+    }
+
+    private static Configuration.AuditableTypeConfig? TryGetTypeConfig(
+        AuditLog row, Configuration.IAuditConfiguration configuration)
+    {
+        if (string.IsNullOrEmpty(row.EntityType))
+        {
+            return null;
+        }
+        var type = Type.GetType(row.EntityType, throwOnError: false);
+        return type is null ? null : configuration.GetConfig(type);
+    }
+
     private static IReadOnlyList<FieldChange> ParseChanges(string diff)
+        => ParseChanges(diff, typeConfig: null);
+
+    private static IReadOnlyList<FieldChange> ParseChanges(string diff, Configuration.AuditableTypeConfig? typeConfig)
     {
         if (string.IsNullOrEmpty(diff) || diff == "[]")
         {
@@ -150,12 +235,22 @@ public static class AuditViewRenderer
             var value = valueNode is JsonValue jv && jv.TryGetValue<string>(out var s)
                 ? s
                 : valueNode?.ToJsonString();
+            // v0.7.3 label lookup: derive the top-level property name from the JSON Pointer
+            // (skip the leading '/', take everything up to the next '/'). Nested properties
+            // inherit their root's label so a change to /Address/Street labels as 'Address'.
+            string? displayLabel = null;
+            if (typeConfig is not null && path.Length > 1 && path[0] == '/')
+            {
+                var slash = path.IndexOf('/', 1);
+                var propName = slash < 0 ? path[1..] : path[1..slash];
+                displayLabel = typeConfig.FieldLabel(propName);
+            }
             changes.Add(opName switch
             {
-                "add" => new FieldChange { PropertyPath = path, NewValue = value, ChangeKind = ChangeKind.Added },
-                "remove" => new FieldChange { PropertyPath = path, OldValue = null, ChangeKind = ChangeKind.Removed },
-                "replace" => new FieldChange { PropertyPath = path, NewValue = value, ChangeKind = ChangeKind.Modified },
-                _ => new FieldChange { PropertyPath = path, NewValue = value, ChangeKind = ChangeKind.Modified },
+                "add" => new FieldChange { PropertyPath = path, NewValue = value, ChangeKind = ChangeKind.Added, DisplayLabel = displayLabel },
+                "remove" => new FieldChange { PropertyPath = path, OldValue = null, ChangeKind = ChangeKind.Removed, DisplayLabel = displayLabel },
+                "replace" => new FieldChange { PropertyPath = path, NewValue = value, ChangeKind = ChangeKind.Modified, DisplayLabel = displayLabel },
+                _ => new FieldChange { PropertyPath = path, NewValue = value, ChangeKind = ChangeKind.Modified, DisplayLabel = displayLabel },
             });
         }
         return changes;

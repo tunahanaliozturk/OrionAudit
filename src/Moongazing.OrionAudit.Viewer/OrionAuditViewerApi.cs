@@ -30,7 +30,7 @@ internal static class OrionAuditViewerApi
                 .Skip(skip)
                 .Take(take)
                 .ToListAsync();
-            var views = rows.Select(r => AuditViewRenderer.Render(r, ProjectCustoms(db, r, config))).ToList();
+            var views = rows.Select(r => AuditViewRenderer.Render(r, config, ProjectCustoms(db, r, config))).ToList();
             return Results.Ok(new { entries = views });
         });
 
@@ -44,7 +44,7 @@ internal static class OrionAuditViewerApi
                 .Where(a => a.EntityType == entityType && a.EntityId == key)
                 .OrderBy(a => a.OccurredOnUtc)
                 .ToListAsync();
-            var views = rows.Select(r => AuditViewRenderer.Render(r, ProjectCustoms(db, r, config))).ToList();
+            var views = rows.Select(r => AuditViewRenderer.Render(r, config, ProjectCustoms(db, r, config))).ToList();
             return Results.Ok(new { entries = views });
         });
 

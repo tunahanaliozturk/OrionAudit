@@ -13,6 +13,8 @@ public sealed class AuditConfigurationBuilder
     private readonly Dictionary<Type, Dictionary<string, AuditFieldRule>> rulesByType = new();
     private readonly Dictionary<Type, string?> softDeleteByType = new();
     private readonly Dictionary<Type, Type> baseTypeByType = new();
+    private readonly Dictionary<Type, Dictionary<string, string>> fieldLabelsByType = new();
+    private readonly Dictionary<Type, string> entityLabelsByType = new();
     private IReadOnlyList<CustomColumn> customColumns = Array.Empty<CustomColumn>();
 
     /// <summary>Set by <c>AddOrionAudit</c> from <c>OrionAuditOptions.CustomColumns</c>.</summary>
@@ -43,6 +45,22 @@ public sealed class AuditConfigurationBuilder
             if (typeBuilder.BaseType is not null)
             {
                 baseTypeByType[entityType] = typeBuilder.BaseType;
+            }
+            if (typeBuilder.FieldLabels.Count > 0)
+            {
+                if (!fieldLabelsByType.TryGetValue(entityType, out var existing))
+                {
+                    existing = new Dictionary<string, string>(StringComparer.Ordinal);
+                    fieldLabelsByType[entityType] = existing;
+                }
+                foreach (var (prop, label) in typeBuilder.FieldLabels)
+                {
+                    existing[prop] = label;
+                }
+            }
+            if (typeBuilder.EntityLabel is not null)
+            {
+                entityLabelsByType[entityType] = typeBuilder.EntityLabel;
             }
         }
 
@@ -81,7 +99,9 @@ public sealed class AuditConfigurationBuilder
                 kvp.Key,
                 kvp.Value,
                 softDeleteByType.TryGetValue(kvp.Key, out var sd) ? sd : null,
-                baseTypeByType.TryGetValue(kvp.Key, out var bt) ? bt : null));
+                baseTypeByType.TryGetValue(kvp.Key, out var bt) ? bt : null,
+                fieldLabelsByType.TryGetValue(kvp.Key, out var fl) ? fl : null,
+                entityLabelsByType.TryGetValue(kvp.Key, out var el) ? el : null));
         return new AuditConfiguration(configsByType, customColumns);
     }
 

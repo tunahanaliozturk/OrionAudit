@@ -11,6 +11,15 @@ public sealed class AuditTypeBuilder<T> where T : class
 {
     internal Dictionary<string, AuditFieldRule> Rules { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Per-property display labels surfaced by the viewer (v0.7.3). Keyed by property name
+    /// (the same key the rules dictionary uses), value is the human-readable label.
+    /// </summary>
+    internal Dictionary<string, string> FieldLabels { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Optional human-readable label for the entity type itself (e.g. "Sales Order").</summary>
+    internal string? EntityLabel { get; private set; }
+
     /// <summary>Name of a boolean property whose flip captures <see cref="AuditAction.SoftDeleted"/>.</summary>
     internal string? SoftDeleteProperty { get; private set; }
 
@@ -66,17 +75,68 @@ public sealed class AuditTypeBuilder<T> where T : class
         return this;
     }
 
+    /// <summary>
+    /// Assigns a human-readable display label to a property. The label flows through the
+    /// viewer's <c>FieldChange.DisplayLabel</c> so a column captured as <c>SubTotal</c> can
+    /// surface as <c>"Net"</c> in the UI without renaming the entity. Has no effect on
+    /// capture or snapshot behaviour.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// o.Audit&lt;Order&gt;(b => b.Label(o =&gt; o.SubTotal, "Net"));
+    /// </code>
+    /// </example>
+    public AuditTypeBuilder<T> Label<TProp>(Expression<Func<T, TProp>> selector, string displayLabel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayLabel);
+        FieldLabels[PropertyName(selector)] = displayLabel;
+        return this;
+    }
+
+    /// <summary>
+    /// Assigns a human-readable display label to the entity type itself (e.g. <c>"Sales Order"</c>
+    /// for an <c>Order</c> CLR type). Surfaces as <c>AuditEntryView.EntityDisplayLabel</c>.
+    /// </summary>
+    public AuditTypeBuilder<T> Label(string displayLabel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayLabel);
+        EntityLabel = displayLabel;
+        return this;
+    }
+
+    /// <summary>
+    /// Returns the property name from a top-level selector (<c>x =&gt; x.Foo</c>). Throws on
+    /// nested selectors (<c>x =&gt; x.Foo.Bar</c>) because the renderer resolves labels by
+    /// root property path; a nested selector would silently never match. Nested label
+    /// support is on the roadmap.
+    /// </summary>
     private static string PropertyName<TProp>(Expression<Func<T, TProp>> selector)
     {
         if (selector.Body is MemberExpression member && member.Member is PropertyInfo prop)
         {
+            EnsureTopLevel(member, selector);
             return prop.Name;
         }
         if (selector.Body is UnaryExpression { Operand: MemberExpression inner } && inner.Member is PropertyInfo innerProp)
         {
+            EnsureTopLevel(inner, selector);
             return innerProp.Name;
         }
         throw new OrionAuditConfigurationException(
             $"Expression '{selector}' is not a simple property accessor.");
+    }
+
+    // Reject nested selectors like x => x.Foo.Bar. The renderer resolves labels by the root
+    // path segment, so a nested selector would silently never match. Surface a configuration
+    // exception at registration time so the mistake is caught immediately.
+    private static void EnsureTopLevel<TProp>(MemberExpression member, Expression<Func<T, TProp>> selector)
+    {
+        if (member.Expression is not ParameterExpression)
+        {
+            throw new OrionAuditConfigurationException(
+                $"Expression '{selector}' is a nested property selector. Audit rules and labels only " +
+                $"support top-level properties; the renderer resolves nested-property changes via the " +
+                $"root's label. Configure the root property instead.");
+        }
     }
 }
