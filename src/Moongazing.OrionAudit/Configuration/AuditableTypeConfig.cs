@@ -20,20 +20,42 @@ public sealed class AuditableTypeConfig
 {
     private readonly FrozenDictionary<string, AuditFieldRule> rules;
 
+    private readonly FrozenDictionary<string, string> fieldLabels;
+
     /// <summary>Initializes a new configuration with the supplied field rules.</summary>
     public AuditableTypeConfig(
         Type entityType,
         IDictionary<string, AuditFieldRule> rules,
         string? softDeleteProperty = null,
-        Type? baseType = null)
+        Type? baseType = null,
+        IDictionary<string, string>? fieldLabels = null,
+        string? entityLabel = null)
     {
         ArgumentNullException.ThrowIfNull(entityType);
         ArgumentNullException.ThrowIfNull(rules);
         EntityType = entityType;
         this.rules = rules.ToFrozenDictionary(StringComparer.Ordinal);
+        this.fieldLabels = fieldLabels is null
+            ? FrozenDictionary<string, string>.Empty
+            : fieldLabels.ToFrozenDictionary(StringComparer.Ordinal);
         SoftDeleteProperty = softDeleteProperty;
         BaseType = baseType;
+        EntityLabel = entityLabel;
     }
+
+    /// <summary>
+    /// Human-readable label for the entity type itself (v0.7.3). Null when no label is
+    /// configured; the viewer falls back to the CLR type name.
+    /// </summary>
+    public string? EntityLabel { get; }
+
+    /// <summary>
+    /// Returns the configured display label for <paramref name="propertyName"/>, or
+    /// <see langword="null"/> when no label is configured. Property name matches the
+    /// snapshot key (PascalCase CLR property name).
+    /// </summary>
+    public string? FieldLabel(string propertyName)
+        => fieldLabels.TryGetValue(propertyName, out var label) ? label : null;
 
     /// <summary>The audited entity CLR type.</summary>
     public Type EntityType { get; }

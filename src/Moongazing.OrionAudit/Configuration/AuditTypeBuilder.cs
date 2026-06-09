@@ -11,6 +11,15 @@ public sealed class AuditTypeBuilder<T> where T : class
 {
     internal Dictionary<string, AuditFieldRule> Rules { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Per-property display labels surfaced by the viewer (v0.7.3). Keyed by property name
+    /// (the same key the rules dictionary uses), value is the human-readable label.
+    /// </summary>
+    internal Dictionary<string, string> FieldLabels { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Optional human-readable label for the entity type itself (e.g. "Sales Order").</summary>
+    internal string? EntityLabel { get; private set; }
+
     /// <summary>Name of a boolean property whose flip captures <see cref="AuditAction.SoftDeleted"/>.</summary>
     internal string? SoftDeleteProperty { get; private set; }
 
@@ -63,6 +72,35 @@ public sealed class AuditTypeBuilder<T> where T : class
     public AuditTypeBuilder<T> Redact<TProp>(Expression<Func<T, TProp>> selector)
     {
         Rules[PropertyName(selector)] = AuditFieldRule.Redact;
+        return this;
+    }
+
+    /// <summary>
+    /// Assigns a human-readable display label to a property. The label flows through the
+    /// viewer's <c>FieldChange.DisplayLabel</c> so a column captured as <c>SubTotal</c> can
+    /// surface as <c>"Net"</c> in the UI without renaming the entity. Has no effect on
+    /// capture or snapshot behaviour.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// o.Audit&lt;Order&gt;(b => b.Label(o =&gt; o.SubTotal, "Net"));
+    /// </code>
+    /// </example>
+    public AuditTypeBuilder<T> Label<TProp>(Expression<Func<T, TProp>> selector, string displayLabel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayLabel);
+        FieldLabels[PropertyName(selector)] = displayLabel;
+        return this;
+    }
+
+    /// <summary>
+    /// Assigns a human-readable display label to the entity type itself (e.g. <c>"Sales Order"</c>
+    /// for an <c>Order</c> CLR type). Surfaces as <c>AuditEntryView.EntityDisplayLabel</c>.
+    /// </summary>
+    public AuditTypeBuilder<T> Label(string displayLabel)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayLabel);
+        EntityLabel = displayLabel;
         return this;
     }
 
