@@ -52,6 +52,11 @@ public static class AuditServiceCollectionExtensions
 
         if (options.RetentionPolicy is not RetentionPolicy.NonePolicy)
         {
+            // v0.7.8: register the default archiver so consumers that DO NOT supply a
+            // custom IAuditArchiver get the v0.7.7 straight-delete behaviour. TryAdd
+            // means a consumer that already registered (e.g. CopyToTableAuditArchiver)
+            // wins without explicit removal.
+            services.TryAddSingleton<IAuditArchiver, DeleteAuditArchiver>();
             services.AddHostedService<AuditRetentionHostedService<TDbContext>>();
         }
 
