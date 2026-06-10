@@ -119,8 +119,145 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
             RetentionPolicy.RetainForPolicy r => await SweepAgeAsync(ctx, r.Age, ct).ConfigureAwait(false),
             RetentionPolicy.RetainCountPolicy r => await SweepCountAsync(ctx, r.Rows, ct).ConfigureAwait(false),
             RetentionPolicy.PerTenantPolicy pt => await SweepPerTenantAsync(ctx, pt, ct).ConfigureAwait(false),
+            RetentionPolicy.PerEntityTypePolicy pe => await SweepPerEntityTypeAsync(ctx, tenantId: null, pe, options.MaxRowsPerSweep, ct).ConfigureAwait(false),
             _ => 0,
         };
+    }
+
+    private async Task<int> SweepPerEntityTypeAsync(
+        TDbContext ctx,
+        string? tenantId,
+        RetentionPolicy.PerEntityTypePolicy pe,
+        int remainingBudget,
+        CancellationToken ct)
+    {
+        // Discover the entity types (optionally scoped to a tenant). Cap the cycle's
+        // total deletions at remainingBudget across entity types so the per-cycle budget
+        // applies to PerEntityType nested under PerTenant just as it does to top-level
+        // PerEntityType.
+        var entityTypes = await (tenantId is null
+                ? ctx.Set<AuditLog>().AsNoTracking().Select(a => a.EntityType).Distinct()
+                : ctx.Set<AuditLog>().AsNoTracking().Where(a => a.TenantId == tenantId).Select(a => a.EntityType).Distinct())
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var total = 0;
+        foreach (var entityType in entityTypes)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (total >= remainingBudget)
+            {
+                break;
+            }
+            var policy = pe.ByEntityType.TryGetValue(entityType, out var p) ? p : pe.Fallback;
+            switch (policy)
+            {
+                case RetentionPolicy.NonePolicy:
+                    continue;
+                case RetentionPolicy.RetainForPolicy r:
+                    total += await SweepAgeScopedAsync(ctx, tenantId, entityType, r.Age, remainingBudget - total, ct).ConfigureAwait(false);
+                    break;
+                case RetentionPolicy.RetainCountPolicy r:
+                    total += await SweepCountScopedAsync(ctx, tenantId, entityType, r.Rows, remainingBudget - total, ct).ConfigureAwait(false);
+                    break;
+            }
+        }
+        return total;
+    }
+
+    private async Task<int> SweepAgeScopedAsync(
+        TDbContext ctx, string? tenantId, string entityType, TimeSpan age, int remainingBudget, CancellationToken ct)
+    {
+        if (remainingBudget < 1)
+        {
+            return 0;
+        }
+        var cutoff = clock.GetUtcNow().UtcDateTime - age;
+        var batch = Math.Min(options.MaxRowsPerSweep, remainingBudget);
+        IQueryable<AuditLog> query = ctx.Set<AuditLog>()
+            .Where(a => a.EntityType == entityType && a.OccurredOnUtc < cutoff);
+        if (tenantId is not null)
+        {
+            query = query.Where(a => a.TenantId == tenantId);
+        }
+        if (archiver is DeleteAuditArchiver)
+        {
+            return await query.OrderBy(a => a.OccurredOnUtc).Take(batch).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        }
+        var rows = await query.AsNoTracking().OrderBy(a => a.OccurredOnUtc).Take(batch).ToListAsync(ct).ConfigureAwait(false);
+        return await archiver.ArchiveAsync(ctx, rows, policy, ct).ConfigureAwait(false);
+    }
+
+    private async Task<int> SweepCountScopedAsync(
+        TDbContext ctx, string? tenantId, string entityType, int keep, int remainingBudget, CancellationToken ct)
+    {
+        if (remainingBudget < 1)
+        {
+            return 0;
+        }
+        // Top-level PerEntityType calls this with tenantId=null. The previous version
+        // treated null as "unscoped" - grouping only by EntityId - which meant rows for
+        // (Order, id=42) belonging to different tenants merged into one group and
+        // tenant A's RetainCount could trim tenant B's rows. We group by
+        // (TenantId, EntityId) so per-(tenant, entity) windows compose correctly even
+        // when the top-level policy is PerEntityType.
+        var groups = await ctx.Set<AuditLog>()
+            .Where(a => a.EntityType == entityType && (tenantId == null || a.TenantId == tenantId))
+            .GroupBy(a => new { a.TenantId, a.EntityId })
+            .Where(g => g.Count() > keep)
+            .Select(g => new { g.Key.TenantId, g.Key.EntityId, Total = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var totalDeleted = 0;
+        var useArchiver = archiver is not DeleteAuditArchiver;
+        foreach (var group in groups)
+        {
+            if (totalDeleted >= remainingBudget)
+            {
+                break;
+            }
+            var trim = ctx.Set<AuditLog>()
+                .Where(a => a.EntityType == entityType
+                            && a.TenantId == group.TenantId
+                            && a.EntityId == group.EntityId);
+            if (useArchiver)
+            {
+                // Route through the archiver: select the rows-to-archive (the OLDEST
+                // ones past `keep`) and hand them off so a CopyToTable consumer can
+                // ship them to the archive store before they leave the live table.
+                var archivableRows = await trim
+                    .AsNoTracking()
+                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .Skip(keep)
+                    .Take(remainingBudget - totalDeleted)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                if (archivableRows.Count == 0)
+                {
+                    continue;
+                }
+                totalDeleted += await archiver.ArchiveAsync(ctx, archivableRows, policy, ct).ConfigureAwait(false);
+                continue;
+            }
+            var idsToDelete = await trim
+                .OrderByDescending(a => a.OccurredOnUtc)
+                .Skip(keep)
+                .Take(remainingBudget - totalDeleted)
+                .Select(a => a.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            if (idsToDelete.Count == 0)
+            {
+                continue;
+            }
+            var deleted = await ctx.Set<AuditLog>()
+                .Where(a => idsToDelete.Contains(a.Id))
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+            totalDeleted += deleted;
+        }
+        return totalDeleted;
     }
 
     private async Task<int> SweepPerTenantAsync(TDbContext ctx, RetentionPolicy.PerTenantPolicy pt, CancellationToken ct)
@@ -157,9 +294,13 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                     total += await SweepAgeForTenantAsync(ctx, tenantId, r.Age, remaining, ct).ConfigureAwait(false);
                     break;
                 case RetentionPolicy.RetainCountPolicy r:
-                    // Tenant-scoped count sweep: trims only this tenant's groups so
-                    // tenant A's RetainCount cannot delete tenant B's rows.
                     total += await SweepCountForTenantAsync(ctx, tenantId, r.Rows, remaining, ct).ConfigureAwait(false);
+                    break;
+                case RetentionPolicy.PerEntityTypePolicy pe:
+                    // v0.7.10 nested PerEntityType under PerTenant: scoped to this
+                    // tenant's rows so per-(tenant, entity-type) windows compose
+                    // without cross-tenant leakage.
+                    total += await SweepPerEntityTypeAsync(ctx, tenantId, pe, remaining, ct).ConfigureAwait(false);
                     break;
             }
         }
