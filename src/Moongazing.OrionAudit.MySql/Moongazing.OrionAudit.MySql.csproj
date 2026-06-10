@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>OrionAudit.MySql</PackageId>
+    <Description>MySQL / MariaDB provider integration for OrionAudit. Adds a ModelBuilder extension that applies the OrionAudit entity configurations with MySQL-aware column types (JSON or LONGTEXT for the diff/snapshot payloads).</Description>
+    <PackageTags>audit;audit-trail;efcore;mysql;mariadb;json;pomelo</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
+  </ItemGroup>
+</Project>
