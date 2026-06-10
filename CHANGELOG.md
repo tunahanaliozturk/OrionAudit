@@ -7,6 +7,43 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-06-10
+
+### Added
+
+#### `AuditLogQueryExtensions` - composable filter / projection helpers
+
+`AuditQueryExtensions.AuditFor<T>()` / `AuditLog()` already auto-resolved the audit table and tenant. v0.7.6 ships a composable set of extensions on `IQueryable<AuditLog>` so consumers can stack filters AFTER the entry point AND share the same DSL when the audit query comes from a different `DbContext` (the cross-context scenario where audit storage lives on a dedicated DB but operator projections combine it with primary-DB data).
+
+- **`BetweenDates(fromUtc, toUtc)`** / **`WithinLast(window)`** - time-window helpers; reject inverted ranges and non-positive windows so misconfigured callers fail fast.
+- **`ByUser(id)`** / **`ByUsers(ids)`** / **`ByUserType(type)`** / **`ByTenant(id)`** / **`ByAction(AuditAction)`** / **`ByCorrelation(id)`** - the common operator-dashboard filters expressed as a fluent chain. `ByUsers` materialises the id sequence to a `List<string>` so the EF Core LINQ translator picks the SQL `IN` overload instead of the `ReadOnlySpan`-based array extension on .NET 9+.
+- **`Newest()`** / **`Oldest()`** - explicit ordering for paging.
+- **`DistinctUserIds()`** - projection of distinct non-null user ids; the canonical building block for cross-context joins. Take the result in-process, then issue a single `WHERE Id IN (...)` against the user-store context to materialise display names without paying for a SQL-side JOIN.
+- **`TopActorsByCount(top)`** - returns `UserActivitySummary(UserId, ActivityCount)` ordered by descending activity. Two-stage projection (GroupBy -> anonymous shape -> record) so SQLite / SQL Server / Postgres translators all accept it.
+- **`Matching(Expression<Func<AuditLog, bool>>)`** - free-form predicate continuation that reads as part of the DSL.
+
+### Tests
+
+15 new facts (`AuditLogQueryExtensionsTests`). The test suite uses SQLite in-memory rather than EF Core InMemory so `Contains`, `GroupBy`, and `OrderBy` exercise a relational translator equivalent to what production providers ship. 197 facts total (+15 new + 1 pre-existing skip).
+
+### Migration from v0.7.5
+
+Source-compatible. Existing `AuditFor<T>()` / `AuditLog()` calls keep working; the new helpers chain on top.
+
+```csharp
+var last30Days = await dbContext.AuditFor<Order>()
+    .WithinLast(TimeSpan.FromDays(30))
+    .ByUserType("user")
+    .Newest()
+    .Take(50)
+    .ToListAsync();
+
+var topActors = await dbContext.AuditLog()
+    .WithinLast(TimeSpan.FromDays(7))
+    .TopActorsByCount(10)
+    .ToListAsync();
+```
+
 ## [0.7.5] - 2026-06-10
 
 ### Added
