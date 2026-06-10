@@ -33,9 +33,44 @@ public abstract record RetentionPolicy
         return new RetainCountPolicy(rows);
     }
 
+    /// <summary>
+    /// Per-tenant retention policies. The sweep evaluates each tenant's policy
+    /// independently. Rows whose <see cref="AuditLog.TenantId"/> is not present in the
+    /// dictionary fall back to <paramref name="fallback"/>.
+    /// </summary>
+    /// <param name="byTenantId">Map from tenant id to retention policy.</param>
+    /// <param name="fallback">Policy used for tenants not present in <paramref name="byTenantId"/>. Must NOT be another <c>PerTenant</c> policy.</param>
+    public static RetentionPolicy PerTenant(
+        IReadOnlyDictionary<string, RetentionPolicy> byTenantId,
+        RetentionPolicy fallback)
+    {
+        ArgumentNullException.ThrowIfNull(byTenantId);
+        ArgumentNullException.ThrowIfNull(fallback);
+        if (byTenantId.Count == 0)
+        {
+            throw new ArgumentException(
+                "RetentionPolicy.PerTenant requires at least one tenant mapping.",
+                nameof(byTenantId));
+        }
+        if (byTenantId.Values.Any(p => p is PerTenantPolicy)
+            || fallback is PerTenantPolicy)
+        {
+            throw new ArgumentException(
+                "RetentionPolicy.PerTenant cannot nest another PerTenant policy.",
+                nameof(byTenantId));
+        }
+        // Snapshot to a copy under Ordinal so subsequent mutations on the caller's dict
+        // cannot invalidate the registry. Keeps lookup behaviour deterministic.
+        var snapshot = byTenantId.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        return new PerTenantPolicy(snapshot, fallback);
+    }
+
     internal sealed record NonePolicy : RetentionPolicy;
     internal sealed record RetainForPolicy(TimeSpan Age) : RetentionPolicy;
     internal sealed record RetainCountPolicy(int Rows) : RetentionPolicy;
+    internal sealed record PerTenantPolicy(
+        IReadOnlyDictionary<string, RetentionPolicy> ByTenantId,
+        RetentionPolicy Fallback) : RetentionPolicy;
 }
 
 /// <summary>
