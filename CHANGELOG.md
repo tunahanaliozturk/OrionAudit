@@ -7,6 +7,38 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-06-10
+
+### Added
+
+#### `AuditRollupExtensions` - time-series rollups
+
+Pairs with the v0.7.6 composable filters: chain rollup helpers AFTER `AuditFor<T>()` / `AuditLog()` + filters to scope the aggregate. Operator dashboards rendering activity histograms or per-day leaderboards previously had to materialise rows in memory and group on the client; v0.7.7 emits SQL `GROUP BY` so the aggregate fits in a single round-trip.
+
+- **`RollupByDay()`** -> `IQueryable<AuditDailyBucket>` ordered ascending. `AuditDailyBucket(DateOnly Day, int Count)`. Empty days are NOT materialised; fill gaps in memory if you need a dense series.
+- **`RollupByMonth()`** -> `IQueryable<AuditMonthlyBucket(int Year, int Month, int Count)>` ordered ascending.
+- **`RollupByDayAndAction()`** -> `IQueryable<AuditDailyActionBucket(DateOnly Day, AuditAction Action, int Count)>`. One row per (day, action) pair. Useful for stacked charts that distinguish create / update / delete / soft-delete.
+- **`RollupByDayAndUser(IEnumerable<AuditLog>, topUsersPerDay)`** -> `IEnumerable<AuditDailyUserBucket(DateOnly Day, string UserId, int ActivityCount)>`. Materialises in-memory rather than translating to SQL because the per-day Top-N sub-grouping is awkward across providers; consumers call `ToListAsync()` first and then pipe through the rollup.
+
+### Tests
+
+8 new facts cover: `RollupByDay` count + ascending order, `RollupByMonth` distinct buckets, `RollupByDayAndAction` independent (day, action) keys, `RollupByDayAndUser` Top-N per day, non-positive Top-N rejected, null-query rejection on all four helpers, composition with `ByAction` filter. SQLite in-memory fixture so `GROUP BY` exercises a relational translator. 205 facts total.
+
+### Migration from v0.7.6
+
+Source-compatible.
+
+```csharp
+var last30Days = await dbContext.AuditLog()
+    .WithinLast(TimeSpan.FromDays(30))
+    .RollupByDay()
+    .ToListAsync();
+
+var monthlyBreakdownByAction = await dbContext.AuditFor<Order>()
+    .RollupByDayAndAction()
+    .ToListAsync();
+```
+
 ## [0.7.6] - 2026-06-10
 
 ### Added
