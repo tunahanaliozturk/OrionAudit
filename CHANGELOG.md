@@ -7,6 +7,27 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9] - 2026-06-10
+
+### Added
+
+#### `RetentionPolicy.PerTenant` - per-tenant retention policies
+
+Different tenants frequently have distinct compliance windows (90 days for one customer, 7 years for another). v0.7.6-v0.7.8 forced one policy across the whole audit table; v0.7.9 lets the sweep evaluate each tenant policy independently.
+
+- `RetentionPolicy.PerTenant(IReadOnlyDictionary<string, RetentionPolicy> byTenantId, RetentionPolicy fallback)`.
+- Snapshot at construction. Rejects empty mapping, nested `PerTenant`, null arguments.
+- `AuditRetentionHostedService.SweepPerTenantAsync` discovers tenants and dispatches per tenant.
+- Age-based path respects the v0.7.8 `IAuditArchiver` strategy hook.
+
+### Tests
+
+7 new facts; 219 total.
+
+### Migration from v0.7.8
+
+Source-compatible.
+
 ## [0.7.8] - 2026-06-10
 
 ### Added

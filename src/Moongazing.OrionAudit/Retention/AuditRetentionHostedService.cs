@@ -103,18 +103,138 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         var sw = Stopwatch.StartNew();
         await using var scope = scopeFactory.CreateAsyncScope();
         var ctx = scope.ServiceProvider.GetRequiredService<TDbContext>();
-        var deleted = policy switch
-        {
-            RetentionPolicy.RetainForPolicy r => await SweepAgeAsync(ctx, r.Age, cancellationToken).ConfigureAwait(false),
-            RetentionPolicy.RetainCountPolicy r => await SweepCountAsync(ctx, r.Rows, cancellationToken).ConfigureAwait(false),
-            _ => 0,
-        };
+        var deleted = await DispatchPolicyAsync(ctx, policy, cancellationToken).ConfigureAwait(false);
 
         activity?.SetTag("orionaudit.retention.rows_deleted", deleted);
         OrionAuditTelemetry.RetentionRowsDeleted.Add(deleted);
         OrionAuditTelemetry.RetentionSweepDuration.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetStatus(ActivityStatusCode.Ok);
         return deleted;
+    }
+
+    private async Task<int> DispatchPolicyAsync(TDbContext ctx, RetentionPolicy effective, CancellationToken ct)
+    {
+        return effective switch
+        {
+            RetentionPolicy.RetainForPolicy r => await SweepAgeAsync(ctx, r.Age, ct).ConfigureAwait(false),
+            RetentionPolicy.RetainCountPolicy r => await SweepCountAsync(ctx, r.Rows, ct).ConfigureAwait(false),
+            RetentionPolicy.PerTenantPolicy pt => await SweepPerTenantAsync(ctx, pt, ct).ConfigureAwait(false),
+            _ => 0,
+        };
+    }
+
+    private async Task<int> SweepPerTenantAsync(TDbContext ctx, RetentionPolicy.PerTenantPolicy pt, CancellationToken ct)
+    {
+        // Discover the tenants the sweep has rows for. For each tenant pick the matching
+        // policy (or the fallback) and dispatch to a tenant-scoped sweep. Per-cycle
+        // budget (MaxRowsPerSweep) is enforced ACROSS all tenants, not per tenant - the
+        // overall cap on a single sweep cycle is the documented cross-table contract.
+        var tenants = await ctx.Set<AuditLog>()
+            .AsNoTracking()
+            .Select(a => a.TenantId)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var total = 0;
+        var budget = options.MaxRowsPerSweep;
+        foreach (var tenantId in tenants)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (total >= budget)
+            {
+                break;
+            }
+            var perTenantPolicy = tenantId is not null && pt.ByTenantId.TryGetValue(tenantId, out var p)
+                ? p
+                : pt.Fallback;
+            var remaining = budget - total;
+            switch (perTenantPolicy)
+            {
+                case RetentionPolicy.NonePolicy:
+                    continue;
+                case RetentionPolicy.RetainForPolicy r:
+                    total += await SweepAgeForTenantAsync(ctx, tenantId, r.Age, remaining, ct).ConfigureAwait(false);
+                    break;
+                case RetentionPolicy.RetainCountPolicy r:
+                    // Tenant-scoped count sweep: trims only this tenant's groups so
+                    // tenant A's RetainCount cannot delete tenant B's rows.
+                    total += await SweepCountForTenantAsync(ctx, tenantId, r.Rows, remaining, ct).ConfigureAwait(false);
+                    break;
+            }
+        }
+        return total;
+    }
+
+    private static async Task<int> SweepCountForTenantAsync(TDbContext ctx, string? tenantId, int keep, int remainingBudget, CancellationToken ct)
+    {
+        if (remainingBudget < 1)
+        {
+            return 0;
+        }
+        var groups = await ctx.Set<AuditLog>()
+            .Where(a => a.TenantId == tenantId)
+            .GroupBy(a => new { a.EntityType, a.EntityId })
+            .Where(g => g.Count() > keep)
+            .Select(g => new { g.Key.EntityType, g.Key.EntityId, Total = g.Count() })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var totalDeleted = 0;
+        foreach (var group in groups)
+        {
+            if (totalDeleted >= remainingBudget)
+            {
+                break;
+            }
+            var idsToDelete = await ctx.Set<AuditLog>()
+                .Where(a => a.TenantId == tenantId
+                            && a.EntityType == group.EntityType
+                            && a.EntityId == group.EntityId)
+                .OrderByDescending(a => a.OccurredOnUtc)
+                .Skip(keep)
+                .Take(remainingBudget - totalDeleted)
+                .Select(a => a.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            if (idsToDelete.Count == 0)
+            {
+                continue;
+            }
+            var deleted = await ctx.Set<AuditLog>()
+                .Where(a => idsToDelete.Contains(a.Id))
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+            totalDeleted += deleted;
+        }
+        return totalDeleted;
+    }
+
+    private async Task<int> SweepAgeForTenantAsync(TDbContext ctx, string? tenantId, TimeSpan age, int remainingBudget, CancellationToken ct)
+    {
+        var cutoff = clock.GetUtcNow().UtcDateTime - age;
+        var batch = Math.Min(options.MaxRowsPerSweep, remainingBudget);
+        if (batch < 1)
+        {
+            return 0;
+        }
+        if (archiver is DeleteAuditArchiver)
+        {
+            return await ctx.Set<AuditLog>()
+                .Where(a => a.TenantId == tenantId && a.OccurredOnUtc < cutoff)
+                .OrderBy(a => a.OccurredOnUtc)
+                .Take(batch)
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+        }
+        var rows = await ctx.Set<AuditLog>()
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId && a.OccurredOnUtc < cutoff)
+            .OrderBy(a => a.OccurredOnUtc)
+            .Take(batch)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        return await archiver.ArchiveAsync(ctx, rows, policy, ct).ConfigureAwait(false);
     }
 
     private async Task<int> SweepAgeAsync(TDbContext ctx, TimeSpan age, CancellationToken ct)
