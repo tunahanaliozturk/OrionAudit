@@ -158,11 +158,36 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
             .ConfigureAwait(false);
 
         var totalDeleted = 0;
+        // v0.7.8: when a custom archiver is in effect we MUST funnel the count-policy
+        // path through it too, otherwise CopyToTable consumers silently lose rows that
+        // the count policy retires. The default DeleteAuditArchiver keeps the v0.7.7
+        // fast path (id-list ExecuteDelete) so single-tenant consumers are unaffected.
+        var useArchiver = archiver is not DeleteAuditArchiver;
         foreach (var group in groups)
         {
             if (totalDeleted >= options.MaxRowsPerSweep)
             {
                 break;
+            }
+            if (useArchiver)
+            {
+                var archivableRows = await ctx.Set<AuditLog>()
+                    .AsNoTracking()
+                    .Where(a => a.EntityType == group.EntityType
+                                && a.EntityId == group.EntityId
+                                && a.TenantId == group.TenantId)
+                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .Skip(keep)
+                    .Take(options.MaxRowsPerSweep - totalDeleted)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                if (archivableRows.Count == 0)
+                {
+                    continue;
+                }
+                var archived = await archiver.ArchiveAsync(ctx, archivableRows, policy, ct).ConfigureAwait(false);
+                totalDeleted += archived;
+                continue;
             }
             var idsToDelete = await ctx.Set<AuditLog>()
                 .Where(a => a.EntityType == group.EntityType
