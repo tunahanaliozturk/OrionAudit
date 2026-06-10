@@ -24,20 +24,46 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
     private readonly RetentionSweepOptions options;
     private readonly TimeProvider clock;
     private readonly ILogger<AuditRetentionHostedService<TDbContext>> logger;
+    private readonly IAuditArchiver archiver;
 
-    /// <summary>Initializes a new retention sweep service.</summary>
+    /// <summary>
+    /// v0.7.7 source-compatible 5-arg ctor. Defaults the archiver to
+    /// <see cref="DeleteAuditArchiver"/> so existing call sites compiled against v0.7.7
+    /// keep their straight-delete behaviour. ABI break note: the v0.7.7 5-arg ctor is
+    /// retained as an explicit overload that chains to the 6-arg one with archiver =
+    /// null, so compiled v0.7.7 callers continue to resolve their original signature
+    /// without MissingMethodException.
+    /// </summary>
     public AuditRetentionHostedService(
         IServiceScopeFactory scopeFactory,
         RetentionPolicy policy,
         RetentionSweepOptions options,
         TimeProvider clock,
         ILogger<AuditRetentionHostedService<TDbContext>> logger)
+        : this(scopeFactory, policy, options, clock, logger, archiver: null)
+    {
+    }
+
+    /// <summary>
+    /// v0.7.8 ctor with optional <see cref="IAuditArchiver"/>. Consumers register a
+    /// custom archiver (e.g. <see cref="CopyToTableAuditArchiver{TArchiveRow}"/>) to ship
+    /// expiring rows to a cold store before deletion. Null defaults to
+    /// <see cref="DeleteAuditArchiver"/>.
+    /// </summary>
+    public AuditRetentionHostedService(
+        IServiceScopeFactory scopeFactory,
+        RetentionPolicy policy,
+        RetentionSweepOptions options,
+        TimeProvider clock,
+        ILogger<AuditRetentionHostedService<TDbContext>> logger,
+        IAuditArchiver? archiver)
     {
         this.scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         this.policy = policy ?? throw new ArgumentNullException(nameof(policy));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.archiver = archiver ?? new DeleteAuditArchiver();
     }
 
     /// <inheritdoc />
@@ -94,15 +120,29 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
     private async Task<int> SweepAgeAsync(TDbContext ctx, TimeSpan age, CancellationToken ct)
     {
         var cutoff = clock.GetUtcNow().UtcDateTime - age;
-        // Bounded delete: take the oldest N rows past the cutoff. ExecuteDeleteAsync on a
-        // .Take(N) query is the portable EF Core 9 idiom — translates to a TOP/LIMIT delete on
-        // every supported provider.
-        return await ctx.Set<AuditLog>()
+        // When the default DeleteAuditArchiver is in effect, run the v0.7.7 fast path
+        // (single ExecuteDelete) without materialising the rows. A custom archiver,
+        // however, NEEDS the row data so it can copy it to the archive table - in that
+        // case we read the eligible rows into memory first and hand them off.
+        if (archiver is DeleteAuditArchiver)
+        {
+            return await ctx.Set<AuditLog>()
+                .Where(a => a.OccurredOnUtc < cutoff)
+                .OrderBy(a => a.OccurredOnUtc)
+                .Take(options.MaxRowsPerSweep)
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+        }
+
+        var rows = await ctx.Set<AuditLog>()
+            .AsNoTracking()
             .Where(a => a.OccurredOnUtc < cutoff)
             .OrderBy(a => a.OccurredOnUtc)
             .Take(options.MaxRowsPerSweep)
-            .ExecuteDeleteAsync(ct)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return await archiver.ArchiveAsync(ctx, rows, policy, ct).ConfigureAwait(false);
     }
 
     private async Task<int> SweepCountAsync(TDbContext ctx, int keep, CancellationToken ct)
