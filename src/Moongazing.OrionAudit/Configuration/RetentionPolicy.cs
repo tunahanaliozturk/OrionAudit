@@ -52,6 +52,16 @@ public abstract record RetentionPolicy
                 "RetentionPolicy.PerTenant requires at least one tenant mapping.",
                 nameof(byTenantId));
         }
+        if (byTenantId.Values.Any(p => p is null))
+        {
+            // Null policy values would silently skip the sweep for that tenant - reject
+            // at construction so the misconfiguration surfaces at startup. Consumers
+            // wanting to opt-out a tenant pass `RetentionPolicy.None` explicitly.
+            throw new ArgumentException(
+                "RetentionPolicy.PerTenant: tenant policy values must not be null. " +
+                "Use RetentionPolicy.None for tenants that should not be swept.",
+                nameof(byTenantId));
+        }
         if (byTenantId.Values.Any(p => p is PerTenantPolicy)
             || fallback is PerTenantPolicy)
         {
