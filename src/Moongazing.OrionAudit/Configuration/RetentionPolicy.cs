@@ -66,7 +66,8 @@ public abstract record RetentionPolicy
             || fallback is PerTenantPolicy)
         {
             throw new ArgumentException(
-                "RetentionPolicy.PerTenant cannot nest another PerTenant policy.",
+                "RetentionPolicy.PerTenant cannot nest another PerTenant policy. " +
+                "PerEntityType IS allowed inside PerTenant for per-(tenant, entity-type) windows.",
                 nameof(byTenantId));
         }
         // Snapshot to a copy under Ordinal so subsequent mutations on the caller's dict
@@ -75,11 +76,53 @@ public abstract record RetentionPolicy
         return new PerTenantPolicy(snapshot, fallback);
     }
 
+    /// <summary>
+    /// Per-(tenant, entity-type) retention policies. Each tenant can specify a distinct
+    /// policy per <c>EntityType</c> name plus a tenant-level fallback for entity types
+    /// not covered. Composes on top of <see cref="PerTenant"/> - a single tenant binds to
+    /// a <see cref="PerEntityTypePolicy"/> internally that the sweep evaluates per entity
+    /// group.
+    /// </summary>
+    /// <param name="byEntityType">Map from <c>EntityType</c> name to retention policy.</param>
+    /// <param name="fallback">Policy used for entity types not present in <paramref name="byEntityType"/>. Must NOT be another <c>PerEntityType</c> or <c>PerTenant</c> policy.</param>
+    public static RetentionPolicy PerEntityType(
+        IReadOnlyDictionary<string, RetentionPolicy> byEntityType,
+        RetentionPolicy fallback)
+    {
+        ArgumentNullException.ThrowIfNull(byEntityType);
+        ArgumentNullException.ThrowIfNull(fallback);
+        if (byEntityType.Count == 0)
+        {
+            throw new ArgumentException(
+                "RetentionPolicy.PerEntityType requires at least one entity-type mapping.",
+                nameof(byEntityType));
+        }
+        if (byEntityType.Values.Any(p => p is null))
+        {
+            throw new ArgumentException(
+                "RetentionPolicy.PerEntityType: entity-type policy values must not be null. " +
+                "Use RetentionPolicy.None for entity types that should not be swept.",
+                nameof(byEntityType));
+        }
+        if (byEntityType.Values.Any(p => p is PerTenantPolicy or PerEntityTypePolicy)
+            || fallback is PerTenantPolicy or PerEntityTypePolicy)
+        {
+            throw new ArgumentException(
+                "RetentionPolicy.PerEntityType cannot nest another PerTenant or PerEntityType policy.",
+                nameof(byEntityType));
+        }
+        var snapshot = byEntityType.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        return new PerEntityTypePolicy(snapshot, fallback);
+    }
+
     internal sealed record NonePolicy : RetentionPolicy;
     internal sealed record RetainForPolicy(TimeSpan Age) : RetentionPolicy;
     internal sealed record RetainCountPolicy(int Rows) : RetentionPolicy;
     internal sealed record PerTenantPolicy(
         IReadOnlyDictionary<string, RetentionPolicy> ByTenantId,
+        RetentionPolicy Fallback) : RetentionPolicy;
+    internal sealed record PerEntityTypePolicy(
+        IReadOnlyDictionary<string, RetentionPolicy> ByEntityType,
         RetentionPolicy Fallback) : RetentionPolicy;
 }
 
