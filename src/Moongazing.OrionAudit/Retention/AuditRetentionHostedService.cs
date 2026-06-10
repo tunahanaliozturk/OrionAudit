@@ -188,37 +188,57 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         return await archiver.ArchiveAsync(ctx, rows, policy, ct).ConfigureAwait(false);
     }
 
-    private static async Task<int> SweepCountScopedAsync(
+    private async Task<int> SweepCountScopedAsync(
         TDbContext ctx, string? tenantId, string entityType, int keep, int remainingBudget, CancellationToken ct)
     {
         if (remainingBudget < 1)
         {
             return 0;
         }
-        IQueryable<AuditLog> baseQuery = ctx.Set<AuditLog>().Where(a => a.EntityType == entityType);
-        if (tenantId is not null)
-        {
-            baseQuery = baseQuery.Where(a => a.TenantId == tenantId);
-        }
-        var groups = await baseQuery
-            .GroupBy(a => a.EntityId)
+        // Top-level PerEntityType calls this with tenantId=null. The previous version
+        // treated null as "unscoped" - grouping only by EntityId - which meant rows for
+        // (Order, id=42) belonging to different tenants merged into one group and
+        // tenant A's RetainCount could trim tenant B's rows. We group by
+        // (TenantId, EntityId) so per-(tenant, entity) windows compose correctly even
+        // when the top-level policy is PerEntityType.
+        var groups = await ctx.Set<AuditLog>()
+            .Where(a => a.EntityType == entityType && (tenantId == null || a.TenantId == tenantId))
+            .GroupBy(a => new { a.TenantId, a.EntityId })
             .Where(g => g.Count() > keep)
-            .Select(g => new { EntityId = g.Key, Total = g.Count() })
+            .Select(g => new { g.Key.TenantId, g.Key.EntityId, Total = g.Count() })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         var totalDeleted = 0;
+        var useArchiver = archiver is not DeleteAuditArchiver;
         foreach (var group in groups)
         {
             if (totalDeleted >= remainingBudget)
             {
                 break;
             }
-            IQueryable<AuditLog> trim = ctx.Set<AuditLog>()
-                .Where(a => a.EntityType == entityType && a.EntityId == group.EntityId);
-            if (tenantId is not null)
+            var trim = ctx.Set<AuditLog>()
+                .Where(a => a.EntityType == entityType
+                            && a.TenantId == group.TenantId
+                            && a.EntityId == group.EntityId);
+            if (useArchiver)
             {
-                trim = trim.Where(a => a.TenantId == tenantId);
+                // Route through the archiver: select the rows-to-archive (the OLDEST
+                // ones past `keep`) and hand them off so a CopyToTable consumer can
+                // ship them to the archive store before they leave the live table.
+                var archivableRows = await trim
+                    .AsNoTracking()
+                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .Skip(keep)
+                    .Take(remainingBudget - totalDeleted)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                if (archivableRows.Count == 0)
+                {
+                    continue;
+                }
+                totalDeleted += await archiver.ArchiveAsync(ctx, archivableRows, policy, ct).ConfigureAwait(false);
+                continue;
             }
             var idsToDelete = await trim
                 .OrderByDescending(a => a.OccurredOnUtc)
