@@ -20,7 +20,7 @@ namespace Moongazing.OrionAudit;
 /// columns are left null, and the pre-enrichment values from the resolver are NOT
 /// preserved (the enricher's return value wins). To fall back to the raw claim values on
 /// directory failure, the implementation MUST catch the exception and return the
-/// original <paramref name="user"/> instead. Throwing aborts the entire
+/// original <c>user</c> argument instead. Throwing aborts the entire
 /// <c>SaveChangesAsync</c>; wrap in try/catch inside the enricher if directory failures
 /// should be treated as best-effort rather than fatal.
 /// </para>
