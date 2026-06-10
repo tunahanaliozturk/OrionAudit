@@ -7,6 +7,38 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-06-10
+
+### Added
+
+#### LDAP / IdP user resolution hooks
+
+Lands the user-resolution-hook deferral from chain 4. The single-purpose `HttpContextAuditUserResolver` only checked `NameIdentifier` / `sub`; v0.7.5 introduces a claim-driven resolver that handles real-world IdP shapes (Azure AD `oid`, single-tenant `preferred_username`, custom service-principal classifications) without forking the resolver per tenant.
+
+- **`ClaimAuditUserResolverOptions`** in the core package - configurable ordered lists of `IdClaimTypes` (defaults: `sub`, `NameIdentifier`, `oid`, `preferred_username`), `DisplayNameClaimTypes` (defaults: `Name`, `name`, `preferred_username`, `Email`, `email`), optional `TypeClaimType`, `DefaultUserType` (default `"user"`), and `RequireAuthenticated` (default `true`). First match wins.
+- **`ClaimAuditUserResolver`** in `Moongazing.OrionAudit.AspNetCore` - reads the current `ClaimsPrincipal` from `IHttpContextAccessor` and applies the options.
+- **`IAuditUserEnricher`** in the core package - optional scoped hook invoked after the resolver produces an `AuditUser`. Lets consumers replace display name / type / other metadata from an IdP or LDAP directory. Synchronous by design (composes with the synchronous `IAuditUserResolver.Resolve` contract); consumer implementations MUST cache directory lookups because the interceptor is on the SaveChanges hot path. Returning `null` drops attribution entirely; throwing aborts SaveChanges.
+- **`AddOrionAuditClaimResolver(this IServiceCollection, configure?)`** DI helper - registers the claim-driven resolver, removes any previously-registered `IAuditUserResolver` (typically the default `HttpContextAuditUserResolver` wired by `AddOrionAuditAspNetCore`), and wires `IHttpContextAccessor` + `IOptions<ClaimAuditUserResolverOptions>`. Idempotent.
+
+### Migration from v0.7.4
+
+Source-compatible. The default `HttpContextAuditUserResolver` is unchanged for consumers who keep using it. Opt in to the claim-driven path:
+
+```csharp
+services.AddOrionAuditClaimResolver(o =>
+{
+    o.IdClaimTypes.Insert(0, "employee_id");       // try internal claim first
+    o.TypeClaimType = "idp_kind";                   // "interactive" / "service-principal"
+});
+
+// Optional enrichment hook (LDAP / Graph API; consumers must cache).
+services.AddScoped<IAuditUserEnricher, MyLdapEnricher>();
+```
+
+### Tests
+
+12 new `ClaimAuditUserResolver` / `AddOrionAuditClaimResolver` facts; existing 6 `HttpContextAuditUserResolver` facts unchanged. Total AspNetCore suite: 18 facts.
+
 ## [0.7.4] - 2026-06-09
 
 ### Added
