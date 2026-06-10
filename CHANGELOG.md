@@ -7,6 +7,27 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.10] - 2026-06-11
+
+### Added
+
+#### `RetentionPolicy.PerEntityType` + nested `PerTenant` -> `PerEntityType`
+
+Extends the v0.7.9 per-tenant retention. v0.7.9 evaluated one policy per tenant; v0.7.10 lets each tenant carry a per-entity-type policy so compliance windows can be expressed at the row-class level.
+
+- `RetentionPolicy.PerEntityType(byEntityType, fallback)` per-entity-type policy factory.
+- `PerTenant` now accepts a `PerEntityType` policy as a tenant value -> per-(tenant, entity-type) windows.
+- `SweepPerEntityTypeAsync` discovers entity types (optionally tenant-scoped) and dispatches per entity type. Cross-cycle budget enforced.
+- Rejects empty mapping, null policy values, nested `PerTenant` / `PerEntityType`, null arguments.
+
+### Tests
+
+7 new facts; 226 total.
+
+### Migration from v0.7.9
+
+Source-compatible.
+
 ## [0.7.9] - 2026-06-10
 
 ### Added
