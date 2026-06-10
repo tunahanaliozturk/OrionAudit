@@ -7,6 +7,28 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-06-10
+
+### Added
+
+#### `IAuditArchiver` strategy hook for the retention sweep
+
+Mirrors the OrionGuard v6.5.6 `IOutboxArchiver` pattern. v0.7.7 retention always hard-deleted; v0.7.8 lets consumers register an archiver that ships expiring rows to a separate cold store (S3, Parquet, archive table) BEFORE deleting them.
+
+- `IAuditArchiver` interface: `ArchiveAsync(DbContext, IReadOnlyList<AuditLog>, RetentionPolicy, CancellationToken) -> Task<int>`.
+- `DeleteAuditArchiver` default - keeps the v0.7.7 fast path (single `ExecuteDelete`, no row materialisation).
+- `CopyToTableAuditArchiver<TArchiveRow>` generic - transactional copy-into-archive then delete-from-live.
+- `AuditRetentionHostedService<TDbContext>` 6-arg ctor with optional archiver; v0.7.7 5-arg ctor retained for ABI compat.
+- `AddOrionAudit` registers `DeleteAuditArchiver` via `TryAddSingleton` so custom archivers win without explicit removal.
+
+### Tests
+
+7 new facts; 212 total in core suite.
+
+### Migration from v0.7.7
+
+Source-compatible.
+
 ## [0.7.7] - 2026-06-10
 
 ### Added
