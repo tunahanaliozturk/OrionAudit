@@ -234,7 +234,13 @@ Ships the schema column + capture-side stamping. Inheritance-aware querying land
 
 - `OrionAuditColumnHints.MySqlJson` (native `json` on MySQL 5.7+ / MariaDB 10.2+) and `OrionAuditColumnHints.MySqlLongText` added to the existing enum.
 - New `Moongazing.OrionAudit.MySql` add-on package: `ApplyOrionAuditMySqlConfigurations(this ModelBuilder, DbContext, useLongText, ...)` forwards through to the existing DbContext-aware `ApplyOrionAuditConfigurations` overload with the right hint pre-selected.
-- LDAP / IdP user resolution hooks retargeted to v0.7.5.
+
+## v0.7.5 — LDAP / IdP user resolution hooks *(shipped 2026-06-10)*
+
+- `ClaimAuditUserResolverOptions` (configurable ordered claim lists for id / display name / type).
+- `ClaimAuditUserResolver` in `Moongazing.OrionAudit.AspNetCore`.
+- `IAuditUserEnricher` synchronous post-resolution hook for IdP / LDAP enrichment (consumers cache).
+- `AddOrionAuditClaimResolver(configure?)` DI helper.
 
 ---
 
