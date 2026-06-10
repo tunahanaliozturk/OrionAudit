@@ -16,10 +16,13 @@ namespace Moongazing.OrionAudit;
 /// keyed by <see cref="AuditUser.Id"/>.
 /// </para>
 /// <para>
-/// Returning <see langword="null"/> drops attribution entirely (the audit row keeps the
-/// pre-enrichment values from the resolver). Throwing aborts the SaveChanges; wrap in
-/// try/catch inside the implementation if directory failures should fall back to raw
-/// claim values.
+/// Returning <see langword="null"/> drops attribution entirely - the audit row's User
+/// columns are left null, and the pre-enrichment values from the resolver are NOT
+/// preserved (the enricher's return value wins). To fall back to the raw claim values on
+/// directory failure, the implementation MUST catch the exception and return the
+/// original <paramref name="user"/> instead. Throwing aborts the entire
+/// <c>SaveChangesAsync</c>; wrap in try/catch inside the enricher if directory failures
+/// should be treated as best-effort rather than fatal.
 /// </para>
 /// </remarks>
 public interface IAuditUserEnricher
