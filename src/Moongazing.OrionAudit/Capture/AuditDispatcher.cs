@@ -143,6 +143,11 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 row.Attempts++;
                 row.ClaimToken = null;
                 row.ClaimedUtc = null;
+                // v0.7.17: emit the dispatch error counter for EVERY swallowed failure
+                // (transient + terminal). DispatchRowsDeadLettered fires only on the
+                // terminal branch; this fires on the full surface area so operators see
+                // the upstream pressure that precedes a dead-letter.
+                OrionAuditTelemetry.RecordDispatchError(ex.GetType().Name);
                 LogRowFailed(row.Id, row.Attempts, ex);
                 if (row.Attempts >= options.MaxAttempts)
                 {

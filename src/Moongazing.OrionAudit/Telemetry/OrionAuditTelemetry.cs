@@ -90,6 +90,23 @@ public static class OrionAuditTelemetry
     public static void RecordRetentionError(string exceptionType)
         => RetentionErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
 
+    /// <summary>
+    /// v0.7.17 dispatcher row failure counter. Increments when <c>AuditDispatcher</c>
+    /// swallows a per-row exception. Distinct from
+    /// <see cref="DispatchRowsDeadLettered"/> which only counts rows that exhausted
+    /// MaxAttempts; this counter fires on EVERY failure including the transient ones
+    /// that the dispatcher retries on the next cycle. Operators page on
+    /// <c>rate(orionaudit_dispatch_errors_total[5m])</c> to spot a flaky dispatch
+    /// pipeline long before rows reach the dead-letter threshold.
+    /// </summary>
+    internal static readonly Counter<long> DispatchErrors = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.errors", unit: "{errors}",
+        description: "Per-row dispatch failures swallowed by the dispatcher (transient + terminal).");
+
+    /// <summary>Record a per-row dispatch failure tagged with the exception type.</summary>
+    public static void RecordDispatchError(string exceptionType)
+        => DispatchErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 
