@@ -142,6 +142,18 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
 
     private async Task<int> DispatchPolicyAsync(TDbContext ctx, RetentionPolicy effective, CancellationToken ct)
     {
+        // v0.7.15: record which policy branch fires PER CYCLE so multi-tenant /
+        // multi-entity-type deployments can confirm the live policy after a rolling
+        // config change matches what was deployed.
+        OrionAuditTelemetry.RecordRetentionDispatched(effective switch
+        {
+            RetentionPolicy.RetainForPolicy => "retain_for",
+            RetentionPolicy.RetainCountPolicy => "retain_count",
+            RetentionPolicy.PerTenantPolicy => "per_tenant",
+            RetentionPolicy.PerEntityTypePolicy => "per_entity_type",
+            RetentionPolicy.NonePolicy => "none",
+            _ => "unknown",
+        });
         return effective switch
         {
             RetentionPolicy.RetainForPolicy r => await SweepAgeAsync(ctx, r.Age, ct).ConfigureAwait(false),
