@@ -49,6 +49,15 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.lag", unit: "ms",
         description: "Per-row dispatch latency (queue entry OccurredOnUtc -> AuditLog write).");
 
+    /// <summary>
+    /// v0.7.14 distribution of audited rows produced per SaveChangesAsync. Operators graph
+    /// p99 to spot outlier saves (e.g. a bulk import path that should have been audited in
+    /// smaller chunks) and right-size capture-queue partitioning.
+    /// </summary>
+    internal static readonly Histogram<int> CaptureEntriesPerSave = Meter.CreateHistogram<int>(
+        "orionaudit.capture.entries_per_save", unit: "{rows}",
+        description: "Audited rows produced per SaveChangesAsync call.");
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 

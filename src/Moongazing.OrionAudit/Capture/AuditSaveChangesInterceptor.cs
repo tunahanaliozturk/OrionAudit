@@ -84,6 +84,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 ctx.Add(BuildQueueEntry(entry, configuration, user, tenantId, correlationId, occurredOn, jsonContext));
             }
             OrionAuditTelemetry.EntriesWritten.Add(auditedEntries.Count);
+            // v0.7.14: distribution of audited rows per save; complements the steady-state
+            // EntriesWritten counter by exposing the tail (bulk imports, batch-mode saves).
+            OrionAuditTelemetry.CaptureEntriesPerSave.Record(auditedEntries.Count);
             OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
@@ -136,6 +139,12 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         OrionAuditTelemetry.EntriesWritten.Add(writtenCount);
         OrionAuditTelemetry.EntriesFailed.Add(failedCount);
         OrionAuditTelemetry.SnapshotsWritten.Add(snapshotsTaken);
+        // v0.7.14: record the TOTAL audited entry count (written + failed), not just
+        // writtenCount. A save where every audit row failed (e.g. custom column provider
+        // threw, diff serialization choked) still produced audit entries; recording 0
+        // would pollute the histogram p50 with a meaningless "this save audited nothing"
+        // sample. The capture-shape distribution is the goal, not the success ratio.
+        OrionAuditTelemetry.CaptureEntriesPerSave.Record(writtenCount + failedCount);
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
 
         // Publish BEFORE SaveChanges so a publisher exception aborts the consumer transaction.
