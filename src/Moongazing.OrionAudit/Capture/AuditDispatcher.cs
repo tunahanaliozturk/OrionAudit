@@ -107,6 +107,9 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        // v0.7.18 dispatch batch size histogram: zero-row cycles do NOT emit so the
+        // histogram tail reflects actual produced batches, not idle polling.
+        OrionAuditTelemetry.RecordDispatchBatchSize(claimed.Count);
         if (claimed.Count == 0)
         {
             return 0;
