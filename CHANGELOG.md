@@ -7,6 +7,30 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.19] - 2026-06-11
+
+### Added
+
+#### `orionaudit.dispatch.lag.violations` SLO threshold counter
+
+`Counter<long>` that increments each time a per-row dispatch lag exceeds the consumer-supplied `AsyncCaptureOptions.DispatchLagViolationThreshold`. Operators alert on the rate without needing a p99 calculation in their monitoring stack - the threshold IS the SLO.
+
+- `AsyncCaptureOptions.DispatchLagViolationThreshold` nullable; default `null` = no threshold = back-compat no-op.
+- Public `OrionAuditTelemetry.RecordDispatchLagViolation()` helper.
+- Pairs with the existing `orionaudit.dispatch.lag` histogram: histogram for trend, counter for SLO-driven alerting.
+
+### Tests
+
+2 facts; 244 total.
+
+### Migration from v0.7.18
+
+Source-compatible.
+
+```csharp
+o.UseAsyncCapture(q => q.DispatchLagViolationThreshold(TimeSpan.FromSeconds(30)));
+```
+
 ## [0.7.18] - 2026-06-11
 
 ### Added
