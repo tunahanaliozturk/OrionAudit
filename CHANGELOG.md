@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.17] - 2026-06-11
+
+### Added
+
+#### `orionaudit.dispatch.errors` counter
+
+`Counter<long>` that increments for EVERY swallowed per-row failure in `AuditDispatcher.DispatchOnceAsync` (transient + terminal). Distinct from `orionaudit.dispatch.rows_deadlettered` which only counts rows that exhausted `MaxAttempts`; this counter fires on the full failure surface so operators see the upstream pressure that precedes a dead-letter.
+
+- Tag: `exception_type` - short type name (e.g. `JsonException`, `DbUpdateException`).
+- Public `OrionAuditTelemetry.RecordDispatchError(string)` helper.
+- Pairs with v0.7.16 `orionaudit.retention.errors`: now both retention + dispatch swallowed exceptions emit on a counter per exception type.
+
+### Tests
+
+1 fact; 240 total.
+
+### Migration from v0.7.16
+
+Source-compatible.
+
 ## [0.7.16] - 2026-06-11
 
 ### Added
