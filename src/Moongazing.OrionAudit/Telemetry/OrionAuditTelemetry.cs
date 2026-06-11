@@ -117,6 +117,21 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.batch_size", unit: "{rows}",
         description: "Capture-queue rows claimed per dispatcher cycle (non-empty cycles only).");
 
+    /// <summary>
+    /// v0.7.19 dispatch lag SLO violation counter. Increments each time a per-row
+    /// dispatch lag exceeds the consumer-supplied
+    /// <see cref="Configuration.AsyncCaptureOptions.DispatchLagViolationThreshold"/>.
+    /// Operators alert on the rate without needing a p99 calculation; the threshold
+    /// itself is the SLO.
+    /// </summary>
+    internal static readonly Counter<long> DispatchLagViolations = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.lag.violations", unit: "{rows}",
+        description: "Per-row dispatch lag exceeded the consumer-configured SLO threshold.");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
+    public static void RecordDispatchLagViolation()
+        => DispatchLagViolations.Add(1);
+
     /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
     public static void RecordDispatchBatchSize(int count)
     {

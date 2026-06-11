@@ -137,6 +137,12 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 // the histogram p50 down.
                 var lag = clock.GetUtcNow().UtcDateTime - row.OccurredOnUtc;
                 OrionAuditTelemetry.DispatchLag.Record(Math.Max(0d, lag.TotalMilliseconds));
+                // v0.7.19 SLO violation counter: increments when lag exceeds the
+                // consumer's configured threshold. Null threshold = back-compat no-op.
+                if (options.DispatchLagViolationThreshold is { } slo && lag > slo)
+                {
+                    OrionAuditTelemetry.RecordDispatchLagViolation();
+                }
                 publishEvents?.Add(AuditSaveChangesInterceptor.ToEvent(auditLog));
             }
 #pragma warning disable CA1031 // a single bad row must not abort the batch
