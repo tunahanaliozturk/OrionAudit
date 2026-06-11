@@ -139,6 +139,17 @@ public sealed class RetentionSweepOptions
     public int MaxRowsPerSweep { get; set; } = 10_000;
 
     /// <summary>
+    /// Optional wall-clock budget per sweep cycle. When set, the sweep stops dispatching
+    /// to inner per-tenant / per-entity branches once <see cref="MaxSweepDuration"/>
+    /// elapses since the cycle started, returning whatever total it has accumulated so
+    /// far. Useful for operators who run retention on a maintenance window and need a
+    /// guarantee that the sweep gives up control by a known deadline rather than
+    /// chewing through MaxRowsPerSweep rows of a stuck backend.
+    /// Default <see langword="null"/> = unlimited (preserves v0.7.11 behaviour).
+    /// </summary>
+    public TimeSpan? MaxSweepDuration { get; set; }
+
+    /// <summary>
     /// When true, the sweep evaluates eligibility and reports the count of rows that
     /// WOULD have been removed, but does NOT actually delete (or archive) any row. The
     /// telemetry counter <c>orionaudit.retention.dry_run_rows</c> increments instead of
