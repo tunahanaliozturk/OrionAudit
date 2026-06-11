@@ -7,6 +7,27 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.12] - 2026-06-11
+
+### Added
+
+#### `RetentionSweepOptions.MaxSweepDuration` - wall-clock budget per cycle
+
+Operators running retention on a maintenance window need a guarantee that a single sweep gives up control by a known deadline rather than chewing through `MaxRowsPerSweep` rows of a stuck backend.
+
+- `RetentionSweepOptions.MaxSweepDuration` (nullable, default null = unlimited, preserves v0.7.11 behaviour).
+- The deadline is captured at the start of each `SweepOnceAsync` call and consulted between per-tenant / per-entity-type branches via `DeadlineReached()`. Inner branches return early when it has elapsed; the sweep returns whatever total it has accumulated so far.
+- Does NOT preempt an in-flight delete batch - granularity is per dispatch unit (tenant, entity type), which keeps the bounded-transaction guarantee from v0.7.x intact.
+- Plays well with `MaxRowsPerSweep`: whichever cap fires first wins.
+
+### Tests
+
+3 new facts.
+
+### Migration from v0.7.11
+
+Source-compatible.
+
 ## [0.7.11] - 2026-06-11
 
 ### Added
