@@ -195,6 +195,8 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
             // and failure (try/finally) so a publisher that times out is the most
             // visible part of the histogram tail - exactly what operators need to
             // diagnose broker incidents.
+            // v0.7.22: per-publish event count for batch-shape visibility.
+            OrionAuditTelemetry.RecordEventsPerPublish(publishEvents.Count);
             var publishSw = Stopwatch.StartNew();
             try
             {
