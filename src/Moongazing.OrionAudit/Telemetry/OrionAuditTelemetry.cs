@@ -163,6 +163,28 @@ public static class OrionAuditTelemetry
     }
 
     /// <summary>
+    /// v0.7.22 distribution of event count per <c>IAuditEventPublisher.PublishAsync</c>
+    /// call. Operators graph p99 to see whether publishes are sized appropriately for
+    /// the broker (small batches = under-utilising broker throughput; over-large
+    /// batches risk timeouts and partial-success ambiguity). Pairs with the v0.7.21
+    /// publish.duration_ms histogram - duration alone cannot distinguish a slow
+    /// publisher from a publisher that took on a large batch.
+    /// </summary>
+    internal static readonly Histogram<int> EventsPerPublish = Meter.CreateHistogram<int>(
+        "orionaudit.dispatch.events_per_publish", unit: "{events}",
+        description: "Events sent per IAuditEventPublisher.PublishAsync call.");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
+    public static void RecordEventsPerPublish(int count)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+        EventsPerPublish.Record(count);
+    }
+
+    /// <summary>
     /// v0.7.21 distribution of <c>IAuditEventPublisher.PublishAsync</c> wall-clock per
     /// dispatcher cycle. Operators graph p99 to spot a publisher whose downstream
     /// (Kafka, RabbitMQ, etc.) has regressed independently of the database side.

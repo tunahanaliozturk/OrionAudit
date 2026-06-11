@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.22] - 2026-06-11
+
+### Added
+
+#### `orionaudit.dispatch.events_per_publish` histogram
+
+`Histogram<int>` of events sent per `IAuditEventPublisher.PublishAsync` call. Operators graph p99 to see whether publishes are sized appropriately for the broker - small batches under-utilise broker throughput while over-large batches risk timeouts and partial-success ambiguity.
+
+- Pairs with v0.7.21 `publish.duration_ms`: duration alone cannot distinguish a slow publisher from a publisher carrying a large batch.
+- Recorded immediately before the `PublishAsync` call (BEFORE the duration stopwatch); zero-event branches do not reach the recording site.
+- Public `OrionAuditTelemetry.RecordEventsPerPublish(int)` helper.
+
+### Tests
+
+2 facts; 250 total.
+
+### Migration from v0.7.21
+
+Source-compatible.
+
 ## [0.7.21] - 2026-06-11
 
 ### Added
