@@ -131,6 +131,10 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
                 processed++;
+                // v0.7.20: capture entry payload size = BeforeJson + AfterJson lengths.
+                // Recorded on the success path so failed rows do not skew the histogram.
+                OrionAuditTelemetry.RecordCaptureEntrySize(
+                    (row.BeforeJson?.Length ?? 0) + (row.AfterJson?.Length ?? 0));
                 // v0.7.13 dispatch lag: time between the original event and its
                 // promotion to an AuditLog row. Negative deltas (clock skew between
                 // capture and dispatcher hosts) are clamped to 0 so they do not pull
