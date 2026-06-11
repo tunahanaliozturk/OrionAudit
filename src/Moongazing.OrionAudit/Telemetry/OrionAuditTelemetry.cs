@@ -107,6 +107,26 @@ public static class OrionAuditTelemetry
     public static void RecordDispatchError(string exceptionType)
         => DispatchErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
 
+    /// <summary>
+    /// v0.7.18 distribution of rows claimed per dispatcher cycle. Operators graph p99
+    /// to spot a dispatcher that consistently maxes out BatchSize (raise the batch) or
+    /// stays near 0 (over-sized polling cadence). Zero-row cycles do NOT emit; idle
+    /// polling is the role of an ObservableGauge that the dispatcher already provides.
+    /// </summary>
+    internal static readonly Histogram<int> DispatchBatchSize = Meter.CreateHistogram<int>(
+        "orionaudit.dispatch.batch_size", unit: "{rows}",
+        description: "Capture-queue rows claimed per dispatcher cycle (non-empty cycles only).");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
+    public static void RecordDispatchBatchSize(int count)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+        DispatchBatchSize.Record(count);
+    }
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 

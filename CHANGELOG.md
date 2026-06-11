@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.18] - 2026-06-11
+
+### Added
+
+#### `orionaudit.dispatch.batch_size` histogram
+
+`Histogram<int>` exposing rows claimed per dispatcher cycle. Operators graph p99 to spot a dispatcher that consistently maxes out BatchSize (raise batch) or stays near 0 (over-sized polling cadence).
+
+- Zero-row cycles do NOT emit (idle polling tracked by separate gauge).
+- Recorded inside `AuditDispatcher.DispatchOnceAsync` right after the storage claim.
+- Public `OrionAuditTelemetry.RecordDispatchBatchSize(int)` helper.
+
+### Tests
+
+2 facts; 242 total.
+
+### Migration from v0.7.17
+
+Source-compatible.
+
 ## [0.7.17] - 2026-06-11
 
 ### Added
