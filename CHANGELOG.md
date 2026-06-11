@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.16] - 2026-06-11
+
+### Added
+
+#### `orionaudit.retention.errors` counter
+
+`Counter<long>` that increments when the background retention loop swallows an unexpected exception from `SweepOnceAsync`. Operators page on `rate(orionaudit_retention_errors_total[5m])` to catch a stuck or thrashing sweep long before retention SLAs slip.
+
+- Tag: `exception_type` - short type name (e.g. `TimeoutException`, `DbUpdateConcurrencyException`) so dashboards can split by root cause.
+- Cancellation does NOT emit - the cancellation catch above this filter is its own branch.
+- Public `OrionAuditTelemetry.RecordRetentionError(string exceptionType)` so consumer-owned retention drivers can opt in.
+
+### Tests
+
+1 new fact; 239 total.
+
+### Migration from v0.7.15
+
+Source-compatible.
+
 ## [0.7.15] - 2026-06-11
 
 ### Added
