@@ -142,6 +142,26 @@ public static class OrionAuditTelemetry
         DispatchBatchSize.Record(count);
     }
 
+    /// <summary>
+    /// v0.7.20 distribution of capture queue entry payload size in bytes (BeforeJson +
+    /// AfterJson combined). Operators graph p99 to size storage column types, spot a
+    /// tenant whose audited entities suddenly grew, and right-size the capture-queue
+    /// poll cadence against actual byte throughput.
+    /// </summary>
+    internal static readonly Histogram<int> CaptureEntrySize = Meter.CreateHistogram<int>(
+        "orionaudit.capture.entry_size_bytes", unit: "By",
+        description: "Capture queue entry payload size in bytes (BeforeJson + AfterJson).");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
+    public static void RecordCaptureEntrySize(int bytes)
+    {
+        if (bytes <= 0)
+        {
+            return;
+        }
+        CaptureEntrySize.Record(bytes);
+    }
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 
