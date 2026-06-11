@@ -56,6 +56,16 @@ public sealed class AsyncCaptureBuilder
     }
 
     /// <summary>Overrides the dead-letter attempt cap. Must be >= 1.</summary>
+    /// <summary>
+    /// v0.7.19 fluent setter for the dispatch-lag SLO threshold. Pass <see langword="null"/>
+    /// (the default) to disable the counter.
+    /// </summary>
+    public AsyncCaptureBuilder DispatchLagViolationThreshold(TimeSpan? threshold)
+    {
+        Options.DispatchLagViolationThreshold = threshold;
+        return this;
+    }
+
     public AsyncCaptureBuilder MaxAttempts(int attempts)
     {
         if (attempts < 1)
