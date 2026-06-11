@@ -18,7 +18,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/tunahanaliozturk/OrionAudit</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <Version>0.7.16</Version>
+    <Version>0.7.17</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsPackable)' == 'false'">
