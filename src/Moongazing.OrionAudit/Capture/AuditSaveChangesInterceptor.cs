@@ -84,6 +84,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 ctx.Add(BuildQueueEntry(entry, configuration, user, tenantId, correlationId, occurredOn, jsonContext));
             }
             OrionAuditTelemetry.EntriesWritten.Add(auditedEntries.Count);
+            // v0.7.14: distribution of audited rows per save; complements the steady-state
+            // EntriesWritten counter by exposing the tail (bulk imports, batch-mode saves).
+            OrionAuditTelemetry.CaptureEntriesPerSave.Record(auditedEntries.Count);
             OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
@@ -136,6 +139,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         OrionAuditTelemetry.EntriesWritten.Add(writtenCount);
         OrionAuditTelemetry.EntriesFailed.Add(failedCount);
         OrionAuditTelemetry.SnapshotsWritten.Add(snapshotsTaken);
+        OrionAuditTelemetry.CaptureEntriesPerSave.Record(writtenCount);
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
 
         // Publish BEFORE SaveChanges so a publisher exception aborts the consumer transaction.
