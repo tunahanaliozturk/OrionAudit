@@ -58,6 +58,19 @@ public static class OrionAuditTelemetry
         "orionaudit.capture.entries_per_save", unit: "{rows}",
         description: "Audited rows produced per SaveChangesAsync call.");
 
+    /// <summary>
+    /// v0.7.15 retention dispatch counter. Increments once per <c>SweepOnceAsync</c> cycle
+    /// with the policy branch the dispatcher took (<c>retain_for</c>, <c>retain_count</c>,
+    /// <c>per_tenant</c>, <c>per_entity_type</c>, <c>none</c>). Operators graph the rate to
+    /// confirm the live policy matches the configured one across a rolling deployment.
+    /// </summary>
+    internal static readonly Counter<long> RetentionDispatched = Meter.CreateCounter<long>(
+        "orionaudit.retention.dispatched", unit: "{cycles}",
+        description: "Retention sweep cycles dispatched, tagged with the policy branch taken.");
+
+    internal static void RecordRetentionDispatched(string policyBranch)
+        => RetentionDispatched.Add(1, new KeyValuePair<string, object?>("policy", policyBranch));
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 

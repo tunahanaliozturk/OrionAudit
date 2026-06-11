@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.15] - 2026-06-11
+
+### Added
+
+#### `orionaudit.retention.dispatched` counter
+
+`Counter<long>` incremented once per `SweepOnceAsync` cycle with the policy branch the dispatcher took. Operators graph the rate to confirm the live policy matches the configured one across a rolling deployment.
+
+- Tag: `policy` - one of `retain_for`, `retain_count`, `per_tenant`, `per_entity_type`, `none`, `unknown` (forward-compat).
+- Pairs with the existing `RetentionRowsDeleted` counter: rows_deleted is rate-meaningful, dispatched is policy-shape-meaningful.
+- Emitted inside `DispatchPolicyAsync` BEFORE the policy-specific sweep runs so a sweep that throws mid-run still records its branch.
+
+### Tests
+
+5 new facts (parameterised Theory).
+
+### Migration from v0.7.14
+
+Source-compatible.
+
 ## [0.7.14] - 2026-06-11
 
 ### Added
