@@ -18,6 +18,14 @@ public sealed class AsyncCaptureOptions
 
     /// <summary>How long a claim is honoured before another dispatcher may reclaim it. Default: 5 minutes.</summary>
     public TimeSpan ClaimLease { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// v0.7.19 alert threshold for the dispatch-lag SLO. When a per-row dispatch lag
+    /// exceeds this duration the <c>orionaudit.dispatch.lag.violations</c> counter
+    /// increments so operators can alert without setting up a p99 calculation in their
+    /// monitoring stack. Default <see langword="null"/> = no threshold (back-compat).
+    /// </summary>
+    public TimeSpan? DispatchLagViolationThreshold { get; set; }
 }
 
 /// <summary>Fluent builder for <see cref="AsyncCaptureOptions"/>, passed to <c>UseAsyncCapture</c>.</summary>
@@ -48,6 +56,16 @@ public sealed class AsyncCaptureBuilder
     }
 
     /// <summary>Overrides the dead-letter attempt cap. Must be >= 1.</summary>
+    /// <summary>
+    /// v0.7.19 fluent setter for the dispatch-lag SLO threshold. Pass <see langword="null"/>
+    /// (the default) to disable the counter.
+    /// </summary>
+    public AsyncCaptureBuilder DispatchLagViolationThreshold(TimeSpan? threshold)
+    {
+        Options.DispatchLagViolationThreshold = threshold;
+        return this;
+    }
+
     public AsyncCaptureBuilder MaxAttempts(int attempts)
     {
         if (attempts < 1)
