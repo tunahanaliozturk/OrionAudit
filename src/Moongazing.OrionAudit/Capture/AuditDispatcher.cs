@@ -191,15 +191,20 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         if (publisher is not null && publishEvents is { Count: > 0 })
         {
             // v0.7.21: time the PublishAsync round-trip so a slow Kafka/RabbitMQ tail
-            // surfaces independently of the database commit. Emission happens BEFORE
-            // SaveChangesAsync so a commit failure does NOT mask the publish-side
-            // latency picture; the consumer hooks are already telling the same story
-            // via the entry_size_bytes post-commit pattern, and PublishAsync is its
-            // own SLO surface.
+            // surfaces independently of the database commit. Records on BOTH success
+            // and failure (try/finally) so a publisher that times out is the most
+            // visible part of the histogram tail - exactly what operators need to
+            // diagnose broker incidents.
             var publishSw = Stopwatch.StartNew();
-            await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
-            publishSw.Stop();
-            OrionAuditTelemetry.RecordPublishDuration(publishSw.Elapsed.TotalMilliseconds);
+            try
+            {
+                await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                publishSw.Stop();
+                OrionAuditTelemetry.RecordPublishDuration(publishSw.Elapsed.TotalMilliseconds);
+            }
         }
 
         // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.
