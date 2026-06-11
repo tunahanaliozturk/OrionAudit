@@ -323,7 +323,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         return total;
     }
 
-    private static async Task<int> SweepCountForTenantAsync(TDbContext ctx, string? tenantId, int keep, int remainingBudget, CancellationToken ct)
+    private async Task<int> SweepCountForTenantAsync(TDbContext ctx, string? tenantId, int keep, int remainingBudget, CancellationToken ct)
     {
         if (remainingBudget < 1)
         {
@@ -338,16 +338,38 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
             .ConfigureAwait(false);
 
         var totalDeleted = 0;
+        var useArchiver = archiver is not DeleteAuditArchiver;
         foreach (var group in groups)
         {
             if (totalDeleted >= remainingBudget)
             {
                 break;
             }
-            var idsToDelete = await ctx.Set<AuditLog>()
+            var trim = ctx.Set<AuditLog>()
                 .Where(a => a.TenantId == tenantId
                             && a.EntityType == group.EntityType
-                            && a.EntityId == group.EntityId)
+                            && a.EntityId == group.EntityId);
+            if (useArchiver)
+            {
+                // Route through the archiver so DryRunAuditArchiver (and any custom
+                // archiver such as CopyToTableAuditArchiver) sees the rows. Previously
+                // this path called ExecuteDeleteAsync directly, bypassing the dry-run
+                // counter and silently deleting rows during a dry-run sweep.
+                var archivableRows = await trim
+                    .AsNoTracking()
+                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .Skip(keep)
+                    .Take(remainingBudget - totalDeleted)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                if (archivableRows.Count == 0)
+                {
+                    continue;
+                }
+                totalDeleted += await archiver.ArchiveAsync(ctx, archivableRows, policy, ct).ConfigureAwait(false);
+                continue;
+            }
+            var idsToDelete = await trim
                 .OrderByDescending(a => a.OccurredOnUtc)
                 .Skip(keep)
                 .Take(remainingBudget - totalDeleted)
