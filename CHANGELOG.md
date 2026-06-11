@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.14] - 2026-06-11
+
+### Added
+
+#### `orionaudit.capture.entries_per_save` histogram
+
+`Histogram<int>` on the existing `OrionAudit` Meter. Operators graph p99 to spot outlier saves (bulk import paths that should have been audited in smaller chunks) and right-size capture-queue partitioning.
+
+- Recorded inside `AuditSaveChangesInterceptor` on every save that produces at least one audited entry, in BOTH async-capture and inline-capture modes.
+- Zero-row saves do NOT emit so the histogram tail does not get polluted with 0 samples.
+- Complements the steady-state `orionaudit.capture.entries_written` counter (which is rate-meaningful) by exposing distribution (which is outlier-meaningful).
+
+### Tests
+
+2 new integration facts; 29 total.
+
+### Migration from v0.7.13
+
+Source-compatible.
+
 ## [0.7.13] - 2026-06-11
 
 ### Added
