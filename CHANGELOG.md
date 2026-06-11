@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.20] - 2026-06-11
+
+### Added
+
+#### `orionaudit.capture.entry_size_bytes` histogram
+
+`Histogram<int>` of capture queue entry payload size in bytes (BeforeJson + AfterJson combined). Operators graph p99 to size storage column types, spot a tenant whose audited entities suddenly grew, and right-size the capture-queue poll cadence against actual byte throughput.
+
+- Recorded inside the dispatcher success path so failed rows do not skew the histogram tail.
+- Zero/negative inputs ignored.
+- Public `OrionAuditTelemetry.RecordCaptureEntrySize(int)` helper.
+
+### Tests
+
+2 facts; 246 total.
+
+### Migration from v0.7.19
+
+Source-compatible.
+
 ## [0.7.19] - 2026-06-11
 
 ### Added
