@@ -121,6 +121,10 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         var publishEvents = publisher is null or NullAuditEventPublisher
             ? null
             : new List<AuditLogEvent>(claimed.Count);
+        // v0.7.20 fix (codex P2): stash entry sizes per row and emit them AFTER
+        // SaveChangesAsync. Recording inside the loop pre-commit would double-count any
+        // row that the publisher or commit later failed on.
+        List<int>? pendingEntrySizes = null;
 
         foreach (var row in claimed)
         {
@@ -131,10 +135,13 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
                 processed++;
-                // v0.7.20: capture entry payload size = BeforeJson + AfterJson lengths.
-                // Recorded on the success path so failed rows do not skew the histogram.
-                OrionAuditTelemetry.RecordCaptureEntrySize(
-                    (row.BeforeJson?.Length ?? 0) + (row.AfterJson?.Length ?? 0));
+                // v0.7.20: stash the entry size so it can be emitted AFTER SaveChangesAsync
+                // confirms persistence. Recording before commit would double-count when the
+                // commit (or the upstream PublishAsync that runs before commit) fails: the
+                // queue row stays around and is re-dispatched on the next cycle, producing
+                // another histogram sample for the same envelope.
+                pendingEntrySizes ??= new List<int>(claimed.Count);
+                pendingEntrySizes.Add((row.BeforeJson?.Length ?? 0) + (row.AfterJson?.Length ?? 0));
                 // v0.7.13 dispatch lag: time between the original event and its
                 // promotion to an AuditLog row. Negative deltas (clock skew between
                 // capture and dispatcher hosts) are clamped to 0 so they do not pull
@@ -188,6 +195,16 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
 
         // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.
         await ctx.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        // v0.7.20: emit AFTER SaveChangesAsync confirms persistence so a publish or
+        // commit failure does not cause a double-count on the next cycle's retry.
+        if (pendingEntrySizes is not null)
+        {
+            foreach (var size in pendingEntrySizes)
+            {
+                OrionAuditTelemetry.RecordCaptureEntrySize(size);
+            }
+        }
 
         OrionAuditTelemetry.DispatchRowsProcessed.Add(processed);
         OrionAuditTelemetry.DispatchRowsDeadLettered.Add(deadLettered);
