@@ -128,6 +128,12 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
                 processed++;
+                // v0.7.13 dispatch lag: time between the original event and its
+                // promotion to an AuditLog row. Negative deltas (clock skew between
+                // capture and dispatcher hosts) are clamped to 0 so they do not pull
+                // the histogram p50 down.
+                var lag = clock.GetUtcNow().UtcDateTime - row.OccurredOnUtc;
+                OrionAuditTelemetry.DispatchLag.Record(Math.Max(0d, lag.TotalMilliseconds));
                 publishEvents?.Add(AuditSaveChangesInterceptor.ToEvent(auditLog));
             }
 #pragma warning disable CA1031 // a single bad row must not abort the batch

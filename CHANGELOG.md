@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.13] - 2026-06-11
+
+### Added
+
+#### `orionaudit.dispatch.lag` histogram
+
+Operators graph p50/p99 dispatch lag to spot capture-queue backlog or dispatcher slowdown long before rows pile up beyond the steady-state `orionaudit.dispatch.rows_processed` rate.
+
+- New `Histogram<double>` named `orionaudit.dispatch.lag` (unit `ms`) on the existing `Moongazing.OrionAudit` Meter.
+- Recorded inside `AuditDispatcher.DispatchOnceAsync` after each successful row promotion.
+- Negative deltas (clock skew between capture and dispatcher hosts) are clamped to 0 so they do not pull the histogram p50 down.
+
+### Tests
+
+1 new fact (integration).
+
+### Migration from v0.7.12
+
+Source-compatible.
+
 ## [0.7.12] - 2026-06-11
 
 ### Added

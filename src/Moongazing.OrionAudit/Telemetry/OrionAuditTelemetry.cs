@@ -39,6 +39,16 @@ public static class OrionAuditTelemetry
     internal static readonly Histogram<double> RetentionSweepDuration = Meter.CreateHistogram<double>(
         "orionaudit.retention.sweep.duration", unit: "ms", description: "Retention sweep duration per cycle.");
 
+    /// <summary>
+    /// v0.7.13 dispatch latency: time between an event's <c>OccurredOnUtc</c> and the
+    /// moment the dispatcher turns its queue entry into an <c>AuditLog</c> row. Operators
+    /// graph p50/p99 to spot capture-queue backlog or dispatcher slowdown long before
+    /// rows pile up beyond <c>orionaudit.dispatch.rows_processed</c>'s steady-state rate.
+    /// </summary>
+    internal static readonly Histogram<double> DispatchLag = Meter.CreateHistogram<double>(
+        "orionaudit.dispatch.lag", unit: "ms",
+        description: "Per-row dispatch latency (queue entry OccurredOnUtc -> AuditLog write).");
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 
