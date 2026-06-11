@@ -71,6 +71,25 @@ public static class OrionAuditTelemetry
     internal static void RecordRetentionDispatched(string policyBranch)
         => RetentionDispatched.Add(1, new KeyValuePair<string, object?>("policy", policyBranch));
 
+    /// <summary>
+    /// v0.7.16 retention sweep failure counter. Increments when the background loop
+    /// swallows an unexpected exception from `SweepOnceAsync` (cancellation does NOT
+    /// emit; only real failures do). Operators page on
+    /// rate(orionaudit_retention_errors_total[5m]) to catch a stuck or thrashing sweep
+    /// long before retention SLAs slip.
+    /// </summary>
+    internal static readonly Counter<long> RetentionErrors = Meter.CreateCounter<long>(
+        "orionaudit.retention.errors", unit: "{errors}",
+        description: "Unexpected exceptions swallowed by the retention sweep loop.");
+
+    /// <summary>
+    /// Record a swallowed exception from the retention sweep loop. Public so consumer-
+    /// owned retention drivers can opt in to the same metric shape.
+    /// </summary>
+    /// <param name="exceptionType">Short type name (e.g. <c>TimeoutException</c>).</param>
+    public static void RecordRetentionError(string exceptionType)
+        => RetentionErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 

@@ -95,6 +95,10 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
             catch (Exception ex)
 #pragma warning restore CA1031
             {
+                // v0.7.16: emit a counter so operators can graph the swallowed failure
+                // rate. Tag with the exception type so dashboards can split by root cause
+                // (DbUpdateConcurrencyException vs SqlException vs TimeoutException).
+                OrionAuditTelemetry.RecordRetentionError(ex.GetType().Name);
                 LogSweepFailed(ex);
             }
         } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
