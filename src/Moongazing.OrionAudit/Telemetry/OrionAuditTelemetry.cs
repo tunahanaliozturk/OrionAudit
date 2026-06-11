@@ -162,6 +162,21 @@ public static class OrionAuditTelemetry
         CaptureEntrySize.Record(bytes);
     }
 
+    /// <summary>
+    /// v0.7.21 distribution of <c>IAuditEventPublisher.PublishAsync</c> wall-clock per
+    /// dispatcher cycle. Operators graph p99 to spot a publisher whose downstream
+    /// (Kafka, RabbitMQ, etc.) has regressed independently of the database side.
+    /// Recorded only when a publisher is configured AND there is at least one event to
+    /// publish (zero-event cycles emit nothing).
+    /// </summary>
+    internal static readonly Histogram<double> PublishDuration = Meter.CreateHistogram<double>(
+        "orionaudit.dispatch.publish.duration_ms", unit: "ms",
+        description: "IAuditEventPublisher.PublishAsync wall-clock per dispatcher cycle.");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
+    public static void RecordPublishDuration(double milliseconds)
+        => PublishDuration.Record(System.Math.Max(0d, milliseconds));
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 

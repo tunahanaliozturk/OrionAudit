@@ -190,7 +190,21 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         // state matters. Strict transactional outbox semantics are tracked in the v0.7.x roadmap.
         if (publisher is not null && publishEvents is { Count: > 0 })
         {
-            await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+            // v0.7.21: time the PublishAsync round-trip so a slow Kafka/RabbitMQ tail
+            // surfaces independently of the database commit. Records on BOTH success
+            // and failure (try/finally) so a publisher that times out is the most
+            // visible part of the histogram tail - exactly what operators need to
+            // diagnose broker incidents.
+            var publishSw = Stopwatch.StartNew();
+            try
+            {
+                await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                publishSw.Stop();
+                OrionAuditTelemetry.RecordPublishDuration(publishSw.Elapsed.TotalMilliseconds);
+            }
         }
 
         // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.

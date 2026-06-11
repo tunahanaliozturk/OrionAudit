@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.21] - 2026-06-11
+
+### Added
+
+#### `orionaudit.dispatch.publish.duration_ms` histogram
+
+`Histogram<double>` measuring `IAuditEventPublisher.PublishAsync` wall-clock per dispatcher cycle. Operators graph p99 to spot a downstream broker (Kafka, RabbitMQ) whose tail has regressed independently of the database side. Emits ONLY when a publisher is configured and there is at least one event to publish.
+
+- Recorded BEFORE `SaveChangesAsync` so a commit failure does not mask the publish-side latency picture.
+- Negative values clamped to 0 (clock-skew safety).
+- Public `OrionAuditTelemetry.RecordPublishDuration(double)` helper.
+
+### Tests
+
+2 facts; 248 total.
+
+### Migration from v0.7.20
+
+Source-compatible.
+
 ## [0.7.20] - 2026-06-11
 
 ### Added
