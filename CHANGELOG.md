@@ -7,6 +7,26 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.11] - 2026-06-11
+
+### Added
+
+#### Retention dry-run mode
+
+`RetentionSweepOptions.DryRun` (default false) flips the sweep into count-only mode. Operators use this to validate a new `RetentionPolicy` (especially `PerTenant` / `PerEntityType`) on production data without touching any row.
+
+- Internally, dry-run wraps the configured archiver in `DryRunAuditArchiver` so all eligibility logic from v0.7.7-v0.7.10 (PerTenant / PerEntityType / archiver-aware paths) applies unchanged.
+- The would-have-removed total flows back to `SweepOnceAsync` and is exposed under a new telemetry counter `orionaudit.retention.dry_run_rows` (distinct from `orionaudit.retention.rows_deleted` so dashboards can differentiate dry runs from real cycles).
+- The activity tag mirrors the counter.
+
+### Tests
+
+4 new facts; 230 total.
+
+### Migration from v0.7.10
+
+Source-compatible. Default behaviour is unchanged.
+
 ## [0.7.10] - 2026-06-11
 
 ### Added
