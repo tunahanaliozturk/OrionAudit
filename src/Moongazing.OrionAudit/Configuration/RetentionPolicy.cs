@@ -137,4 +137,20 @@ public sealed class RetentionSweepOptions
 
     /// <summary>Upper bound on rows deleted per sweep, to keep transactions short. Default: 10 000.</summary>
     public int MaxRowsPerSweep { get; set; } = 10_000;
+
+    /// <summary>
+    /// When true, the sweep evaluates eligibility and reports the count of rows that
+    /// WOULD have been removed, but does NOT actually delete (or archive) any row. The
+    /// telemetry counter <c>orionaudit.retention.dry_run_rows</c> increments instead of
+    /// <c>orionaudit.retention.rows_deleted</c>. Default false.
+    /// </summary>
+    /// <remarks>
+    /// Operators use dry-run mode to validate a new <see cref="RetentionPolicy"/>
+    /// (especially <see cref="RetentionPolicy.PerTenant"/> or
+    /// <see cref="RetentionPolicy.PerEntityType"/>) on production data without touching
+    /// any row. The hosted service emits its normal log line with the would-have-deleted
+    /// count, so a follow-up production run with <see cref="DryRun"/> = false has a
+    /// known expected magnitude.
+    /// </remarks>
+    public bool DryRun { get; set; }
 }

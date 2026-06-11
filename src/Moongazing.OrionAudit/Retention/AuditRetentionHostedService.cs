@@ -63,7 +63,13 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         this.options = options ?? throw new ArgumentNullException(nameof(options));
         this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        this.archiver = archiver ?? new DeleteAuditArchiver();
+        // v0.7.11: dry-run mode swaps the configured archiver for a counting wrapper.
+        // The wrap happens here (not at every call site) so all eligibility logic from
+        // v0.7.7-v0.7.10 (PerTenant / PerEntityType / archiver-aware paths) continues
+        // to apply unchanged and exactly the same rows are evaluated; the difference is
+        // the wrapper returns the count and skips the delete.
+        var configured = archiver ?? new DeleteAuditArchiver();
+        this.archiver = this.options.DryRun ? new DryRunAuditArchiver() : configured;
     }
 
     /// <inheritdoc />
@@ -105,8 +111,18 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         var ctx = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var deleted = await DispatchPolicyAsync(ctx, policy, cancellationToken).ConfigureAwait(false);
 
-        activity?.SetTag("orionaudit.retention.rows_deleted", deleted);
-        OrionAuditTelemetry.RetentionRowsDeleted.Add(deleted);
+        if (options.DryRun)
+        {
+            // Dry-run: emit the would-have-removed total under a distinct counter so
+            // operators can distinguish a dry-run cycle from a real one in telemetry.
+            activity?.SetTag("orionaudit.retention.dry_run_rows", deleted);
+            OrionAuditTelemetry.RetentionDryRunRows.Add(deleted);
+        }
+        else
+        {
+            activity?.SetTag("orionaudit.retention.rows_deleted", deleted);
+            OrionAuditTelemetry.RetentionRowsDeleted.Add(deleted);
+        }
         OrionAuditTelemetry.RetentionSweepDuration.Record(sw.Elapsed.TotalMilliseconds);
         activity?.SetStatus(ActivityStatusCode.Ok);
         return deleted;

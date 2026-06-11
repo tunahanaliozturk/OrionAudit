@@ -33,6 +33,9 @@ public static class OrionAuditTelemetry
     internal static readonly Counter<long> RetentionRowsDeleted = Meter.CreateCounter<long>(
         "orionaudit.retention.rows_deleted", unit: "rows", description: "Audit rows hard-deleted by the retention sweep.");
 
+    internal static readonly Counter<long> RetentionDryRunRows = Meter.CreateCounter<long>(
+        "orionaudit.retention.dry_run_rows", unit: "rows", description: "Audit rows the retention sweep WOULD have removed but did not (dry-run mode).");
+
     internal static readonly Histogram<double> RetentionSweepDuration = Meter.CreateHistogram<double>(
         "orionaudit.retention.sweep.duration", unit: "ms", description: "Retention sweep duration per cycle.");
 
