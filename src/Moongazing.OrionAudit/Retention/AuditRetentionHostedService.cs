@@ -100,6 +100,13 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
     }
 
+    // v0.7.12 fairness deadline shared across the cycle. Inner per-tenant /
+    // per-entity-type branches consult it via DeadlineReached() and return early when
+    // it has elapsed. Reset on every SweepOnceAsync entry.
+    private DateTime? cycleDeadlineUtc;
+    private bool DeadlineReached()
+        => cycleDeadlineUtc is { } d && clock.GetUtcNow().UtcDateTime >= d;
+
     /// <summary>Runs a single sweep cycle. Exposed for tests and operator-triggered runs.</summary>
     public async Task<int> SweepOnceAsync(CancellationToken cancellationToken = default)
     {
@@ -107,9 +114,13 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
             "OrionAudit.Retention.Sweep", ActivityKind.Internal);
 
         var sw = Stopwatch.StartNew();
+        cycleDeadlineUtc = options.MaxSweepDuration is { } budget
+            ? clock.GetUtcNow().UtcDateTime + budget
+            : null;
         await using var scope = scopeFactory.CreateAsyncScope();
         var ctx = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var deleted = await DispatchPolicyAsync(ctx, policy, cancellationToken).ConfigureAwait(false);
+        cycleDeadlineUtc = null;
 
         if (options.DryRun)
         {
@@ -161,7 +172,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         foreach (var entityType in entityTypes)
         {
             ct.ThrowIfCancellationRequested();
-            if (total >= remainingBudget)
+            if (total >= remainingBudget || DeadlineReached())
             {
                 break;
             }
@@ -294,7 +305,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         foreach (var tenantId in tenants)
         {
             ct.ThrowIfCancellationRequested();
-            if (total >= budget)
+            if (total >= budget || DeadlineReached())
             {
                 break;
             }
