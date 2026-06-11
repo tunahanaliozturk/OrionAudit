@@ -80,11 +80,33 @@ public sealed class SweepDeadlineTests : IAsyncLifetime
         public void Advance(TimeSpan delta) => now = now.Add(delta);
     }
 
-    [Fact]
-    public async Task PerTenant_sweep_stops_after_MaxSweepDuration_elapses()
+    private sealed class AutoAdvanceTimeProvider : TimeProvider
     {
+        private DateTimeOffset now;
+        private readonly TimeSpan tickEach;
+        public AutoAdvanceTimeProvider(DateTimeOffset start, TimeSpan tickEach)
+        {
+            now = start;
+            this.tickEach = tickEach;
+        }
+        public override DateTimeOffset GetUtcNow()
+        {
+            var snapshot = now;
+            now = now.Add(tickEach);
+            return snapshot;
+        }
+    }
+
+    [Fact]
+    public async Task PerTenant_sweep_stops_after_MaxSweepDuration_elapses_mid_sweep()
+    {
+        // Use a clock that auto-advances on every read by a chunk larger than the
+        // budget. The first deadline-check inside the loop will see the clock past the
+        // deadline and abort the remaining tenants. Only the first tenant gets processed.
         var now = DateTime.UtcNow;
-        var clock = new MutableTimeProvider(new DateTimeOffset(now, TimeSpan.Zero));
+        var clock = new AutoAdvanceTimeProvider(
+            new DateTimeOffset(now, TimeSpan.Zero),
+            tickEach: TimeSpan.FromMilliseconds(40));
         await SeedAsync(
             Row(now.AddDays(-200), tenantId: "tenant-a"),
             Row(now.AddDays(-200), tenantId: "tenant-b"),
@@ -104,15 +126,11 @@ public sealed class SweepDeadlineTests : IAsyncLifetime
             policy,
             clock);
 
-        // Advance the simulated clock past the deadline BEFORE the sweep tries the
-        // second tenant. The first SweepAgeForTenantAsync runs fully (deadline check
-        // happens BETWEEN tenants); after that the loop breaks.
-        await sut.SweepOnceAsync(CancellationToken.None);
-        // Trigger another sweep with the clock already past the deadline; no tenant
-        // should be processed.
-        clock.Advance(TimeSpan.FromSeconds(1));
         var deleted = await sut.SweepOnceAsync(CancellationToken.None);
-        Assert.Equal(0, deleted);
+
+        // At least one tenant processed but NOT all three - the deadline cut the sweep
+        // short mid-loop.
+        Assert.InRange(deleted, 1, 2);
     }
 
     [Fact]

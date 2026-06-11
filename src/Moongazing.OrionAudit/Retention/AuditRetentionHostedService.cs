@@ -100,12 +100,13 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         } while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
     }
 
-    // v0.7.12 fairness deadline shared across the cycle. Inner per-tenant /
-    // per-entity-type branches consult it via DeadlineReached() and return early when
-    // it has elapsed. Reset on every SweepOnceAsync entry.
-    private DateTime? cycleDeadlineUtc;
+    // v0.7.12 fairness deadline carried through the call stack via AsyncLocal so
+    // concurrent SweepOnceAsync calls (background loop + operator-triggered run) do not
+    // overwrite each other's per-invocation state. AsyncLocal.Value is automatically
+    // captured across async continuations within the same sweep call.
+    private readonly System.Threading.AsyncLocal<DateTime?> cycleDeadlineUtc = new();
     private bool DeadlineReached()
-        => cycleDeadlineUtc is { } d && clock.GetUtcNow().UtcDateTime >= d;
+        => cycleDeadlineUtc.Value is { } d && clock.GetUtcNow().UtcDateTime >= d;
 
     /// <summary>Runs a single sweep cycle. Exposed for tests and operator-triggered runs.</summary>
     public async Task<int> SweepOnceAsync(CancellationToken cancellationToken = default)
@@ -114,13 +115,13 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
             "OrionAudit.Retention.Sweep", ActivityKind.Internal);
 
         var sw = Stopwatch.StartNew();
-        cycleDeadlineUtc = options.MaxSweepDuration is { } budget
+        cycleDeadlineUtc.Value = options.MaxSweepDuration is { } budget
             ? clock.GetUtcNow().UtcDateTime + budget
             : null;
         await using var scope = scopeFactory.CreateAsyncScope();
         var ctx = scope.ServiceProvider.GetRequiredService<TDbContext>();
         var deleted = await DispatchPolicyAsync(ctx, policy, cancellationToken).ConfigureAwait(false);
-        cycleDeadlineUtc = null;
+        cycleDeadlineUtc.Value = null;
 
         if (options.DryRun)
         {
