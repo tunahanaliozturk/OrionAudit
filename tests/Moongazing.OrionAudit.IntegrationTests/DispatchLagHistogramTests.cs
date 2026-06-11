@@ -37,7 +37,7 @@ public class DispatchLagHistogramTests
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, l) =>
         {
-            if (instrument.Meter.Name == "Moongazing.OrionAudit"
+            if (instrument.Meter.Name == "OrionAudit"
                 && instrument.Name == "orionaudit.dispatch.lag")
             {
                 l.EnableMeasurementEvents(instrument);
