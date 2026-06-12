@@ -24,6 +24,10 @@ public sealed class DlqDepthGaugeTests
             do { current = System.Threading.Interlocked.Read(ref observed); }
             while (val > current && System.Threading.Interlocked.CompareExchange(ref observed, val, current) != current);
         });
+        // v0.7.23 coderabbit minor: force OrionAuditTelemetry static init so the
+        // DispatchDlqDepth instrument is constructed before the listener enumerates.
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(
+            typeof(Moongazing.OrionAudit.OrionAuditTelemetry).TypeHandle);
         listener.Start();
 
         // SetDlqDepth is internal; the test assembly already has InternalsVisibleTo wired
@@ -34,6 +38,6 @@ public sealed class DlqDepthGaugeTests
 
         listener.RecordObservableInstruments();
 
-        Assert.True(System.Threading.Interlocked.Read(ref observed) >= 42L);
+        Assert.Equal(42L, System.Threading.Interlocked.Read(ref observed));
     }
 }

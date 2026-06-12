@@ -112,6 +112,13 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         OrionAuditTelemetry.RecordDispatchBatchSize(claimed.Count);
         if (claimed.Count == 0)
         {
+            // v0.7.23 fix (codex P2): snapshot queue + DLQ depth even on zero-row
+            // cycles so the gauges reflect existing state (e.g. dead-letter backlog
+            // present but no dispatchable rows) instead of going stale at 0.
+            OrionAuditTelemetry.SetQueueDepth(await ctx.Set<AuditCaptureQueueEntry>()
+                .CountAsync(q => q.Error == null, cancellationToken).ConfigureAwait(false));
+            OrionAuditTelemetry.SetDlqDepth(await ctx.Set<AuditCaptureQueueEntry>()
+                .CountAsync(q => q.Error != null, cancellationToken).ConfigureAwait(false));
             return 0;
         }
 
