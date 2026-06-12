@@ -217,7 +217,20 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         }
 
         // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.
-        await ctx.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        // v0.7.24: time the SaveChangesAsync wall-clock so operators see the EF write
+        // cost isolated from publish + housekeeping. try/finally so a commit failure
+        // still emits the sample - slow failing commits are the most operator-relevant
+        // tail (deadlocks, transient backend pressure).
+        var flushSw = Stopwatch.StartNew();
+        try
+        {
+            await ctx.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            flushSw.Stop();
+            OrionAuditTelemetry.RecordDispatchFlushDuration(flushSw.Elapsed.TotalMilliseconds);
+        }
 
         // v0.7.20: emit AFTER SaveChangesAsync confirms persistence so a publish or
         // commit failure does not cause a double-count on the next cycle's retry.

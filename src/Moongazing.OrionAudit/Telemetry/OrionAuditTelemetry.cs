@@ -208,6 +208,21 @@ public static class OrionAuditTelemetry
     internal static readonly Histogram<double> DispatchBatchDuration = Meter.CreateHistogram<double>(
         "orionaudit.dispatch.batch.duration", unit: "ms", description: "Dispatcher batch duration per cycle.");
 
+    /// <summary>
+    /// v0.7.24 distribution of SaveChangesAsync wall-clock at dispatch time. Operators
+    /// graph p99 to isolate the EF write piece (AuditLog inserts + queue row deletes +
+    /// commit) from the v0.7.13 dispatch.lag (capture-to-dispatch) and the existing
+    /// dispatch.batch.duration (per-cycle wall-clock covering EVERYTHING).
+    /// try/finally so a commit failure still emits the sample.
+    /// </summary>
+    internal static readonly Histogram<double> DispatchFlushDuration = Meter.CreateHistogram<double>(
+        "orionaudit.dispatch.flush_duration_ms", unit: "ms",
+        description: "SaveChangesAsync wall-clock at dispatch time (AuditLog insert + queue delete + commit).");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in.</summary>
+    public static void RecordDispatchFlushDuration(double milliseconds)
+        => DispatchFlushDuration.Record(System.Math.Max(0d, milliseconds));
+
     private static long dispatchQueueDepth;
 
     /// <summary>Last observed capture-queue depth; updated by the dispatcher each cycle.</summary>
