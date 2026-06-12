@@ -92,20 +92,33 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         var staleBefore = clock.GetUtcNow().UtcDateTime - options.ClaimLease;
 
         // Atomic claim: a single UPDATE over the next BatchSize dispatchable rows.
-        await ctx.Set<AuditCaptureQueueEntry>()
-            .Where(q => q.Error == null && (q.ClaimToken == null || q.ClaimedUtc < staleBefore))
-            .OrderBy(q => q.Id)
-            .Take(options.BatchSize)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(q => q.ClaimToken, claimToken)
-                .SetProperty(q => q.ClaimedUtc, clock.GetUtcNow().UtcDateTime), cancellationToken)
-            .ConfigureAwait(false);
+        // v0.7.25: time the full claim round-trip (UPDATE + SELECT) so capture-table
+        // lock contention / index degradation surfaces isolated from flush + publish.
+        // try/finally so a failing claim (deadlock, timeout) still emits the sample.
+        var claimSw = Stopwatch.StartNew();
+        List<AuditCaptureQueueEntry> claimed;
+        try
+        {
+            await ctx.Set<AuditCaptureQueueEntry>()
+                .Where(q => q.Error == null && (q.ClaimToken == null || q.ClaimedUtc < staleBefore))
+                .OrderBy(q => q.Id)
+                .Take(options.BatchSize)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(q => q.ClaimToken, claimToken)
+                    .SetProperty(q => q.ClaimedUtc, clock.GetUtcNow().UtcDateTime), cancellationToken)
+                .ConfigureAwait(false);
 
-        var claimed = await ctx.Set<AuditCaptureQueueEntry>()
-            .Where(q => q.ClaimToken == claimToken)
-            .OrderBy(q => q.Id)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
+            claimed = await ctx.Set<AuditCaptureQueueEntry>()
+                .Where(q => q.ClaimToken == claimToken)
+                .OrderBy(q => q.Id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            claimSw.Stop();
+            OrionAuditTelemetry.RecordDispatchClaimDuration(claimSw.Elapsed.TotalMilliseconds);
+        }
 
         // v0.7.18 dispatch batch size histogram: zero-row cycles do NOT emit so the
         // histogram tail reflects actual produced batches, not idle polling.
