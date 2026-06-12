@@ -218,6 +218,20 @@ public static class OrionAuditTelemetry
         () => Interlocked.Read(ref dispatchQueueDepth),
         unit: "rows", description: "Capture-queue rows awaiting dispatch, as last observed by the dispatcher.");
 
+    // v0.7.23 dead-letter queue depth snapshot. Fed by the dispatcher each cycle alongside
+    // the pending queue_depth counter. Distinct from rows_deadlettered (a rate-style
+    // counter) - this exposes the live TABLE state so operators can spot a growing
+    // dead-letter table that needs triage even when the dispatch rate looks stable.
+    private static long dispatchDlqDepth;
+
+    /// <summary>v0.7.23 dead-letter queue depth setter. Dispatchers call once per cycle.</summary>
+    internal static void SetDlqDepth(long depth) => Interlocked.Exchange(ref dispatchDlqDepth, depth);
+
+    internal static readonly ObservableGauge<long> DispatchDlqDepth = Meter.CreateObservableGauge<long>(
+        "orionaudit.capture.dlq_depth",
+        () => Interlocked.Read(ref dispatchDlqDepth),
+        unit: "rows", description: "Capture-queue rows in dead-letter state (Error != null), as last observed by the dispatcher.");
+
     internal static readonly Counter<long> ImportRowsWritten = Meter.CreateCounter<long>(
         "orionaudit.import.rows_written", unit: "rows", description: "Audit rows written by the bulk importer.");
 

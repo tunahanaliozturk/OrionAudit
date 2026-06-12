@@ -227,6 +227,11 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         OrionAuditTelemetry.DispatchBatchDuration.Record(sw.Elapsed.TotalMilliseconds);
         OrionAuditTelemetry.SetQueueDepth(await ctx.Set<AuditCaptureQueueEntry>()
             .CountAsync(q => q.Error == null, cancellationToken).ConfigureAwait(false));
+        // v0.7.23: dead-letter depth snapshot. Pairs with queue_depth (pending rows) so
+        // operators see BOTH dimensions of the capture table state without scraping
+        // ad-hoc SQL: pending = work waiting, dlq = failed rows needing triage.
+        OrionAuditTelemetry.SetDlqDepth(await ctx.Set<AuditCaptureQueueEntry>()
+            .CountAsync(q => q.Error != null, cancellationToken).ConfigureAwait(false));
         activity?.SetTag("orionaudit.dispatch.rows_processed", processed);
         // Status set last so an exception above (publish or commit) leaves the span as failed.
         activity?.SetStatus(ActivityStatusCode.Ok);
