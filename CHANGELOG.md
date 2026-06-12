@@ -7,6 +7,25 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.23] - 2026-06-12
+
+### Added
+
+#### `orionaudit.capture.dlq_depth` ObservableGauge
+
+`ObservableGauge<long>` reports the count of capture-queue rows in dead-letter state (`Error != null`). Distinct from the v0.7.x `dispatch.rows_deadlettered` counter (a rate of NEW dead-letters); this gauge exposes the LIVE table state so operators can spot a growing dead-letter backlog that needs triage even when the dispatch rate looks stable.
+
+- Snapshotted by the dispatcher each cycle alongside the existing `queue_depth` (pending rows) gauge.
+- 0 until the first dispatch cycle completes.
+
+### Tests
+
+1 fact; 251 total.
+
+### Migration from v0.7.22
+
+Source-compatible.
+
 ## [0.7.22] - 2026-06-11
 
 ### Added
