@@ -7,6 +7,31 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.26] - 2026-06-13
+
+### Added
+
+#### `IAuditCaptureObserver` extensibility
+
+Consumer-supplied observer invoked when the interceptor captures audited entities during `SaveChangesAsync`. Useful for application-side metrics, security alerting (e.g. "N rows of a sensitive entity modified in one save"), or feeding a separate change-tracking pipeline without coupling that logic to the load-bearing capture path.
+
+- `IAuditCaptureObserver` interface with `OnCaptured(auditedEntityCount, isAsyncCapture)`.
+- `NullAuditCaptureObserver` default.
+- Fires on BOTH capture paths (async staging-capture AND inline AuditLog) with the total audited count.
+- Resolved per-call from the scoped provider (same pattern as `IAuditEventPublisher`); throwing observer is swallowed so an observability fault cannot abort the consumer's transaction.
+
+### Tests
+
+2 facts; 257 total.
+
+### Migration from v0.7.25
+
+Source-compatible.
+
+```csharp
+services.AddSingleton<IAuditCaptureObserver, MyObserver>();
+```
+
 ## [0.7.25] - 2026-06-12
 
 ### Added

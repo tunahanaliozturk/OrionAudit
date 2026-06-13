@@ -28,6 +28,29 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         this.serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     }
 
+    // v0.7.26: resolve and invoke the optional capture observer. Resolved per-call from
+    // the scoped provider (same pattern as IAuditEventPublisher). null and the Null
+    // implementation are both treated as 'no observer'; observer faults are swallowed so
+    // an observability outage cannot abort the consumer's transaction.
+    private void NotifyCaptureObserver(int auditedEntityCount, bool isAsyncCapture)
+    {
+        var observer = serviceProvider.GetService<IAuditCaptureObserver>();
+        if (observer is null or NullAuditCaptureObserver)
+        {
+            return;
+        }
+        try
+        {
+            observer.OnCaptured(auditedEntityCount, isAsyncCapture);
+        }
+#pragma warning disable CA1031
+        catch
+#pragma warning restore CA1031
+        {
+            // observer is observability, not load-bearing
+        }
+    }
+
     /// <inheritdoc />
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData,
@@ -88,6 +111,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             // EntriesWritten counter by exposing the tail (bulk imports, batch-mode saves).
             OrionAuditTelemetry.CaptureEntriesPerSave.Record(auditedEntries.Count);
             OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+            // v0.7.26: notify the optional capture observer (async-capture path).
+            NotifyCaptureObserver(auditedEntries.Count, isAsyncCapture: true);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
         }
@@ -146,6 +171,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         // sample. The capture-shape distribution is the goal, not the success ratio.
         OrionAuditTelemetry.CaptureEntriesPerSave.Record(writtenCount + failedCount);
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
+        // v0.7.26: notify the optional capture observer (inline path). Total audited
+        // count (written + failed) so observers see the full capture surface.
+        NotifyCaptureObserver(writtenCount + failedCount, isAsyncCapture: false);
 
         // Publish BEFORE SaveChanges so a publisher exception aborts the consumer transaction.
         // A NullAuditEventPublisher has nothing to publish and was filtered out above.
