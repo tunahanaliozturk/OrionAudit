@@ -7,6 +7,27 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.25] - 2026-06-12
+
+### Added
+
+#### `orionaudit.dispatch.claim_duration_ms` histogram
+
+`Histogram<double>` measuring the claim round-trip (atomic UPDATE + SELECT of claimed rows) per dispatcher cycle. Isolates capture-table lock contention / index degradation from the v0.7.24 `flush_duration` (write side) and v0.7.21 `publish.duration` (broker side). The dispatcher cycle is now fully decomposed: claim + per-row work + publish + flush.
+
+- ALL cycles emit including zero-row claims (claim latency is itself the signal).
+- try/finally so a failing claim (deadlock, timeout) still emits.
+- Negative values clamped to 0.
+- Public `OrionAuditTelemetry.RecordDispatchClaimDuration(double)` helper.
+
+### Tests
+
+2 facts; 255 total.
+
+### Migration from v0.7.24
+
+Source-compatible.
+
 ## [0.7.24] - 2026-06-12
 
 ### Added

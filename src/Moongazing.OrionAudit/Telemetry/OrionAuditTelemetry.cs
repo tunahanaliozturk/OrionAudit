@@ -223,6 +223,23 @@ public static class OrionAuditTelemetry
     public static void RecordDispatchFlushDuration(double milliseconds)
         => DispatchFlushDuration.Record(System.Math.Max(0d, milliseconds));
 
+    /// <summary>
+    /// v0.7.25 distribution of the claim round-trip wall-clock per dispatcher cycle
+    /// (the atomic UPDATE + the SELECT of claimed rows). Operators graph p99 to spot
+    /// capture-table lock contention or index degradation on the claim path,
+    /// isolated from the v0.7.24 flush_duration (write side) and v0.7.21
+    /// publish.duration (broker side). ALL cycles emit including zero-row claims -
+    /// claim latency is itself the signal. try/finally at the call site so failures
+    /// also emit.
+    /// </summary>
+    internal static readonly Histogram<double> DispatchClaimDuration = Meter.CreateHistogram<double>(
+        "orionaudit.dispatch.claim_duration_ms", unit: "ms",
+        description: "Claim round-trip wall-clock per dispatcher cycle (UPDATE + SELECT).");
+
+    /// <summary>Public so consumer-owned dispatchers can opt in.</summary>
+    public static void RecordDispatchClaimDuration(double milliseconds)
+        => DispatchClaimDuration.Record(System.Math.Max(0d, milliseconds));
+
     private static long dispatchQueueDepth;
 
     /// <summary>Last observed capture-queue depth; updated by the dispatcher each cycle.</summary>
