@@ -34,13 +34,17 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     // an observability outage cannot abort the consumer's transaction.
     private void NotifyCaptureObserver(int auditedEntityCount, bool isAsyncCapture)
     {
-        var observer = serviceProvider.GetService<IAuditCaptureObserver>();
-        if (observer is null or NullAuditCaptureObserver)
-        {
-            return;
-        }
         try
         {
+            // v0.7.26 fix (codex P2): resolve INSIDE the swallow guard. A registered
+            // observer whose constructor / DI dependency throws would otherwise abort
+            // SaveChangesAsync at GetService time, before the try - violating the
+            // 'observer faults are swallowed' contract.
+            var observer = serviceProvider.GetService<IAuditCaptureObserver>();
+            if (observer is null or NullAuditCaptureObserver)
+            {
+                return;
+            }
             observer.OnCaptured(auditedEntityCount, isAsyncCapture);
         }
 #pragma warning disable CA1031
