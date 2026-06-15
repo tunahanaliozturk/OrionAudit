@@ -162,6 +162,11 @@ public sealed class AuditReconstructor : IAuditReconstructor
             }
         }
 
+        // v0.7.29: record how many rows were replayed past the snapshot (or all rows when none
+        // applied) - the snapshot-effectiveness signal. Recorded only when an entity was actually
+        // reconstructed (the early null returns above for absent/deleted entities do not emit).
+        OrionAuditTelemetry.RecordReconstructEventsReplayed(rows.Count - startIndex);
+
         return jsonContext is not null
             ? (T?)JsonSerializer.Deserialize(state, typeof(T), jsonContext)
             : JsonSerializer.Deserialize<T>(state);
