@@ -7,6 +7,23 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.28] - 2026-06-15
+
+### Added
+
+#### `orionaudit.dispatch.poll.idle` counter
+
+`Counter<long>` increments on each dispatcher cycle that claims an empty batch (the capture queue had no dispatchable rows). Operators graph the idle-poll rate against the total poll rate to right-size the polling cadence: a high idle fraction is a cost-of-poll signal, while a low fraction means the dispatcher is busy and `BatchSize` may need raising.
+
+- Distinct from the queue/DLQ depth gauges (current backlog) and the v0.7.18 `batch_size` histogram (which deliberately skips these zero-row cycles).
+- Counted only after the empty-claim cycle fully completes (after the depth-gauge snapshots), so a failing depth query does not count an idle poll for a cycle that then errored out (CodeRabbit).
+- Public `OrionAuditTelemetry.RecordDispatchIdlePoll()` helper.
+- Mirrors the Guard v6.5.17 / Patch v0.2.28 `poll.idle` counters on the Audit side.
+
+### Tests
+
+- `DispatchIdlePollCounterTests`: `RecordDispatchIdlePoll` increments the counter.
+
 ## [0.7.27] - 2026-06-15
 
 ### Added

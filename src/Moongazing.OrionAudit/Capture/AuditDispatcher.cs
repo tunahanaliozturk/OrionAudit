@@ -132,6 +132,10 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 .CountAsync(q => q.Error == null, cancellationToken).ConfigureAwait(false));
             OrionAuditTelemetry.SetDlqDepth(await ctx.Set<AuditCaptureQueueEntry>()
                 .CountAsync(q => q.Error != null, cancellationToken).ConfigureAwait(false));
+            // v0.7.28: count the empty-claim cycle only once it has fully completed (after the
+            // depth-gauge snapshots), so a failing depth query does not count an idle poll for a
+            // cycle that then errored out and re-polls.
+            OrionAuditTelemetry.RecordDispatchIdlePoll();
             return 0;
         }
 

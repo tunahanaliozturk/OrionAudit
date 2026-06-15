@@ -118,6 +118,22 @@ public static class OrionAuditTelemetry
         description: "Capture-queue rows claimed per dispatcher cycle (non-empty cycles only).");
 
     /// <summary>
+    /// v0.7.28 idle-poll counter. Increments each dispatcher cycle that claims an empty batch
+    /// (the capture queue had no dispatchable rows). Operators graph the idle-poll rate against
+    /// the total poll rate to right-size the polling cadence: a high idle fraction is a cost-of-
+    /// poll signal, while a low fraction means the dispatcher is busy and BatchSize may need
+    /// raising. Distinct from the queue/DLQ depth gauges (current backlog) and the v0.7.18
+    /// batch_size histogram (which deliberately skips these zero-row cycles). Mirrors the Guard
+    /// v6.5.17 / Patch v0.2.28 poll.idle counters on the Audit side.
+    /// </summary>
+    internal static readonly Counter<long> DispatchIdlePolls = Meter.CreateCounter<long>(
+        "orionaudit.dispatch.poll.idle", unit: "{polls}",
+        description: "Dispatcher cycles that claimed an empty batch.");
+
+    /// <summary>Record one idle poll (empty-claim cycle). Public for consumer-owned dispatchers.</summary>
+    public static void RecordDispatchIdlePoll() => DispatchIdlePolls.Add(1);
+
+    /// <summary>
     /// v0.7.19 dispatch lag SLO violation counter. Increments each time a per-row
     /// dispatch lag exceeds the consumer-supplied
     /// <see cref="Configuration.AsyncCaptureOptions.DispatchLagViolationThreshold"/>.
