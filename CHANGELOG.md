@@ -7,6 +7,24 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.27] - 2026-06-15
+
+### Added
+
+#### `orionaudit.dispatch.retries_before_success` histogram
+
+`Histogram<int>` records how many attempts a capture-queue row had already failed when it was finally turned into an audit row (its `Attempts` on the success path: 0 = succeeded on the first attempt). It measures the **successful** side of the dispatch loop, complementing the v0.7.17 `dispatch.errors` counter (failures) and `rows_deadlettered` (terminal only), so operators can answer "are retries quietly papering over a flaky capture-to-audit path?".
+
+- Healthy systems sit at p50 = 0; a rising upper percentile means rows are increasingly succeeding only after transient failures.
+- Unlike the batch-shape histograms, the zero sample IS recorded: the fraction of first-try successes is exactly the signal.
+- Emitted post-persist (after `SaveChangesAsync`), alongside the v0.7.20 `entry_size_bytes` samples, so a publish or commit failure that re-dispatches the row does not double-count.
+- Public `OrionAuditTelemetry.RecordRetriesBeforeSuccess(int)` helper (negatives clamp to 0).
+- Mirrors the Guard v6.5.27 `retries_before_success` shape on the Audit side.
+
+### Tests
+
+- `DispatchRetriesBeforeSuccessHistogramTests`: first-try zero is recorded, the retry count is emitted, negatives clamp to 0.
+
 ## [0.7.26] - 2026-06-13
 
 ### Added
