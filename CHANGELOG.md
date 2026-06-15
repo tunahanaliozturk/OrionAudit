@@ -7,6 +7,23 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.29] - 2026-06-15
+
+### Added
+
+#### `orionaudit.reconstruct.events_replayed` histogram
+
+`Histogram<int>` records how many audit diff rows a reconstruction had to replay AFTER the latest applicable snapshot (rows scanned past the snapshot, or all rows when none applies).
+
+- This is the snapshot-effectiveness signal: compared against the total `audit_row_count`, a low `events_replayed` means snapshots are covering most of the history and reconstruction is cheap, while a high value (approaching the row count) means a full replay - a sign the `SnapshotPolicy` should snapshot more frequently, or that an entity has a deep history with no usable snapshot.
+- Distinct from `reconstruct.duration` (wall-clock) and the `audit_row_count` activity tag (total rows fetched).
+- Recorded once per reconstructed entity (the early null returns for absent/deleted entities do not emit). Negatives clamp to 0.
+- Public `OrionAuditTelemetry.RecordReconstructEventsReplayed(int)` helper.
+
+### Tests
+
+- `ReconstructEventsReplayedHistogramTests`: the helper records the value and clamps negatives; a real reconstruction over an entity with history emits a positive replayed-row sample.
+
 ## [0.7.28] - 2026-06-15
 
 ### Added

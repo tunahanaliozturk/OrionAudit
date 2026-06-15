@@ -27,6 +27,24 @@ public static class OrionAuditTelemetry
     internal static readonly Histogram<double> ReconstructDuration = Meter.CreateHistogram<double>(
         "orionaudit.reconstruct.duration", unit: "ms", description: "Time-travel reconstruction duration.");
 
+    /// <summary>
+    /// v0.7.29 distribution of how many audit diff rows a reconstruction had to replay AFTER the
+    /// latest applicable snapshot (rows scanned past the snapshot, or all rows when none applies).
+    /// This is the snapshot-effectiveness signal: compared against the total audit_row_count, a low
+    /// events_replayed means snapshots are covering most of the history and reconstruction is
+    /// cheap, while a high value (approaching the row count) means a full replay - a sign the
+    /// SnapshotPolicy should snapshot more frequently, or that an entity has a deep history with no
+    /// usable snapshot. Distinct from reconstruct.duration (wall-clock) and the audit_row_count
+    /// activity tag (total rows fetched).
+    /// </summary>
+    internal static readonly Histogram<int> ReconstructEventsReplayed = Meter.CreateHistogram<int>(
+        "orionaudit.reconstruct.events_replayed", unit: "{rows}",
+        description: "Audit diff rows replayed past the latest snapshot during a reconstruction.");
+
+    /// <summary>Record one reconstruction's replayed-row count. Negatives clamp to 0.</summary>
+    public static void RecordReconstructEventsReplayed(int rows)
+        => ReconstructEventsReplayed.Record(System.Math.Max(0, rows));
+
     internal static readonly Counter<long> SnapshotsWritten = Meter.CreateCounter<long>(
         "orionaudit.snapshots.written", unit: "snapshots", description: "Periodic snapshots written by the SnapshotPolicy.");
 
