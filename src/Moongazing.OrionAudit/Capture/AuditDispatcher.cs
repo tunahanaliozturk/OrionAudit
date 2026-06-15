@@ -125,6 +125,9 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         OrionAuditTelemetry.RecordDispatchBatchSize(claimed.Count);
         if (claimed.Count == 0)
         {
+            // v0.7.28: count the empty-claim cycle so operators can graph the idle-poll
+            // fraction and right-size the polling cadence.
+            OrionAuditTelemetry.RecordDispatchIdlePoll();
             // v0.7.23 fix (codex P2): snapshot queue + DLQ depth even on zero-row
             // cycles so the gauges reflect existing state (e.g. dead-letter backlog
             // present but no dispatchable rows) instead of going stale at 0.
