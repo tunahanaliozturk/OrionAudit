@@ -199,6 +199,28 @@ public static class OrionAuditTelemetry
     public static void RecordPublishDuration(double milliseconds)
         => PublishDuration.Record(System.Math.Max(0d, milliseconds));
 
+    /// <summary>
+    /// v0.7.27 distribution of how many attempts a queue row had already failed when it was
+    /// finally turned into an audit row (its <c>Attempts</c> on the success path: 0 = succeeded
+    /// on the first attempt). Distinct from the v0.7.17 <c>dispatch.errors</c> counter (which
+    /// tallies failures) and <c>rows_deadlettered</c> (terminal only): this measures the
+    /// successful side, so operators can answer "are retries quietly papering over a flaky
+    /// capture-to-audit path?". A healthy system sits at p50 = 0; a rising upper percentile means
+    /// rows are increasingly succeeding only after transient failures. Unlike the batch-shape
+    /// histograms, the zero sample IS recorded here: the fraction of first-try successes is
+    /// exactly the signal. Mirrors the Guard v6.5.27 <c>retries_before_success</c> shape.
+    /// </summary>
+    internal static readonly Histogram<int> DispatchRetriesBeforeSuccess = Meter.CreateHistogram<int>(
+        "orionaudit.dispatch.retries_before_success", unit: "{retries}",
+        description: "Attempts a queue row had failed before it dispatched successfully (0 = first-try).");
+
+    /// <summary>
+    /// Record the prior-attempt count of a successfully dispatched row. Negatives clamp to 0.
+    /// Public so consumer-owned dispatchers can opt in to the same metric shape.
+    /// </summary>
+    public static void RecordRetriesBeforeSuccess(int retries)
+        => DispatchRetriesBeforeSuccess.Record(System.Math.Max(0, retries));
+
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
         "orionaudit.dispatch.rows_processed", unit: "rows", description: "Capture-queue rows turned into audit rows by the dispatcher.");
 

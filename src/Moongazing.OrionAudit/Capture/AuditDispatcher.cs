@@ -145,6 +145,11 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         // SaveChangesAsync. Recording inside the loop pre-commit would double-count any
         // row that the publisher or commit later failed on.
         List<int>? pendingEntrySizes = null;
+        // v0.7.27: stash each successful row's prior-attempt count (row.Attempts) alongside the
+        // entry sizes, emitted AFTER SaveChangesAsync for the same anti-double-count reason: a
+        // publish or commit failure re-dispatches the row, which would otherwise record a second
+        // sample for the same envelope.
+        List<int>? pendingRetriesBeforeSuccess = null;
 
         foreach (var row in claimed)
         {
@@ -162,6 +167,10 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 // another histogram sample for the same envelope.
                 pendingEntrySizes ??= new List<int>(claimed.Count);
                 pendingEntrySizes.Add((row.BeforeJson?.Length ?? 0) + (row.AfterJson?.Length ?? 0));
+                // v0.7.27: capture the prior-attempt count this successful row carried. A
+                // first-try success records 0; a row that previously failed records its retries.
+                pendingRetriesBeforeSuccess ??= new List<int>(claimed.Count);
+                pendingRetriesBeforeSuccess.Add(row.Attempts);
                 // v0.7.13 dispatch lag: time between the original event and its
                 // promotion to an AuditLog row. Negative deltas (clock skew between
                 // capture and dispatcher hosts) are clamped to 0 so they do not pull
@@ -252,6 +261,15 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
             foreach (var size in pendingEntrySizes)
             {
                 OrionAuditTelemetry.RecordCaptureEntrySize(size);
+            }
+        }
+
+        // v0.7.27: emit the retries-before-success samples post-persist, same as entry sizes.
+        if (pendingRetriesBeforeSuccess is not null)
+        {
+            foreach (var retries in pendingRetriesBeforeSuccess)
+            {
+                OrionAuditTelemetry.RecordRetriesBeforeSuccess(retries);
             }
         }
 
