@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 `Counter<long>` increments on each dispatcher cycle that claims an empty batch (the capture queue had no dispatchable rows). Operators graph the idle-poll rate against the total poll rate to right-size the polling cadence: a high idle fraction is a cost-of-poll signal, while a low fraction means the dispatcher is busy and `BatchSize` may need raising.
 
 - Distinct from the queue/DLQ depth gauges (current backlog) and the v0.7.18 `batch_size` histogram (which deliberately skips these zero-row cycles).
+- Counted only after the empty-claim cycle fully completes (after the depth-gauge snapshots), so a failing depth query does not count an idle poll for a cycle that then errored out (CodeRabbit).
 - Public `OrionAuditTelemetry.RecordDispatchIdlePoll()` helper.
 - Mirrors the Guard v6.5.17 / Patch v0.2.28 `poll.idle` counters on the Audit side.
 
