@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD033 MD041 MD060 -->
 
 <p align="center">
-  <img src="src/Moongazing.OrionAudit/docs/logo.png" alt="OrionAudit Logo" width="150" />
+  <img src="docs/logo.png" alt="OrionAudit Logo" width="150" />
 </p>
 
 <h1 align="center">OrionAudit</h1>
