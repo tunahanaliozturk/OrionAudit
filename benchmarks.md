@@ -1,105 +1,89 @@
 # OrionAudit Benchmarks
 
-Latest run: 2026-05 on Intel Core i7-7820HQ CPU @ 2.90 GHz (Kaby Lake, 4 physical / 8 logical cores), Windows 11 22H2, .NET 10.0.5, BenchmarkDotNet 0.15.8.
+A BenchmarkDotNet suite that measures OrionAudit's pure, in-memory hot paths: snapshot
+building, RFC 6902 diff compute/apply, the replay fold at the heart of time-travel
+reconstruction, and the read-side view projection.
 
-> **Note.** These numbers are reference-grade, not marketing claims. Reproduce locally with `dotnet run -c Release --project bench/Moongazing.OrionAudit.Bench`. Your hardware will differ, and the relative cost of audit vs. baseline `SaveChanges` is dominated by the database round-trip on real providers (see "Database overhead" below).
+The suite deliberately avoids any benchmark that needs a database, MySql provider, or an
+ASP.NET host. Those paths are dominated by IO and a microbenchmark of them measures the
+storage engine, not OrionAudit. Everything here runs against in-memory `JsonObject` /
+`AuditLog` state so the numbers reflect OrionAudit's own CPU and allocation cost.
+
+No reference numbers are published here on purpose. Results are hardware-, runtime-, and
+JIT-dependent. Run the suite on your own machine (see [Running](#running)) and read the
+BenchmarkDotNet summary table it prints.
 
 ## Methodology
 
-- BenchmarkDotNet job: short-run defaults (3 warmup + 5 measurement iterations) unless otherwise noted.
-- Memory profiler enabled (`[MemoryDiagnoser]`).
-- All allocations and GC stats reported.
-- Each scenario isolated; no shared state between runs.
-- EF Core scenarios run against in-memory SQLite, which has near-zero per-row IO cost. This makes audit overhead look large in ratio. Real Postgres / SQL Server numbers move very differently (see the SaveChanges scenario notes).
+- Each benchmark class is decorated with `[MemoryDiagnoser]`, so every result row reports
+  allocated bytes and GC counts alongside timing.
+- Each class runs on two runtimes via `[SimpleJob(RuntimeMoniker.Net80)]` and
+  `[SimpleJob(RuntimeMoniker.Net90)]`, so .NET 8 and .NET 9 appear side by side in the
+  summary table.
+- Inputs are built once in `[GlobalSetup]`; the measured `[Benchmark]` methods do only the
+  work under test.
+- No shared state between scenarios; no database, no DI container, no EF Core in the
+  measured path.
 
 ## Scenarios
 
-### Per-entity snapshot build
+### `SnapshotBuilderBenchmarks`
 
-A 7-property entity, single snapshot build.
+Measures `SnapshotBuilder.Build`, the per-entity snapshot hot path invoked once for every
+audited entity on every `SaveChanges`. Compares an attributes-only capture (`baseline`)
+against a configuration that hashes one field and redacts another, so the delta isolates
+the SHA-256 hash path. Pure: a property-value dictionary in, a `JsonObject` out.
 
-| Method                  |    Mean | Ratio | Allocated |
-|-------------------------|--------:|------:|----------:|
-| Build_AttributesOnly    |  677 ns |  1.00 |     984 B |
-| Build_WithHashAndRedact | 1.74 us |  2.57 |     984 B |
+### `DiffEngineBenchmarks`
 
-Interpretation: `Hash` and `Redact` pay for one SHA-256 invocation per hashed field. The UTF-8 input buffer is stack-allocated for inputs under 256 bytes and rented from `ArrayPool<byte>` above that, with stack-allocated SHA-256 output, so the cryptographic path itself is zero-allocation. The allocation total above is the JSON node graph for the snapshot, not the hash.
+Measures the RFC 6902 diff engine, parameterized by property count (4, 16, 64).
+`Compute` is the write-side path (one diff per audited entity per `SaveChanges`); `Apply`
+is the read-side path (one diff applied per audit row during reconstruction). Both are pure
+`JsonObject` transforms.
 
-### JSON Patch diff (Compute vs. Apply)
+### `ReplayBenchmarks`
 
-The diff engine is the workhorse of OrionAudit. `Compute` runs on write (capture); `Apply` runs on read (reconstruction).
+Measures the pure replay loop at the heart of time-travel reconstruction: folding a chain
+of N pre-computed RFC 6902 patches into a starting snapshot via repeated `DiffEngine.Apply`.
+This is the same fold the database-backed reconstructor performs once it has loaded the
+audit rows, with the storage IO removed. Parameterized by event count (10, 100, 1000) to
+show how replay scales with history depth.
 
-| Properties | Compute (Mean / Alloc) | Apply (Mean / Alloc) | Apply ratio |
-|-----------:|-----------------------:|---------------------:|------------:|
-|          4 |       25.4 us / 24.0 KB |     24.9 us / 4.4 KB |        0.18 |
-|         16 |       95.6 us / 88.5 KB |    35.8 us / 15.3 KB |        0.17 |
-|         64 |      330.0 us / 351 KB  |   136.5 us / -       |        0.41 |
+### `AuditViewRenderBenchmarks`
 
-Interpretation: `Apply` is consistently 2.5x to 5x cheaper than `Compute` and allocates 5x to 6x less. This is the right shape for an audit system: capture pays the upfront cost so that replay (time-travel reconstruction) is cheap. The 64-property row shows the engine starting to scale sub-linearly on the apply path because more operations fit in the same JSON tree walk.
+Measures the read-side projection that turns persisted `AuditLog` rows into human-readable
+`AuditEntryView`s. `RenderOne` parses one row's diff into field-level changes;
+`RenderMany` orders and projects a page of rows. Parameterized by row count (1, 50, 500).
+Pure: depends only on `System.Text.Json`.
 
-### EF Core SaveChanges overhead
-
-In-memory SQLite, OrionAudit registered vs. a baseline `SaveChanges` with no audit hooked up.
-
-| Batch size | NoAudit (Mean) | WithAudit (Mean) | Slowdown | Alloc ratio |
-|-----------:|---------------:|-----------------:|---------:|------------:|
-|          1 |        197 us  |          679 us  |     3.5x |        1.5x |
-|         10 |        474 us  |        2.38 ms   |     5.0x |        3.2x |
-|        100 |       2.59 ms  |        10.8 ms   |     4.2x |        4.6x |
-
-Interpretation: SQLite in-memory has near-zero per-row write cost, which makes the audit overhead look large in ratio. Against a real Postgres or SQL Server deployment the DB round-trip dominates total latency and the audit overhead drops into the 5 to 15 percent range. Run the harness against your own provider for the number that matters to you.
-
-### Async-mode interceptor overhead
-
-`InterceptorBench` measures sync vs. async-staging capture under in-memory SQLite, where async mode pays for the queue insert plus the dispatcher's claim without getting any network-IO benefit. On a real DB this picture reverses (see the v0.5.0 callout in README.md).
-
-| Scenario                       | Batch |  Mean (us) | Ratio | Allocated      |
-|--------------------------------|------:|-----------:|------:|----------------|
-| SaveChanges_NoAudit            |     1 |        277 |  1.00 | 71 KB          |
-| SaveChanges_WithAudit          |     1 |        769 |  2.82 | 96 KB  (1.35x) |
-| SaveChanges_WithAsyncAudit     |     1 |      1 311 |  4.80 | 95 KB  (1.34x) |
-| SaveChanges_NoAudit            |    10 |        957 |  1.00 | 141 KB         |
-| SaveChanges_WithAudit          |    10 |      3 936 |  4.18 | 335 KB (2.37x) |
-| SaveChanges_WithAsyncAudit     |    10 |      3 414 |  3.62 | 343 KB (2.43x) |
-| SaveChanges_NoAudit            |   100 |      6 023 |  1.00 | 819 KB         |
-| SaveChanges_WithAudit          |   100 |     13 720 |  2.36 | 2.7 MB (3.31x) |
-| SaveChanges_WithAsyncAudit     |   100 |     14 259 |  2.45 | 2.8 MB (3.45x) |
-
-Interpretation: in-memory SQLite is unkind to async-mode bookkeeping. The `ExecuteUpdateAsync` claim plus the queue insert show up as raw cost without the network round-trip latency a real DB has. Treat async capture as a correctness-preserving way to move materialization off the consumer's transaction. It is a throughput feature, not a microbenchmark win.
-
-### Time-travel reconstruction
-
-| History depth |    Mean | Allocated |
-|--------------:|--------:|----------:|
-|            10 | 1.09 ms |    126 KB |
-|           100 | 2.76 ms |    506 KB |
-|          1000 | 8.95 ms |    4.3 MB |
-
-Interpretation: reconstruction is O(N) in audit-row count because every diff is applied in sequence from the Insert forward. Periodic snapshotting (already shipped in v0.2) turns this into O(K) where K is the number of updates since the last snapshot. For `SnapshotEvery(100)` against the 1000-depth case, expect roughly a 10x speedup and proportional allocation drop.
-
-## Design notes that show up in the numbers
-
-- **Primitive fast path.** `SnapshotBuilder.ConvertToNode` switches on the runtime type and calls `JsonValue.Create` directly for primitives, skipping `JsonSerializer.SerializeToNode`'s reflection. User-defined types still fall through to the reflective path.
-- **FrozenDictionary lookups.** `IAuditConfiguration.IsAudited` is a frozen-dictionary `ContainsKey`. The interceptor short-circuits on entity state before doing the type lookup, so non-audited entities pay nothing measurable.
-- **Tenant resolver lookup.** `FindExtension<CoreOptionsExtension>()` for the tenant resolver rather than LINQ over `IDbContextOptions.Extensions`, which is what older builds did.
-
-## How to reproduce
+## Running
 
 ```bash
-cd <repo-root>
-dotnet run -c Release --project bench/Moongazing.OrionAudit.Bench
+dotnet run -c Release --project benchmarks/Moongazing.OrionAudit.Benchmarks
 ```
 
-The harness includes `DiffEngineBench`, `DispatcherBench`, `InterceptorBench`, `ReconstructorBench`, `ReconstructorWithSnapshotBench`, and `SnapshotBuilderBench`. Pass `--filter '*'` to run everything; pass a specific class name to run just one.
+`Program.cs` uses `BenchmarkSwitcher.FromAssembly(...)`, so with no arguments it prompts for
+which class(es) to run. To run everything non-interactively:
 
-Results appear in `BenchmarkDotNet.Artifacts/results/`.
+```bash
+dotnet run -c Release --project benchmarks/Moongazing.OrionAudit.Benchmarks -- --filter '*'
+```
 
-## Comparison baselines
+To run a single class, pass its name to the filter, for example:
 
-We report OrionAudit numbers next to honest baselines so readers can place them in context:
+```bash
+dotnet run -c Release --project benchmarks/Moongazing.OrionAudit.Benchmarks -- --filter '*DiffEngineBenchmarks*'
+```
 
-- **No audit registered.** The `NoAudit` columns above. The right comparison for "what does the abstraction cost in the hot path".
-- **Audit.NET.** The closest commodity alternative for EF Core. It captures a similar shape (entity diff per SaveChanges) but does not ship a reflection-free diff engine, periodic snapshotting, or time-travel reconstruction. A side-by-side will land in a future release; until then, the rough public guidance is that Audit.NET is in the same order of magnitude as OrionAudit's sync mode on simple entities and falls behind once snapshotting matters.
-- **DIY interceptor.** A minimal hand-rolled SaveChangesInterceptor that writes a flat JSON dump per change. Establishes how much OrionAudit's diff and reconstruction features cost compared to "log everything as a blob".
+Results, including machine-readable exports, are written to `BenchmarkDotNet.Artifacts/results/`.
 
-The point of the comparison is to be honest about where OrionAudit sits, not to win a chart. If a competitor is faster on a given scenario we will say so and explain why.
+## Reading the results
+
+- Compare the `Mean` column within a class, not across machines.
+- Watch the `Allocated` column: OrionAudit's design goal on these paths is low, predictable
+  allocation. The snapshot primitive fast path and the reflection-free diff engine are the
+  reason the numbers stay flat as inputs grow.
+- For `ReplayBenchmarks`, expect cost to grow with event count: reconstruction is O(N) in
+  audit-row count when no snapshot cursor is present. Periodic snapshotting (shipped in the
+  core library) turns this into O(K) where K is the number of updates since the last
+  snapshot; that win is exercised by the database-backed paths, not by this pure suite.
