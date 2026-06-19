@@ -4,11 +4,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moongazing.OrionAudit;
 using Moongazing.OrionAudit.Sample;
+using Moongazing.OrionAudit.Store;
 using Moongazing.OrionAudit.Testing;
 
 const string Sep = "============================================================";
 
-Console.WriteLine("OrionAudit v0.2.0 — feature showcase");
+Console.WriteLine("OrionAudit v0.8.0 — feature showcase");
 Console.WriteLine(Sep);
 
 await using var connection = new SqliteConnection("DataSource=:memory:");
@@ -235,6 +236,79 @@ await Section("10. SOFT-DELETE CAPTURE", async () =>
         {
             Console.WriteLine($"   {row.OccurredOnUtc:HH:mm:ss.fff}  {row.Action,-12}  snapshot={(row.Snapshot is null ? "no" : "yes")}");
         }
+    }
+});
+
+Console.WriteLine();
+Console.WriteLine(Sep);
+Console.WriteLine("v0.8.0 features tour");
+Console.WriteLine(Sep);
+
+await Section("11. QUERYABLE HISTORY READ API + SNAPSHOT COMPACTION", async () =>
+{
+    await using var hsConn = new SqliteConnection("DataSource=:memory:");
+    await hsConn.OpenAsync();
+    var hsServices = new ServiceCollection();
+    hsServices.AddLogging();
+    hsServices.AddOrionAudit<ShopDb>(o =>
+    {
+        SampleAuditModule.RegisterAuditedTypes(o.ConfigurationBuilder);
+        o.UseJsonContext(SampleJsonContext.Default);
+    });
+    hsServices.AddSingleton(hsConn);
+    hsServices.AddDbContext<ShopDb>((p, o) =>
+        o.UseSqlite(p.GetRequiredService<SqliteConnection>()).UseOrionAudit(p));
+    await using var hsSp = hsServices.BuildServiceProvider();
+    await using (var bootstrap = hsSp.CreateAsyncScope())
+    {
+        await bootstrap.ServiceProvider.GetRequiredService<ShopDb>().Database.EnsureCreatedAsync();
+    }
+
+    // One insert and a run of updates so there is a real history to query and compact.
+    Guid orderId;
+    await using (var scope = hsSp.CreateAsyncScope())
+    {
+        var ctx = scope.ServiceProvider.GetRequiredService<ShopDb>();
+        var order = new Order { CustomerName = "Query", Status = "Pending", Total = 10m };
+        ctx.Orders.Add(order);
+        await ctx.SaveChangesAsync();
+        orderId = order.Id;
+        for (var i = 1; i <= 9; i++)
+        {
+            order.Status = $"step-{i}";
+            await ctx.SaveChangesAsync();
+        }
+    }
+
+    // EfCoreAuditHistoryStore is registered by AddOrionAudit — resolve IAuditHistoryStore directly.
+    await using (var scope = hsSp.CreateAsyncScope())
+    {
+        var store = scope.ServiceProvider.GetRequiredService<IAuditHistoryStore>();
+
+        // Filter by entity type + subject + action, oldest first, first page of 5.
+        var page = await store.QueryAsync(new AuditHistoryQuery
+        {
+            EntityType = typeof(Order).AssemblyQualifiedName,
+            EntityId = orderId.ToString(),
+            Action = AuditAction.Updated,
+            Order = AuditHistoryOrder.OldestFirst,
+            Take = 5,
+        });
+        Console.WriteLine($"   Query Updated rows for the order: page has {page.Items.Count} of {page.TotalCount} total, HasMore={page.HasMore}.");
+
+        // Compact: fold older history into a snapshot, keep the 3 most-recent rows verbatim.
+        var result = await store.CompactAsync(new AuditCompactionRequest
+        {
+            EntityType = typeof(Order).AssemblyQualifiedName!,
+            EntityId = orderId.ToString(),
+            RetainTail = 3,
+        });
+        Console.WriteLine($"   Compaction folded {result.RowsRemoved} rows: {result.RowsBefore} -> {result.RowsAfter} (snapshotWritten={result.SnapshotWritten}).");
+
+        // Latest state stays fully reconstructable after compaction.
+        var reconstructor = scope.ServiceProvider.GetRequiredService<IAuditReconstructor>();
+        var current = await reconstructor.ReconstructAsync<Order>(orderId.ToString(), DateTime.UtcNow.AddMinutes(1));
+        Console.WriteLine($"   Reconstructed final Status = {current!.Status} (rebuilt from the compacted snapshot plus the retained tail).");
     }
 });
 
