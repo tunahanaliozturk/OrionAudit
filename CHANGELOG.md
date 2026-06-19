@@ -7,6 +7,36 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-19
+
+### Added
+
+#### Queryable audit-history read API (`IAuditHistoryStore`)
+
+A storage-agnostic read/maintenance surface over recorded `AuditLog` rows, in the new `Moongazing.OrionAudit.Store` namespace. Lets a consumer query audit history by common dimensions without binding to a specific persistence backend.
+
+- `IAuditHistoryStore.QueryAsync(AuditHistoryQuery, ...)` returns a paged `AuditHistoryPage` (rows + `TotalCount` + `HasMore`). `AuditHistoryQuery` filters by entity type, polymorphic base type, entity id (subject), `AuditAction`, user id, tenant id, and an inclusive `FromUtc`..`ToUtc` time range, with `Skip`/`Take` paging and newest-first / oldest-first ordering. Every filter is optional; an unfiltered query is bounded by `AuditHistoryQuery.DefaultPageSize` (100). `AuditHistoryQuery.Validate()` rejects negative skip, non-positive take, and an inverted time range consistently across backends.
+- `AuditHistoryStoreBase` supplies a capability-default that throws `NotSupportedException` for each operation, so a backend overrides only what it can honour (mirrors the family's `DeleteAuditArchiver`-as-default pattern).
+- `EfCoreAuditHistoryStore` is the default implementation, registered by `AddOrionAudit`; it translates the filters into a server-side query over the consumer's `DbContext`.
+- `InMemoryAuditHistoryStore` (in OrionAudit.Testing) implements the full surface over an in-memory row list with no persistence dependency, for tests and prototyping against the abstraction.
+
+#### Snapshot compaction
+
+An explicit operation that collapses a long change-history for one entity into a compacted snapshot (latest reconstructable state) plus a bounded retained tail, to bound storage growth.
+
+- `IAuditHistoryStore.CompactAsync(AuditCompactionRequest, ...)` folds the rows older than `RetainTail` into a single snapshot row carrying the entity's reconstructed state at the compaction boundary, removes the folded rows, and keeps the most-recent `RetainTail` rows verbatim. A folded `Deleted` / `SoftDeleted` boundary stays a terminal state. Optional `TenantId` scopes the compaction to one tenant's rows for a shared entity id. Returns `AuditCompactionResult` (rows before / removed / after, snapshot-written). A no-op when the history is too short to gain anything.
+- `AuditHistoryCompactor` is the pure, backend-agnostic folding engine. It replays the folded history over `AuditLog` JSON via `DiffEngine` (no reflection, no CLR entity type), so it is trim-safe / Native-AOT clean and shared by every store. The EF Core store applies the plan as one insert + delete inside a single `SaveChanges` transaction, so a failure leaves the history untouched.
+
+### Fixed
+
+- Flaky `CaptureEntriesPerSaveHistogramTests`: the tests listened on the process-global `OrionAudit` meter with no per-test discriminator, so under xUnit parallel execution an audited save in another test class could leak a sample into these assertions (intermittently breaking the strict "no emission for a no-op save" check). The tests now gate sample capture on an `AsyncLocal` flag that flows across the awaited `SaveChangesAsync` into the interceptor's `Record` call, isolating each test to its own emissions. Test-only change; no production behaviour affected.
+
+### Tests
+
+- `InMemoryAuditHistoryStoreTests`: query filters (entity type, id, action, user, tenant) return correct subsets; time-range bounds are inclusive on both ends; paging returns disjoint subsets and reports `HasMore`; ordering ascending/descending; invalid paging and inverted ranges throw. Compaction reduces history while preserving the latest reconstructable state, respects the retained tail, handles `RetainTail` 0, no-ops a short history, touches only the requested entity, and keeps a folded delete terminal.
+- `EfCoreAuditHistoryStoreTests`: query filtering/paging/time-range against a real SQLite provider; compaction removes the folded rows, preserves the latest state on a fresh read, and stays tenant-scoped.
+- `AuditHistoryStoreBaseTests`: the default base throws `NotSupportedException`; a store overriding only `QueryAsync` still throws from `CompactAsync`.
+
 ## [0.7.32] - 2026-06-17
 
 ### Changed
