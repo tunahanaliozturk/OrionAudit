@@ -203,6 +203,34 @@ public class InMemoryAuditHistoryStoreTests
             store.QueryAsync(new AuditHistoryQuery { FromUtc = t0.AddHours(5), ToUtc = t0 }));
     }
 
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void Validate_NonUtcFrom_Throws(DateTimeKind kind)
+    {
+        var from = new DateTime(2026, 1, 1, 0, 0, 0, kind);
+        var ex = Assert.Throws<ArgumentException>(() => new AuditHistoryQuery { FromUtc = from }.Validate());
+        Assert.Contains("FromUtc", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void Validate_NonUtcTo_Throws(DateTimeKind kind)
+    {
+        var to = new DateTime(2026, 1, 1, 0, 0, 0, kind);
+        var ex = Assert.Throws<ArgumentException>(() => new AuditHistoryQuery { ToUtc = to }.Validate());
+        Assert.Contains("ToUtc", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_UtcBounds_Passes()
+    {
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Should not throw.
+        new AuditHistoryQuery { FromUtc = t0, ToUtc = t0.AddHours(1) }.Validate();
+    }
+
     // ----- Compaction -----
 
     // Builds a linear history: Insert {v:1} then Updates v:2..vN, each diff replacing /v.
@@ -371,5 +399,88 @@ public class InMemoryAuditHistoryStoreTests
             EntityId = "e1",
             RetainTail = -1,
         }));
+    }
+
+    [Fact]
+    public async Task Compact_NonObjectSnapshotJson_ThrowsOrionAuditException()
+    {
+        // The base row's snapshot is a JSON array, not an object. AsObject() would throw a raw
+        // InvalidOperationException; the compactor must funnel it into OrionAuditException.
+        var store = new InMemoryAuditHistoryStore();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        store.Add(Row(OrderType, "e1", AuditAction.Inserted, t0, snapshot: "[1,2,3]"));
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0.AddMinutes(1),
+            diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 2 } }.ToJsonString()));
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0.AddMinutes(2),
+            diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 3 } }.ToJsonString()));
+
+        await Assert.ThrowsAsync<OrionAuditException>(() => store.CompactAsync(new AuditCompactionRequest
+        {
+            EntityType = OrderType,
+            EntityId = "e1",
+            RetainTail = 0,
+        }));
+    }
+
+    [Fact]
+    public async Task Compact_CompactedBaseIsInserted()
+    {
+        // A folded insert/update history must leave the compacted base as Inserted so Replay
+        // accepts it as the start of the history.
+        var store = HistoryStore(updateCount: 9); // Insert + 9 updates
+
+        await store.CompactAsync(new AuditCompactionRequest
+        {
+            EntityType = OrderType,
+            EntityId = "e1",
+            RetainTail = 3,
+        });
+
+        var oldest = store.Snapshot()
+            .OrderBy(r => r.OccurredOnUtc).ThenBy(r => r.Id)
+            .First();
+        Assert.Equal(AuditAction.Inserted, oldest.Action);
+        Assert.NotNull(oldest.Snapshot);
+    }
+
+    [Fact]
+    public async Task Compact_EqualTimestampBoundaryAndTail_SnapshotSortsFirst()
+    {
+        var store = new InMemoryAuditHistoryStore();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Insert + two updates + a retained-tail update, all at the SAME timestamp t0.
+        store.Add(Row(OrderType, "e1", AuditAction.Inserted, t0, snapshot: new JsonObject { ["v"] = 1 }.ToJsonString()));
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0,
+            diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 2 } }.ToJsonString()));
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0,
+            diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 3 } }.ToJsonString()));
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0,
+            diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 4 } }.ToJsonString()));
+
+        await store.CompactAsync(new AuditCompactionRequest
+        {
+            EntityType = OrderType,
+            EntityId = "e1",
+            RetainTail = 1,
+        });
+
+        var ordered = store.Snapshot()
+            .OrderBy(r => r.OccurredOnUtc).ThenBy(r => r.Id)
+            .ToList();
+
+        // Snapshot first, retained tail second; oldest-first replay yields the latest state v == 4.
+        Assert.Equal(2, ordered.Count);
+        Assert.Equal(AuditAction.Inserted, ordered[0].Action);
+        Assert.NotNull(ordered[0].Snapshot);
+
+        var state = JsonNode.Parse(ordered[0].Snapshot!)!.AsObject();
+        foreach (var r in ordered.Skip(1))
+        {
+            if (r.Diff is { Length: > 0 } && r.Diff != "[]")
+            {
+                state = Moongazing.OrionAudit.Capture.DiffEngine.Apply(state, r.Diff);
+            }
+        }
+        Assert.Equal(4, (int)state["v"]!);
     }
 }

@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moongazing.OrionAudit;
 using Moongazing.OrionAudit.Capture;
+using Moongazing.OrionAudit.Read;
 using Moongazing.OrionAudit.Store;
 
 namespace Moongazing.OrionAudit.Tests;
@@ -10,6 +11,15 @@ namespace Moongazing.OrionAudit.Tests;
 public class EfCoreAuditHistoryStoreTests
 {
     private const string OrderType = "Acme.Order, Acme";
+
+    // A real CLR type whose AssemblyQualifiedName is what AuditReconstructor filters on, so a
+    // compacted history can be replayed end-to-end through the production reconstructor.
+    public sealed class Widget
+    {
+        public int V { get; set; }
+    }
+
+    private static readonly string WidgetType = typeof(Widget).AssemblyQualifiedName!;
 
     private sealed class AuditDbContext : DbContext
     {
@@ -206,5 +216,126 @@ public class EfCoreAuditHistoryStoreTests
         var t2Count = await ctx.AuditLogs.CountAsync(a => a.TenantId == "t2");
         Assert.Equal(2, t1Count); // snapshot + 1 retained
         Assert.Equal(6, t2Count); // untouched
+    }
+
+    [Fact]
+    public async Task Compact_InsertUpdateHistory_StaysReconstructableThroughReplay()
+    {
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+
+        var entityId = Guid.NewGuid().ToString();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        ctx.AuditLogs.Add(new AuditLog
+        {
+            EntityType = WidgetType,
+            EntityId = entityId,
+            Action = AuditAction.Inserted,
+            OccurredOnUtc = t0,
+            Diff = "[]",
+            Snapshot = new JsonObject { ["V"] = 1 }.ToJsonString(),
+        });
+        for (var i = 2; i <= 10; i++)
+        {
+            ctx.AuditLogs.Add(new AuditLog
+            {
+                EntityType = WidgetType,
+                EntityId = entityId,
+                Action = AuditAction.Updated,
+                OccurredOnUtc = t0.AddMinutes(i),
+                Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = i } }.ToJsonString(),
+            });
+        }
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+
+        var store = new EfCoreAuditHistoryStore(ctx);
+        await store.CompactAsync(new AuditCompactionRequest
+        {
+            EntityType = WidgetType,
+            EntityId = entityId,
+            RetainTail = 3,
+        });
+        ctx.ChangeTracker.Clear();
+
+        // The compacted base must read as Inserted, otherwise Replay throws "starts with a
+        // non-Insert action". Confirm the oldest surviving row is an Inserted snapshot.
+        var oldest = await ctx.AuditLogs
+            .Where(a => a.EntityId == entityId)
+            .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
+            .FirstAsync();
+        Assert.Equal(AuditAction.Inserted, oldest.Action);
+        Assert.NotNull(oldest.Snapshot);
+
+        // Reconstruct through the production reconstructor: the compacted base is accepted and the
+        // latest state replays to v == 10.
+        var reconstructor = new AuditReconstructor(ctx);
+        var widget = await reconstructor.ReconstructAsync<Widget>(entityId, t0.AddMinutes(10));
+        Assert.NotNull(widget);
+        Assert.Equal(10, widget!.V);
+    }
+
+    [Fact]
+    public async Task Compact_EqualTimestampBoundaryAndTail_KeepsSnapshotBeforeTail()
+    {
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+
+        var entityId = Guid.NewGuid().ToString();
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Insert + two updates at t0 (boundary), then a retained-tail update at the SAME timestamp
+        // t0. With a random snapshot Guid the snapshot could sort after the tail; reusing the
+        // boundary Id guarantees it sorts first.
+        ctx.AuditLogs.Add(new AuditLog
+        {
+            EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Inserted,
+            OccurredOnUtc = t0, Diff = "[]", Snapshot = new JsonObject { ["V"] = 1 }.ToJsonString(),
+        });
+        ctx.AuditLogs.Add(new AuditLog
+        {
+            EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Updated, OccurredOnUtc = t0,
+            Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = 2 } }.ToJsonString(),
+        });
+        ctx.AuditLogs.Add(new AuditLog
+        {
+            EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Updated, OccurredOnUtc = t0,
+            Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = 3 } }.ToJsonString(),
+        });
+        // Retained tail row, same timestamp t0.
+        ctx.AuditLogs.Add(new AuditLog
+        {
+            EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Updated, OccurredOnUtc = t0,
+            Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = 4 } }.ToJsonString(),
+        });
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+
+        var store = new EfCoreAuditHistoryStore(ctx);
+        await store.CompactAsync(new AuditCompactionRequest
+        {
+            EntityType = WidgetType,
+            EntityId = entityId,
+            RetainTail = 1,
+        });
+        ctx.ChangeTracker.Clear();
+
+        var ordered = await ctx.AuditLogs
+            .Where(a => a.EntityId == entityId)
+            .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
+            .ToListAsync();
+
+        // Snapshot (the in-place boundary) must be first even though it shares t0 with the tail.
+        Assert.Equal(2, ordered.Count);
+        Assert.Equal(AuditAction.Inserted, ordered[0].Action);
+        Assert.NotNull(ordered[0].Snapshot);
+
+        // And replay (which depends on oldest-first ordering) lands the correct latest state v == 4.
+        var reconstructor = new AuditReconstructor(ctx);
+        var widget = await reconstructor.ReconstructAsync<Widget>(entityId, t0);
+        Assert.NotNull(widget);
+        Assert.Equal(4, widget!.V);
     }
 }

@@ -62,10 +62,12 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
             return plan.ToResult();
         }
 
-        // Insert the compacted snapshot and remove the folded rows together. SaveChanges runs in a
-        // single transaction by default, so a failure leaves the history untouched (the folded rows
-        // are not deleted unless the snapshot row also lands).
-        context.Set<AuditLog>().Add(plan.SnapshotRow!);
+        // The plan's SnapshotRow is the boundary row mutated in place. It was loaded (tracked) by
+        // the query above, so its mutated state is already pending as an UPDATE; we only need to
+        // remove the strictly-older folded rows. Keeping the boundary's Id and OccurredOnUtc means
+        // the snapshot keeps its chronological position ahead of the retained tail. SaveChanges runs
+        // in a single transaction by default, so a failure leaves the history untouched (the folded
+        // rows are not deleted unless the snapshot update also lands).
         context.Set<AuditLog>().RemoveRange(plan.RowsToRemove);
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 

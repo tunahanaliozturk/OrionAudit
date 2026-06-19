@@ -101,8 +101,9 @@ public sealed record AuditHistoryQuery
     /// same diagnostics for a malformed query.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// <see cref="Skip"/> is negative, <see cref="Take"/> is below 1, or <see cref="FromUtc"/>
-    /// is later than <see cref="ToUtc"/>.
+    /// <see cref="Skip"/> is negative, <see cref="Take"/> is below 1, <see cref="FromUtc"/> or
+    /// <see cref="ToUtc"/> is not a UTC instant (<see cref="DateTimeKind.Utc"/>), or
+    /// <see cref="FromUtc"/> is later than <see cref="ToUtc"/>.
     /// </exception>
     public void Validate()
     {
@@ -113,6 +114,19 @@ public sealed record AuditHistoryQuery
         if (Take is { } take && take < 1)
         {
             throw new ArgumentException($"AuditHistoryQuery.Take must be at least 1 when set (got {take}).");
+        }
+        // The bounds compare directly against OccurredOnUtc (a UTC instant), so a Local or
+        // Unspecified DateTime would silently shift the filter window. Enforce the documented
+        // UTC-only contract rather than reinterpreting the caller's wall-clock time.
+        if (FromUtc is { } fromKind && fromKind.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException(
+                $"AuditHistoryQuery.FromUtc must be a UTC instant (DateTimeKind.Utc), but its Kind is {fromKind.Kind}.");
+        }
+        if (ToUtc is { } toKind && toKind.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException(
+                $"AuditHistoryQuery.ToUtc must be a UTC instant (DateTimeKind.Utc), but its Kind is {toKind.Kind}.");
         }
         if (FromUtc is { } from && ToUtc is { } to && to < from)
         {

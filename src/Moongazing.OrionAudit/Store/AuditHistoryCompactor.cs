@@ -13,8 +13,8 @@ namespace Moongazing.OrionAudit.Store;
 public static class AuditHistoryCompactor
 {
     /// <summary>
-    /// The plan produced by <see cref="Plan"/>: the compacted snapshot row to insert and the rows
-    /// to delete. A no-op plan carries a null <see cref="SnapshotRow"/> and an empty
+    /// The plan produced by <see cref="Plan"/>: the compacted snapshot row to update in place and
+    /// the older rows to delete. A no-op plan carries a null <see cref="SnapshotRow"/> and an empty
     /// <see cref="RowsToRemove"/>.
     /// </summary>
     public sealed class CompactionPlan
@@ -27,10 +27,20 @@ public static class AuditHistoryCompactor
             RetainedTail = retainedTail;
         }
 
-        /// <summary>The compacted snapshot row to insert, or null when the plan is a no-op.</summary>
+        /// <summary>
+        /// The compacted snapshot row, or null when the plan is a no-op. This is the folded
+        /// boundary row mutated <em>in place</em>: it keeps the boundary's <see cref="AuditLog.Id"/>
+        /// and <see cref="AuditLog.OccurredOnUtc"/> so it deterministically tie-breaks BEFORE the
+        /// retained tail at the same timestamp. Because it reuses an existing row's identity, a
+        /// store must <em>update</em> this row in place, not insert it as a new row (see
+        /// <see cref="RowsToRemove"/>, which never includes the boundary).
+        /// </summary>
         public AuditLog? SnapshotRow { get; }
 
-        /// <summary>The rows to delete from the live audit table (the folded history).</summary>
+        /// <summary>
+        /// The rows to delete from the live audit table (the folded history), excluding the
+        /// boundary row, which is preserved and updated in place as <see cref="SnapshotRow"/>.
+        /// </summary>
         public IReadOnlyList<AuditLog> RowsToRemove { get; }
 
         /// <summary>Row count before compaction.</summary>
@@ -47,9 +57,12 @@ public static class AuditHistoryCompactor
             => IsEffective
                 ? new AuditCompactionResult(
                     rowsBefore: RowsBefore,
-                    rowsRemoved: RowsToRemove.Count,
-                    // After: every original row minus the folded rows, plus the one snapshot row.
-                    rowsAfter: RowsBefore - RowsToRemove.Count + 1,
+                    // The boundary row is folded too but stays as the in-place snapshot rather than
+                    // being deleted, so the reported removed/after counts add it back explicitly.
+                    rowsRemoved: RowsToRemove.Count + 1,
+                    // After: every original row minus all folded rows, plus the one snapshot row
+                    // (the in-place boundary). Equivalent to RowsBefore - RowsToRemove.Count.
+                    rowsAfter: RowsBefore - RowsToRemove.Count,
                     snapshotWritten: true)
                 : AuditCompactionResult.NoOp(RowsBefore);
     }
@@ -93,9 +106,14 @@ public static class AuditHistoryCompactor
         var boundary = folded[^1];
 
         var state = ReplayFolded(folded);
-        var snapshotRow = BuildSnapshotRow(boundary, state);
+        var snapshotRow = WriteSnapshotInPlace(boundary, state);
 
-        return new CompactionPlan(snapshotRow, folded, rowCount, retainTail);
+        // The boundary is folded too, but it is preserved as the in-place snapshot row (keeping its
+        // Id and OccurredOnUtc so it sorts ahead of the retained tail at an equal timestamp), so it
+        // is excluded from the rows the store deletes. Only the strictly-older rows are removed.
+        var rowsToRemove = folded.Take(foldCount - 1).ToList();
+
+        return new CompactionPlan(snapshotRow, rowsToRemove, rowCount, retainTail);
     }
 
     // Replays the folded rows into a single JSON state, starting from the freshest usable
@@ -118,7 +136,11 @@ public static class AuditHistoryCompactor
         int startIndex;
         if (snapshotIndex >= 0 && folded[snapshotIndex].Snapshot is { } snapshotJson)
         {
-            state = JsonNode.Parse(snapshotJson)?.AsObject()
+            // Parse defensively: a null parse (literal "null") OR a non-object JSON node (array or
+            // scalar) both mean "not a usable snapshot object". AsObject() throws
+            // InvalidOperationException for the non-object case, so guard the type explicitly and
+            // route every failure through the documented OrionAuditException path.
+            state = JsonNode.Parse(snapshotJson) as JsonObject
                 ?? throw new OrionAuditException(
                     $"Compaction: snapshot on row {folded[snapshotIndex].Id} did not deserialize as a JSON object.");
             startIndex = snapshotIndex + 1;
@@ -150,30 +172,23 @@ public static class AuditHistoryCompactor
         return state;
     }
 
-    // The compacted snapshot row inherits the boundary row's identity dimensions (so it slots into
-    // the same entity/tenant history) and timestamp (so chronological ordering against the retained
-    // tail is preserved). Its Action records the entity's last folded action so a delete that was
-    // folded still reads as a terminal state, while its Snapshot carries the reconstructed state
-    // and its Diff is empty (the row IS the state, not a delta).
-    private static AuditLog BuildSnapshotRow(AuditLog boundary, JsonObject state)
-        => new()
-        {
-            Id = Guid.NewGuid(),
-            EntityType = boundary.EntityType,
-            EntityBaseType = boundary.EntityBaseType,
-            EntityId = boundary.EntityId,
-            // A folded delete stays a terminal state; anything else compacts to an Updated state row.
-            Action = boundary.Action is AuditAction.Deleted or AuditAction.SoftDeleted
-                ? boundary.Action
-                : AuditAction.Updated,
-            OccurredOnUtc = boundary.OccurredOnUtc,
-            UserId = boundary.UserId,
-            UserDisplay = boundary.UserDisplay,
-            UserType = boundary.UserType,
-            TenantId = boundary.TenantId,
-            CorrelationId = boundary.CorrelationId,
-            Diff = "[]",
-            Snapshot = state.ToJsonString(),
-            Error = null,
-        };
+    // Turns the boundary row INTO the compacted snapshot, in place. The boundary keeps its Id and
+    // OccurredOnUtc so it deterministically sorts ahead of the retained tail at an equal timestamp
+    // (the store updates this row rather than inserting a fresh, randomly-keyed one). Its Snapshot
+    // carries the reconstructed state and its Diff is emptied (the row IS the state, not a delta).
+    //
+    // Action: a folded delete stays a terminal Deleted/SoftDeleted state. Anything else becomes
+    // Inserted, NOT Updated: a folded base state is effectively the insert of that state, and
+    // AuditReconstructor.Replay REQUIRES a history to begin with an Inserted row. Writing the
+    // compacted base as Inserted is what keeps a compacted insert/update history reconstructable.
+    private static AuditLog WriteSnapshotInPlace(AuditLog boundary, JsonObject state)
+    {
+        boundary.Action = boundary.Action is AuditAction.Deleted or AuditAction.SoftDeleted
+            ? boundary.Action
+            : AuditAction.Inserted;
+        boundary.Diff = "[]";
+        boundary.Snapshot = state.ToJsonString();
+        boundary.Error = null;
+        return boundary;
+    }
 }

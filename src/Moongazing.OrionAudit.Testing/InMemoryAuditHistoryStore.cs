@@ -103,9 +103,12 @@ public sealed class InMemoryAuditHistoryStore : AuditHistoryStoreBase
                 return Task.FromResult(plan.ToResult());
             }
 
+            // The plan's SnapshotRow is the boundary row mutated in place; it already lives in the
+            // list (same reference held in `history`), so we only remove the strictly-older folded
+            // rows and leave the mutated boundary where it sits. Reusing the boundary's Id and
+            // OccurredOnUtc keeps the snapshot ahead of the retained tail at an equal timestamp.
             var removeIds = plan.RowsToRemove.Select(r => r.Id).ToHashSet();
             rows.RemoveAll(r => removeIds.Contains(r.Id));
-            rows.Add(plan.SnapshotRow!);
             return Task.FromResult(plan.ToResult());
         }
     }
