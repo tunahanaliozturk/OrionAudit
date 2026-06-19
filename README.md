@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.7.0 is here — Publisher hook.** New `IAuditEventPublisher` extension point fires inside the capture transaction (sync mode) or the dispatcher transaction (async mode), so audit rows fan out to downstream pipelines (broker, search indexer, webhook) atomically with the audit write itself. Ships with a `NullAuditEventPublisher` default (zero behaviour change) and a toy-grade in-process `ChannelAuditEventPublisher` for monoliths and tests. Production deployments write a custom `IAuditEventPublisher` against their broker. On top of v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
-> [See the v0.7.0 changelog](CHANGELOG.md#070---2026-06-01) and [what's next](ROADMAP.md).
+> **v0.8.0 is here — queryable audit-history read API and snapshot compaction.** A new storage-agnostic `IAuditHistoryStore` lets you query recorded `AuditLog` rows by entity, subject, action, user, tenant, and a UTC time range, with paging and ordering, without binding to a specific persistence backend. The same surface adds snapshot compaction, which folds a long change-history for one entity into a compacted base snapshot plus a bounded retained tail, keeping the latest state fully reconstructable while bounding storage growth. The default `EfCoreAuditHistoryStore` is registered by `AddOrionAudit`; an `InMemoryAuditHistoryStore` ships in `OrionAudit.Testing`. On top of v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the v0.8.0 changelog](CHANGELOG.md#080---2026-06-19) and [what's next](ROADMAP.md).
 
 ---
 
@@ -88,6 +88,8 @@ The diagram makes the two key guarantees visible. In sync mode the `AuditLog` ro
 | Provider column hints (jsonb / nvarchar(max)) | Yes  |     -     |        -         |      -      |
 | Opt-in async staging-capture (atomic, lossless) | Yes |    -     |        -         |      -      |
 | Embedded audit-trail UI (no Blazor, no build step) | Yes |   -     |        -         |      -      |
+| Storage-agnostic queryable history read API    |    Yes     |     -     |        -         |      -      |
+| Snapshot compaction (bounded retained tail)    |    Yes     |     -     |        -         |      -      |
 
 ---
 
@@ -136,6 +138,84 @@ same transaction.
 | `OrionAudit.AspNetCore`  | `dotnet add package OrionAudit.AspNetCore`     | `HttpContextAuditUserResolver` + DI helpers        |
 | `OrionAudit.Viewer`      | `dotnet add package OrionAudit.Viewer`         | Embedded read-only audit-trail UI (`MapOrionAuditViewer`) |
 | `OrionAudit.Testing`     | `dotnet add package OrionAudit.Testing`        | `AuditCapture` + fluent assertions, framework-free |
+
+---
+
+## What's new in v0.8.0
+
+### `IAuditHistoryStore` — storage-agnostic queryable history read API
+
+`IAuditHistoryStore` is a read and maintenance surface over recorded `AuditLog` rows that does
+not bind to where those rows live. The default `EfCoreAuditHistoryStore` is registered by
+`AddOrionAudit` against your `DbContext`, so it resolves from DI with no extra wiring:
+
+```csharp
+using Moongazing.OrionAudit.Store;
+
+var store = serviceProvider.GetRequiredService<IAuditHistoryStore>();
+
+// Every write to a single Order by one user, oldest first, second page of 50.
+var page = await store.QueryAsync(new AuditHistoryQuery
+{
+    EntityType = typeof(Order).AssemblyQualifiedName,
+    EntityId = order.Id.ToString(),
+    UserId = "u-123",
+    Action = AuditAction.Updated,
+    FromUtc = DateTime.UtcNow.AddDays(-30),
+    ToUtc = DateTime.UtcNow,
+    Order = AuditHistoryOrder.OldestFirst,
+    Skip = 50,
+    Take = 50,
+});
+
+foreach (var row in page.Items)
+{
+    Console.WriteLine($"{row.OccurredOnUtc:o}  {row.Action}  {row.UserId}");
+}
+
+// page.TotalCount is the match count before paging; page.HasMore drives "load more".
+Console.WriteLine($"showing {page.Items.Count} of {page.TotalCount}, more={page.HasMore}");
+```
+
+Every filter on `AuditHistoryQuery` is optional. A default-constructed query returns the whole
+history, newest first, capped by `AuditHistoryQuery.DefaultPageSize` (100), so an unfiltered
+query never materialises an unbounded result. `FromUtc` and `ToUtc` are inclusive bounds and
+must be UTC instants (`DateTimeKind.Utc`). `Validate()` rejects a negative `Skip`, a `Take`
+below 1, a non-UTC bound, or an inverted time range, and each store calls it before executing
+so every backend reports the same diagnostics.
+
+`AuditHistoryStoreBase` supplies a capability default that throws `NotSupportedException` for
+each operation, so a backend that cannot page or cannot compact overrides only what it can
+honour. This mirrors the family's `DeleteAuditArchiver`-as-default pattern. `OrionAudit.Testing`
+ships an `InMemoryAuditHistoryStore` that implements the full surface over an in-memory row list
+for tests and prototyping against the abstraction.
+
+### Snapshot compaction — fold old history into a base snapshot
+
+Compaction collapses a long Insert-then-many-Updates history for one entity into a single
+compacted snapshot row, plus a bounded retained tail of the most-recent rows kept verbatim. The
+folded rows are removed, which bounds storage growth while keeping the latest state fully
+reconstructable.
+
+```csharp
+var result = await store.CompactAsync(new AuditCompactionRequest
+{
+    EntityType = typeof(Order).AssemblyQualifiedName!,
+    EntityId = order.Id.ToString(),
+    RetainTail = 20,   // keep the 20 most-recent rows verbatim after the snapshot
+    TenantId = "tenant-acme",   // optional: scope to one tenant's rows for a shared id
+});
+
+Console.WriteLine($"folded {result.RowsRemoved} rows: {result.RowsBefore} -> {result.RowsAfter}");
+```
+
+`RetainTail` is the number of most-recent rows kept after the snapshot; zero collapses the
+entire history into one snapshot row. When the history is too short to gain anything the call is
+a no-op (`SnapshotWritten` is false). A folded `Deleted` or `SoftDeleted` boundary stays a
+terminal state. The `EfCoreAuditHistoryStore` applies the plan as one insert plus delete inside
+a single `SaveChanges` transaction, so a failure leaves the history untouched. The folding engine
+replays the history over `AuditLog` JSON via the in-house `DiffEngine`, so it carries no
+reflection and stays trim-safe and Native-AOT clean.
 
 ---
 
@@ -480,10 +560,11 @@ Reproduce with `dotnet run -c Release --project bench/Moongazing.OrionAudit.Benc
 dotnet run --project sample/Moongazing.OrionAudit.Sample.Console
 ```
 
-The sample walks through all seven v0.1.0 features end-to-end against an in-memory Sqlite DB:
-insert / update / delete cycles, sensitive-field masking, multi-tenant filtering, time-travel
-reconstruction, and live OpenTelemetry activity capture. Each section prints what just happened
-so you can scan the output instead of reading source.
+The sample walks through the features end-to-end against an in-memory Sqlite DB: insert / update
+/ delete cycles, sensitive-field masking, multi-tenant filtering, time-travel reconstruction,
+live OpenTelemetry activity capture, periodic snapshotting, soft-delete capture, and the v0.8.0
+queryable history read API plus snapshot compaction. Each section prints what just happened so
+you can scan the output instead of reading source.
 
 ---
 
