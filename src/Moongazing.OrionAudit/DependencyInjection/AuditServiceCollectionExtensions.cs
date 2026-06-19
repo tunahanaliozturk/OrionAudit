@@ -44,6 +44,8 @@ public static class AuditServiceCollectionExtensions
         services.TryAddScoped<IAuditReconstructor>(sp => new AuditReconstructor(
             sp.GetRequiredService<TDbContext>(),
             sp.GetService<System.Text.Json.Serialization.JsonSerializerContext>()));
+        services.TryAddScoped<Store.IAuditHistoryStore>(sp =>
+            new Store.EfCoreAuditHistoryStore(sp.GetRequiredService<TDbContext>()));
         services.TryAddSingleton(TimeProvider.System);
         if (options.JsonContext is not null)
         {
