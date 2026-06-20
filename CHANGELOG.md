@@ -7,6 +7,16 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-06-20
+
+### Performance
+
+#### Diff hot path: remove redundant deep-equal pass per container node
+
+`Json6902.Diff` (reached on every audited change via `DiffEngine.Compute`) opened with a full recursive `JsonNode.DeepEquals(before, after)` short-circuit before falling through to the structural object/array walk. For the common case where `before` and `after` are JSON objects, that upfront deep-equal walked the entire snapshot tree, and then `DiffObject` re-walked the same tree to emit ops, comparing every property twice.
+
+The deep-equal guard now runs only on the leaf (scalar / kind-mismatch) branch, where it actually suppresses a spurious `replace` for two equal values. Containers go straight to the structural diff, which already emits no ops when nothing changed. This removes one full O(N) `DeepEquals` pass over the entity snapshot on every captured insert/update/delete, with byte-identical patch output. A throwaway micro-benchmark over a 20-property entity with a single changed field measured roughly 7-19% less time in `Compute`; the win scales with the number of audited properties. No public API or wire-format change; the full diff/snapshot/reconstruct round-trip and integration suites pass unchanged.
+
 ## [0.8.0] - 2026-06-19
 
 ### Added

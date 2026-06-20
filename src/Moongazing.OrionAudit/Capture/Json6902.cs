@@ -27,11 +27,12 @@ internal static class Json6902
 
     private static void Diff(string path, JsonNode? before, JsonNode? after, JsonArray ops)
     {
-        if (NodesEqual(before, after))
-        {
-            return;
-        }
-
+        // Containers are diffed structurally rather than short-circuited on a full deep-equal:
+        // DiffObject/DiffArray emit no ops when the children are unchanged, so an upfront
+        // NodesEqual would only re-walk the entire subtree that the structural pass walks
+        // anyway. The deep-equal guard is kept solely on the leaf path below, where it actually
+        // suppresses a spurious replace for two equal scalars. This removes one full recursive
+        // deep-equal pass per container node on every audited change.
         if (before is JsonObject beforeObj && after is JsonObject afterObj)
         {
             DiffObject(path, beforeObj, afterObj, ops);
@@ -41,6 +42,12 @@ internal static class Json6902
         if (before is JsonArray beforeArr && after is JsonArray afterArr)
         {
             DiffArray(path, beforeArr, afterArr, ops);
+            return;
+        }
+
+        // Leaf (or kind-mismatch) comparison: only here is a deep-equal meaningful.
+        if (NodesEqual(before, after))
+        {
             return;
         }
 
