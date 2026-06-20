@@ -41,6 +41,19 @@ public class EfCoreAuditHistoryStoreTests
         return (ctx, conn);
     }
 
+    // Builds a deterministic, strictly increasing Guid id from a 1..255 sequence number. All bytes
+    // are fixed except the final one, which carries the sequence. The last byte is the
+    // lowest-priority byte in both Guid.CompareTo and SQLite's default Guid TEXT (".ToString()")
+    // mapping, and it is also the last byte in a raw BLOB comparison, so SeqId(n) sorts strictly by
+    // n under every ordering the store and compactor use. Tests that need rows to tie-break in a
+    // known order use this instead of random Guids.
+    private static Guid SeqId(byte sequence)
+    {
+        var bytes = new byte[16];
+        bytes[15] = sequence;
+        return new Guid(bytes);
+    }
+
     private static AuditLog Row(string entityId, AuditAction action, DateTime occurredOnUtc,
         string? userId = null, string? diff = null, string? snapshot = null)
         => new()
@@ -287,26 +300,37 @@ public class EfCoreAuditHistoryStoreTests
         var entityId = Guid.NewGuid().ToString();
         var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         // Insert + two updates at t0 (boundary), then a retained-tail update at the SAME timestamp
-        // t0. With a random snapshot Guid the snapshot could sort after the tail; reusing the
-        // boundary Id guarantees it sorts first.
+        // t0. Every row shares t0, so ordering falls entirely back to the Guid Id tie-break. The
+        // diffs are sequence-dependent (v1 -> v2 -> v3 -> v4), so the rows must replay in this exact
+        // order for the test to mean anything. Default random Ids would permute that order randomly
+        // (flaky), so assign explicit Ids that differ only in their final byte: those sort
+        // identically under SQLite's default Guid TEXT mapping, raw BLOB byte comparison, and
+        // .NET Guid.CompareTo. This pins the chronological order the compactor and store both rely
+        // on. The compactor folds the first 3 (boundary = SeqId(3)) and keeps the tail SeqId(4);
+        // because the boundary Id (3) < the tail Id (4), the in-place snapshot deterministically
+        // sorts BEFORE the retained tail at the equal timestamp.
         ctx.AuditLogs.Add(new AuditLog
         {
+            Id = SeqId(1),
             EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Inserted,
             OccurredOnUtc = t0, Diff = "[]", Snapshot = new JsonObject { ["V"] = 1 }.ToJsonString(),
         });
         ctx.AuditLogs.Add(new AuditLog
         {
+            Id = SeqId(2),
             EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Updated, OccurredOnUtc = t0,
             Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = 2 } }.ToJsonString(),
         });
         ctx.AuditLogs.Add(new AuditLog
         {
+            Id = SeqId(3),
             EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Updated, OccurredOnUtc = t0,
             Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = 3 } }.ToJsonString(),
         });
         // Retained tail row, same timestamp t0.
         ctx.AuditLogs.Add(new AuditLog
         {
+            Id = SeqId(4),
             EntityType = WidgetType, EntityId = entityId, Action = AuditAction.Updated, OccurredOnUtc = t0,
             Diff = new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/V", ["value"] = 4 } }.ToJsonString(),
         });

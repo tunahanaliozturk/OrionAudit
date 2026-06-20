@@ -19,9 +19,11 @@ public class InMemoryAuditHistoryStoreTests
         string? tenantId = null,
         string? diff = null,
         string? snapshot = null,
-        string? baseType = null)
+        string? baseType = null,
+        Guid? id = null)
         => new()
         {
+            Id = id ?? Guid.NewGuid(),
             EntityType = entityType,
             EntityBaseType = baseType,
             EntityId = entityId,
@@ -32,6 +34,17 @@ public class InMemoryAuditHistoryStoreTests
             Diff = diff ?? "[]",
             Snapshot = snapshot,
         };
+
+    // Deterministic, strictly increasing Guid id from a 1..255 sequence number: every byte fixed
+    // except the final one, which carries the sequence. The last byte is the lowest-priority byte
+    // in Guid.CompareTo (which is how the in-memory store's OrderBy(r => r.Id) sorts), so SeqId(n)
+    // sorts strictly by n. Used when rows share a timestamp and must tie-break in a known order.
+    private static Guid SeqId(byte sequence)
+    {
+        var bytes = new byte[16];
+        bytes[15] = sequence;
+        return new Guid(bytes);
+    }
 
     private static InMemoryAuditHistoryStore SeededStore()
     {
@@ -448,13 +461,19 @@ public class InMemoryAuditHistoryStoreTests
     {
         var store = new InMemoryAuditHistoryStore();
         var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        // Insert + two updates + a retained-tail update, all at the SAME timestamp t0.
-        store.Add(Row(OrderType, "e1", AuditAction.Inserted, t0, snapshot: new JsonObject { ["v"] = 1 }.ToJsonString()));
-        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0,
+        // Insert + two updates + a retained-tail update, all at the SAME timestamp t0. Because every
+        // row shares t0, ordering falls entirely back to the Guid Id tie-break, and the diffs are
+        // sequence-dependent (v1 -> v2 -> v3 -> v4). Random Ids would permute the replay order
+        // (flaky); explicit SeqId(1..4) pins the chronological order. The compactor folds the first
+        // three (boundary = SeqId(3)) and keeps the tail SeqId(4); since boundary Id (3) < tail Id
+        // (4), the in-place snapshot deterministically sorts BEFORE the retained tail.
+        store.Add(Row(OrderType, "e1", AuditAction.Inserted, t0, id: SeqId(1),
+            snapshot: new JsonObject { ["v"] = 1 }.ToJsonString()));
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0, id: SeqId(2),
             diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 2 } }.ToJsonString()));
-        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0,
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0, id: SeqId(3),
             diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 3 } }.ToJsonString()));
-        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0,
+        store.Add(Row(OrderType, "e1", AuditAction.Updated, t0, id: SeqId(4),
             diff: new JsonArray { new JsonObject { ["op"] = "replace", ["path"] = "/v", ["value"] = 4 } }.ToJsonString()));
 
         await store.CompactAsync(new AuditCompactionRequest
