@@ -18,8 +18,8 @@ public static class AuditHashChainStamper
     /// <remarks>
     /// TenantId is part of the key so each tenant has its own stream: tenant-scoped verification
     /// filters rows to one tenant, so the first row of one tenant must not chain onto another tenant's
-    /// head. A null tenant is normalized to the empty string, which is just its own (single-tenant)
-    /// stream.
+    /// head. A null tenant is normalized to the empty string (see <see cref="AuditTenant.Canonical"/>),
+    /// which is just its own (single-tenant) stream.
     /// </remarks>
     public readonly record struct ChainKey(string EntityType, string EntityId, string TenantId);
 
@@ -37,7 +37,7 @@ public static class AuditHashChainStamper
         return scope switch
         {
             AuditHashChainScope.PerEntityStream
-                => new ChainKey(entry.EntityType, entry.EntityId, entry.TenantId ?? string.Empty),
+                => new ChainKey(entry.EntityType, entry.EntityId, AuditTenant.Canonical(entry.TenantId)),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(scope), scope, "Unknown audit hash chain scope."),
         };

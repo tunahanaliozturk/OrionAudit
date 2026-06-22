@@ -54,6 +54,18 @@ internal static class EfCoreAuditHashChainWriter
             return;
         }
 
+        // Canonicalize each row's TenantId to its persisted form (null -> "") BEFORE deriving chain
+        // keys or stamping. This is the single write-path choke point for chaining (the sync interceptor
+        // and the async dispatcher both route here), so normalizing the row column here guarantees the
+        // value MAC'd into the chain, the value persisted on the AuditLog row, and the value written to
+        // the AuditChainAnchor are all identical. Without it a null-tenant row would persist null while
+        // its anchor (keyed off the canonical ChainKey) persists "", splitting one logical stream into a
+        // null one and an empty-string one - the defect this fix removes at the source.
+        foreach (var row in newRows)
+        {
+            row.TenantId = AuditTenant.Canonical(row.TenantId);
+        }
+
         var keyId = keyProvider.ActiveKeyId;
         var key = keyProvider.TryGetKey(keyId)
             ?? throw new OrionAuditChainKeyException(
@@ -94,7 +106,9 @@ internal static class EfCoreAuditHashChainWriter
                 {
                     EntityType = chainKey.EntityType,
                     EntityId = chainKey.EntityId,
-                    TenantId = chainKey.TenantId,
+                    // chainKey.TenantId is already canonical ("" for the no-tenant stream); routed through
+                    // the helper so the anchor's tenant and the row's tenant share one definition.
+                    TenantId = AuditTenant.Canonical(chainKey.TenantId),
                     LatestEntryHash = tail.EntryHash,
                     RowCount = tail.Added,
                     KeyId = keyId,

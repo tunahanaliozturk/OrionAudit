@@ -139,8 +139,15 @@ public sealed class EfCoreAuditIntegrityVerifier : IAuditIntegrityVerifier
         {
             anchorQuery = anchorQuery.Where(a => a.TenantId == request.TenantId);
         }
+        // Coalesce TenantId to "" exactly as the row projection above does. Anchors written after the
+        // write-path normalization already store ""; this also folds any historic anchor that physically
+        // stored null. Critically it keeps StreamKey.TenantId non-null (so LoadStreamAsync's
+        // stream.TenantId.Length cannot NRE) AND makes the no-tenant anchor key-equal to the no-tenant
+        // row key, so the union below dedupes them into ONE stream instead of verifying it twice.
+        // (?? maps to SQL COALESCE; an arbitrary helper call would not translate, hence not AuditTenant
+        // here - the canonical value is identical.)
         var anchorStreams = await anchorQuery
-            .Select(a => new { a.EntityType, a.EntityId, a.TenantId })
+            .Select(a => new { a.EntityType, a.EntityId, TenantId = a.TenantId ?? string.Empty })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
@@ -160,14 +167,21 @@ public sealed class EfCoreAuditIntegrityVerifier : IAuditIntegrityVerifier
     private async Task<AuditChainAnchor?> LoadAnchorAsync(StreamKey stream, CancellationToken cancellationToken)
     {
         // No-tracking: the anchor is read-only context for the walk and we never persist it here.
-        return await context.Set<AuditChainAnchor>()
+        var query = context.Set<AuditChainAnchor>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(
-                a => a.EntityType == stream.EntityType
-                    && a.EntityId == stream.EntityId
-                    && a.TenantId == stream.TenantId,
-                cancellationToken)
-            .ConfigureAwait(false);
+            .Where(a => a.EntityType == stream.EntityType && a.EntityId == stream.EntityId);
+
+        // Match the no-tenant stream against BOTH a null and an empty-string anchor, mirroring exactly
+        // how LoadStreamAsync scopes the rows. New anchors persist "" (write-path normalization), but a
+        // historic anchor may physically store null; without the null branch that anchor would not be
+        // found for the "" stream key and the stream's truncation/whole-deletion check would silently
+        // pass (deleted tail undetected). A concrete tenant matches precisely so a shared entity id
+        // across tenants loads exactly one tenant's anchor.
+        query = stream.TenantId.Length == 0
+            ? query.Where(a => a.TenantId == null || a.TenantId == "")
+            : query.Where(a => a.TenantId == stream.TenantId);
+
+        return await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<List<AuditLog>> LoadStreamAsync(

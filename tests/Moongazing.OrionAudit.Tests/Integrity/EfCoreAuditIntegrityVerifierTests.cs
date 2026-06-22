@@ -438,4 +438,185 @@ public class EfCoreAuditIntegrityVerifierTests
         Assert.Throws<ArgumentException>(() => AuditChainVerificationRequest.ForEntity("   ", "o1"));
         Assert.Throws<ArgumentException>(() => AuditChainVerificationRequest.ForEntity(OrderType, "   "));
     }
+
+    // --- No-tenant (null/empty TenantId) coverage ------------------------------------------------
+    // The hash-chain keys streams by (EntityType, EntityId, TenantId) and treats a null tenant as the
+    // empty string. Two on-disk shapes of a no-tenant stream must both work:
+    //   * NEW data: the write path (StampAsync) canonicalizes the row tenant to "" BEFORE MAC'ing and
+    //     persisting, so rows, MAC, and anchor all agree on "".
+    //   * HISTORIC data (written before the normalization): the row column physically holds null and the
+    //     row was MAC'd with that null (the hasher reads AuditLog.TenantId directly, and a null field is
+    //     encoded distinctly from ""), while its anchor was created with "" (the anchor's tenant always
+    //     came from the canonical ChainKey). Verification must still find that "" anchor for the null
+    //     rows and not split or NRE.
+    // These tests pin: (1) a clean no-tenant chain verifies with no NullReferenceException, (2) the write
+    // path stores the SAME canonical "" on row and anchor, (3) tail-row deletion is detected via the
+    // anchor for a null-tenant stream, and (4) the no-tenant stream is verified exactly once (null rows +
+    // "" anchor must dedupe to one stream, not two).
+
+    // Seeds a HISTORIC null-tenant stream exactly as pre-normalization capture left it on disk: rows whose
+    // TenantId column is literally null, MAC'd over that null (bypassing StampAsync so the new write-path
+    // canonicalization does not touch them), plus a single anchor whose TenantId is "". This is the only
+    // faithful way to reproduce the null-row / ""-anchor split that Findings A and B are about - mutating
+    // the column AFTER a "" stamp would instead corrupt the MAC. Returns the seeded rows in chain order.
+    private static async Task<List<AuditLog>> SeedHistoricNullTenantStreamAsync(
+        AuditDbContext ctx, string entityId, byte startSeq, int count)
+    {
+        var rows = new List<AuditLog>();
+        string? previous = null;
+        for (var i = 0; i < count; i++)
+        {
+            var seq = (byte)(startSeq + i);
+            var action = i == 0 ? AuditAction.Inserted : AuditAction.Updated;
+            var diff = i == 0 ? "[]" : $"[{{\"op\":\"replace\",\"path\":\"/v\",\"value\":{seq}}}]";
+            var row = Row(seq, entityId, action, diff, tenantId: null); // TenantId stays null
+            row.PreviousHash = previous;
+            row.HashKeyId = TestChainKeys.ActiveKeyId;
+            // MAC over the null-tenant row, exactly as the pre-fix stamper did.
+            row.EntryHash = AuditEntryHasher.ComputeEntryHash(row, previous, TestChainKeys.Key.Span);
+            previous = row.EntryHash;
+            rows.Add(row);
+        }
+        ctx.AuditLogs.AddRange(rows);
+        // Anchor for the no-tenant stream is "" (the canonical ChainKey tenant), as capture would write it.
+        ctx.Anchors.Add(new AuditChainAnchor
+        {
+            EntityType = OrderType,
+            EntityId = entityId,
+            TenantId = string.Empty,
+            LatestEntryHash = rows[^1].EntryHash!,
+            RowCount = count,
+            KeyId = TestChainKeys.ActiveKeyId,
+        });
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+        return rows;
+    }
+
+    [Fact]
+    public async Task Verify_NoTenantStream_CleanChain_IsValid()
+    {
+        // Post-normalization happy path: a null-tenant stream seeded through the production writer
+        // persists "" on both rows and anchor, so verification walks one stream and never touches a
+        // null TenantId (no NRE on stream.TenantId.Length).
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+        await SeedCleanStreamAsync(ctx, "o1", startSeq: 1, count: 5, tenantId: null);
+
+        var result = await Verifier(ctx).VerifyChainAsync(AuditChainVerificationRequest.ForEntity(OrderType, "o1"));
+
+        Assert.True(result.IsValid);
+        Assert.Equal(5, result.VerifiedRowCount);
+    }
+
+    [Fact]
+    public async Task Verify_NoTenantStream_WritePath_NormalizesRowAndAnchorToEmpty()
+    {
+        // The write path (StampAsync) is the single chaining choke point; it must coalesce a null row
+        // tenant to "" so the AuditLog row and its AuditChainAnchor store an identical, non-null value.
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+        await SeedCleanStreamAsync(ctx, "o1", startSeq: 1, count: 3, tenantId: null);
+
+        var rowTenants = await ctx.AuditLogs.AsNoTracking()
+            .Where(a => a.EntityId == "o1").Select(a => a.TenantId).ToListAsync();
+        Assert.All(rowTenants, t => Assert.Equal(string.Empty, t));
+
+        var anchor = await ctx.Anchors.AsNoTracking().SingleAsync();
+        Assert.Equal(string.Empty, anchor.TenantId);
+        // Row and anchor agree: the historic null/"" split is gone at the source.
+        Assert.All(rowTenants, t => Assert.Equal(anchor.TenantId, t));
+    }
+
+    [Fact]
+    public async Task Verify_HistoricNullTenant_CleanChain_IsValid_NoNre()
+    {
+        // Historic rows with a literal NULL tenant (MAC'd over null) + a "" anchor must verify cleanly:
+        // the "" anchor is matched via LoadAnchorAsync's null-or-empty branch, and the null rows via
+        // LoadStreamAsync's matching branch. Finding A regression: no NRE from a null StreamKey.TenantId.
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+        await SeedHistoricNullTenantStreamAsync(ctx, "o1", startSeq: 1, count: 5);
+
+        var result = await Verifier(ctx).VerifyChainAsync(AuditChainVerificationRequest.All());
+
+        Assert.True(result.IsValid);
+        Assert.Equal(5, result.VerifiedRowCount);
+    }
+
+    [Fact]
+    public async Task Verify_HistoricNullTenant_TailDeletion_DetectedViaAnchor()
+    {
+        // The core Finding B regression: with rows stored as null tenant and the anchor as "",
+        // LoadAnchorAsync must still find the anchor (null-or-empty match) so tail truncation is caught.
+        // Before the fix the exact-equality match would miss the "" anchor and truncation would pass.
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+        var rows = await SeedHistoricNullTenantStreamAsync(ctx, "o1", startSeq: 1, count: 5);
+
+        var tail = await ctx.AuditLogs.SingleAsync(a => a.Id == rows[4].Id);
+        ctx.AuditLogs.Remove(tail);
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+
+        var result = await Verifier(ctx).VerifyChainAsync(AuditChainVerificationRequest.All());
+
+        Assert.False(result.IsValid);
+        Assert.Equal(AuditChainBreakReason.Truncated, result.Reason);
+        Assert.Equal("o1", result.BrokenEntityId);
+    }
+
+    [Fact]
+    public async Task Verify_HistoricNullTenant_StreamVerifiedExactlyOnce()
+    {
+        // Finding A regression: null rows project to a "" StreamKey and the "" anchor projects to the
+        // same key, so the row/anchor union must dedupe them into ONE stream. If the anchor key were
+        // left null it would be a SECOND key, double-verifying (or mis-counting) the no-tenant stream.
+        // VerifiedRowCount == seeded count proves the stream was walked exactly once.
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+        await SeedHistoricNullTenantStreamAsync(ctx, "o1", startSeq: 1, count: 4);
+
+        // Sanity: the split genuinely exists at rest - rows are NULL, the anchor is "".
+        var distinctRowTenants = await ctx.AuditLogs.AsNoTracking()
+            .Where(a => a.EntityId == "o1").Select(a => a.TenantId).Distinct().ToListAsync();
+        Assert.Equal(new string?[] { null }, distinctRowTenants);
+        Assert.Equal(string.Empty, (await ctx.Anchors.AsNoTracking().SingleAsync()).TenantId);
+
+        var result = await Verifier(ctx).VerifyChainAsync(AuditChainVerificationRequest.All());
+
+        Assert.True(result.IsValid);
+        Assert.Equal(4, result.VerifiedRowCount); // exactly once: 4, not 8
+    }
+
+    [Fact]
+    public async Task Verify_HistoricNullTenant_AlongsideRealTenant_BothVerifyIndependently()
+    {
+        // A no-tenant stream (historic null rows) coexisting with a real-tenant stream for the SAME
+        // entity id must each verify as their own chain - the no-tenant rows must not leak into the
+        // "t1" stream nor vice-versa, and the multi-tenant behaviour pinned elsewhere must hold.
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+        await SeedHistoricNullTenantStreamAsync(ctx, "shared", startSeq: 1, count: 3);
+        await SeedCleanStreamAsync(ctx, "shared", startSeq: 10, count: 3, tenantId: "t1");
+
+        // Two anchors: one "" (no-tenant), one "t1".
+        Assert.Equal(2, await ctx.Anchors.CountAsync());
+
+        var noTenant = await Verifier(ctx).VerifyChainAsync(
+            AuditChainVerificationRequest.ForEntity(OrderType, "shared")); // null tenant -> "" stream
+        var t1 = await Verifier(ctx).VerifyChainAsync(
+            AuditChainVerificationRequest.ForEntity(OrderType, "shared", tenantId: "t1"));
+
+        Assert.True(noTenant.IsValid);
+        Assert.Equal(3, noTenant.VerifiedRowCount);
+        Assert.True(t1.IsValid);
+        Assert.Equal(3, t1.VerifiedRowCount);
+    }
 }
