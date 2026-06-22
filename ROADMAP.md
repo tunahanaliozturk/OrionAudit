@@ -4,6 +4,11 @@ This document lists what's shipped, what's actively planned, and what we're deli
 building. It's a planning artifact, not a contract — dates slip, priorities reshuffle. If
 something here matters to you, open a GitHub issue so we can weigh it against everything else.
 
+**Current version: 0.8.1** (shipped 2026-06-20). Queryable audit-history read API and snapshot
+compaction landed in 0.8.0; 0.8.1 removed a redundant deep-equals pass from the JSON Patch diff
+hot path. Next up is 0.9.0 (audit-log lifecycle: retention/archival of the log itself,
+tamper-evidence, export/streaming) on the way to the 1.0.0 API freeze.
+
 ## Status legend
 
 - **Shipped** — in the named release.
@@ -244,34 +249,106 @@ Ships the schema column + capture-side stamping. Inheritance-aware querying land
 
 ---
 
-## v0.8.0 — Separate audit store & operator tools *(planned, Q1 2027)*
+## v0.8.0 - Queryable history & snapshot compaction *(shipped 2026-06-19)*
 
-Theme: *let audit grow at its own pace, on its own iron.*
+Theme: *let consumers read the audit trail through a backend-agnostic surface, and bound its
+growth without losing fidelity.*
 
-- **Separate-database audit storage (`o.UseSeparateAuditDb(...)`).** Promoted out of v1.0 so
-  large-volume consumers can adopt it earlier. Audit table moves to its own connection / schema
-  / DB; primary-write throughput stops paying for audit retention growth. Single-transaction
-  capture guarantee is preserved on the primary DB; the audit-side write becomes
-  outbox-dispatched.
-- **CLI diff renderer (`dotnet orionaudit diff`).** Reads an `AuditLog.Id` (or stdin JSON) and
-  pretty-prints the patch with red/green inline rendering. Useful for CI log inspection and ops
-  scripting; designed to plug into `git show`-style workflows.
-- **Compaction job.** Background hosted-service variant of retention that merges runs of
-  small diffs into snapshot rows past a configurable age threshold. Bounds the worst-case
-  reconstruction cost without losing fidelity.
-- **Viewer auth presets.** First-class `RequirePolicy` / `RequireRole` configuration on
-  `MapOrionAuditViewer`; in-box documentation for the three common deployment shapes
-  (admin-only, tenant-scoped, read-only public).
+Scope was narrowed from the original "separate audit store & operator tools" entry. The two
+read/maintenance items below shipped at quality; the separate-DB store, CLI diff renderer, and
+viewer auth presets are retargeted to v0.9.0 / v1.0.0 below.
+
+- **Queryable audit-history read API (`IAuditHistoryStore`).** A storage-agnostic read surface
+  in the new `Moongazing.OrionAudit.Store` namespace. `QueryAsync(AuditHistoryQuery, ...)`
+  returns a paged `AuditHistoryPage` (rows + `TotalCount` + `HasMore`), filtering by entity
+  type, polymorphic base type, entity id (subject), `AuditAction`, user id, tenant id, and an
+  inclusive `FromUtc`..`ToUtc` UTC range, with `Skip`/`Take` paging and newest-first /
+  oldest-first ordering. Every filter is optional; an unfiltered query is bounded by
+  `DefaultPageSize` (100). `EfCoreAuditHistoryStore` is the default, registered by
+  `AddOrionAudit`; `InMemoryAuditHistoryStore` ships in OrionAudit.Testing.
+  `AuditHistoryStoreBase` throws `NotSupportedException` per operation so a backend overrides
+  only what it can honour (the `DeleteAuditArchiver`-as-default pattern).
+- **Snapshot compaction (`CompactAsync`).** Folds a long change-history for one entity into a
+  single compacted snapshot row (latest reconstructable state at the boundary) plus a bounded
+  retained tail of the most-recent rows kept verbatim, then removes the folded rows. A folded
+  `Deleted` / `SoftDeleted` boundary stays terminal; optional `TenantId` scopes the compaction.
+  The `AuditHistoryCompactor` folding engine replays over `AuditLog` JSON via `DiffEngine` (no
+  reflection, trim-safe / Native-AOT clean), and the EF Core store applies the plan as one
+  insert + delete in a single `SaveChanges` transaction, so a failure leaves history untouched.
 
 ---
 
-## v0.9.0 — Documentation & AOT polish *(planned, Q1-Q2 2027)*
+## v0.8.1 - Diff hot-path perf *(shipped 2026-06-20)*
 
-Theme: *make OrionAudit the easiest audit library to learn, and finish the AOT story.*
+- **Removed a redundant deep-equals pass from the JSON Patch diff.** `Json6902.Diff` (reached on
+  every audited change) opened with a full recursive `JsonNode.DeepEquals` short-circuit, then
+  `DiffObject` re-walked the same tree to emit ops, comparing every property twice for the
+  common object/object case. The deep-equal guard now runs only on the leaf (scalar /
+  kind-mismatch) branch where it actually suppresses a spurious `replace`; containers go straight
+  to the structural diff. Byte-identical patch output, no public API or wire-format change. A
+  throwaway micro-benchmark on a 20-property entity with one changed field measured roughly
+  7-19% less time in `Compute`, scaling with audited-property count.
 
-- **Documentation site.** Hosted reference + recipes + migration guides. Replaces the
-  repo-readme-as-docs status quo. Includes a runnable cookbook ("audit a multi-tenant SaaS",
-  "audit with TPH", "audit with a separate database").
+---
+
+## v0.9.0 - Audit-log lifecycle, export & docs *(planned, Q3 2026)*
+
+Theme: *manage the audit log itself as a first-class, long-lived store (its retention,
+its integrity, and getting data out of it), and finish the docs.*
+
+- **Background compaction job.** A hosted-service variant of the v0.8.0 `CompactAsync` operation
+  that folds runs of small diffs into snapshot rows past a configurable age / depth threshold,
+  bounding worst-case reconstruction cost without an operator script. Reuses the
+  `AuditHistoryCompactor` engine.
+- **Archival of the audit log itself.** Extends the v0.7.8 `IAuditArchiver` retention hook with
+  a cold-store path tuned for the audit table specifically (age-tiered move to S3 / Parquet /
+  archive table), so an aged audit row can leave the live DB while staying reconstructable on
+  demand from the archive.
+- **Audit-history export / streaming.** A bulk, paged export off `IAuditHistoryStore` (NDJSON /
+  CSV) plus a cursor-based streaming read for feeding a warehouse or SIEM, without holding an
+  unbounded result in memory. Builds on the v0.8.0 paged query.
+- **Documentation site.** Hosted reference + recipes + migration guides, replacing the
+  repo-readme-as-docs status quo. Runnable cookbook ("audit a multi-tenant SaaS", "audit with
+  TPH", "query and compact history").
+- **Viewer auth presets.** First-class `RequirePolicy` / `RequireRole` configuration on
+  `MapOrionAuditViewer` plus in-box docs for the three common deployment shapes (admin-only,
+  tenant-scoped, read-only public). Carried from the original v0.8.0 entry.
+
+---
+
+## v0.10.0 - Tamper-evidence & richer queries *(planned, Q4 2026)*
+
+Theme: *make the audit log defensible as evidence, and richer to slice.*
+
+- **Tamper-evident hash-chaining.** Optional per-row hash that chains each `AuditLog` entry to
+  its predecessor (per entity, or per tenant) so a deleted or edited row is detectable. A
+  `VerifyChainAsync` operation on `IAuditHistoryStore` walks the chain and reports the first
+  break. Opt-in, additive column; existing rows verify as an unchained prefix.
+- **Richer query filters / aggregations.** Promote the v0.7.6 / v0.7.7 composable filters and
+  rollups onto `IAuditHistoryStore` so the backend-agnostic surface gains correlation-id and
+  free-predicate filters plus count/by-day/by-action aggregations, not just paged row reads.
+- **Separate-database audit storage (`o.UseSeparateAuditDb(...)`).** Audit table moves to its
+  own connection / schema / DB so primary-write throughput stops paying for audit growth. The
+  single-transaction capture guarantee is preserved on the primary DB; the audit-side write
+  becomes outbox-dispatched. Carried from the original v0.8.0 entry; sequenced after the read
+  surface so cross-store queries land on a stable `IAuditHistoryStore`.
+- **CLI diff renderer (`dotnet orionaudit diff`).** Reads an `AuditLog.Id` (or stdin JSON) and
+  pretty-prints the patch with red/green inline rendering for CI log inspection and ops
+  scripting. Carried from the original v0.8.0 entry.
+
+---
+
+## v0.11.0 - Store backends & AOT polish *(planned, Q1 2027)*
+
+Theme: *more places to put the audit log, and finish the AOT story.*
+
+- **Additional `IAuditHistoryStore` backends.** With the read/maintenance surface stable, ship
+  at least one non-EF backend (a document / append-only store is the leading candidate) to prove
+  the abstraction holds away from a relational `DbContext`, for consumers who keep audit off
+  their primary database engine.
+- **Performance at scale.** A large-history benchmark (millions of rows, deep per-entity
+  histories) driving index guidance for the query filters, a server-side paging audit, and
+  compaction throughput numbers. Publishes the scaling envelope the query API is good for.
 - **Full Native AOT pass.** `JsonPatch.Net` is already gone (v0.4); this milestone audits the
   remaining reflective paths in the dispatcher, viewer, and reconstruction surfaces, and lifts
   the AOT smoke test to assert *zero* `IL2*` / `IL3*` warnings on the full surface.
@@ -282,7 +359,7 @@ Theme: *make OrionAudit the easiest audit library to learn, and finish the AOT s
 
 ---
 
-## v1.0.0 — Stable API *(planned, Q2 2027)*
+## v1.0.0 — Stable API *(planned, Q1-Q2 2027)*
 
 Target theme: *commit to the surface, slow down, support it.*
 
@@ -308,7 +385,8 @@ Target theme: *commit to the surface, slow down, support it.*
   REST endpoint. Only worth it if the viewer grows beyond "browse and filter".
 - **Optional row-level encryption** for `AuditLog.Diff`/`Snapshot` columns, against a
   consumer-supplied KMS. Soft veto today (see "Out of scope") but the consumer demand signal is
-  growing; revisit before v1.
+  growing; revisit before v1. Distinct from the v0.10.0 tamper-evidence work, which proves a row
+  was not altered but does not encrypt its contents.
 
 If any of the above maps to a real workload you are on right now, open an issue with the
 `roadmap` label and a short description — that is how items move from *considered* to *planned*.
@@ -346,22 +424,27 @@ These come up in conversation; we're saying no on purpose.
 
 ## Release cadence (rough)
 
-| Milestone | Target window                       | Driver                       |
-| --------- | ----------------------------------- | ---------------------------- |
-| v0.1.0    | shipped                             | capture + reconstruction     |
-| v0.2.0    | shipped                             | reliability + composite keys |
-| v0.3.0    | shipped                             | source generator             |
-| v0.4.0    | shipped                             | AOT-clean diff engine        |
-| v0.5.0    | shipped                             | async capture + viewer       |
-| v0.5.1    | shipped 2026-05-23                  | logo refresh                 |
-| v0.6.0    | Q3 2026                             | developer experience         |
-| v0.7.0    | shipped 2026-06-01                  | publisher hook               |
-| v0.7.1    | Q4 2026                             | TPH / polymorphic capture    |
-| v0.7.2    | Q4 2026                             | viewer labels                |
-| v0.7.3    | Q4 2026                             | MySQL / MariaDB matrix       |
-| v0.8.0    | Q1 2027                             | separate audit DB + ops      |
-| v0.9.0    | Q1-Q2 2027                          | docs site + AOT polish       |
-| v1.0.0    | Q2 2027                             | API freeze                   |
+| Milestone | Target window      | Driver                           |
+| --------- | ------------------ | -------------------------------- |
+| v0.1.0    | shipped            | capture + reconstruction         |
+| v0.2.0    | shipped            | reliability + composite keys     |
+| v0.3.0    | shipped            | source generator                 |
+| v0.4.0    | shipped            | AOT-clean diff engine            |
+| v0.5.0    | shipped            | async capture + viewer           |
+| v0.5.1    | shipped 2026-05-23 | logo refresh                     |
+| v0.6.0    | shipped 2026-05-24 | developer experience             |
+| v0.7.0    | shipped 2026-06-01 | publisher hook                   |
+| v0.7.1    | shipped 2026-06-04 | TPH / polymorphic capture        |
+| v0.7.2    | shipped 2026-06-09 | TPH inheritance-aware query      |
+| v0.7.3    | shipped 2026-06-09 | viewer labels                    |
+| v0.7.4    | shipped 2026-06-09 | MySQL / MariaDB matrix           |
+| v0.7.5    | shipped 2026-06-10 | LDAP / IdP user resolution       |
+| v0.8.0    | shipped 2026-06-19 | queryable history + compaction   |
+| v0.8.1    | shipped 2026-06-20 | diff hot-path perf               |
+| v0.9.0    | Q3 2026            | log lifecycle + export + docs    |
+| v0.10.0   | Q4 2026            | tamper-evidence + richer queries |
+| v0.11.0   | Q1 2027            | store backends + AOT polish      |
+| v1.0.0    | Q1-Q2 2027         | API freeze                       |
 
 Patch releases (`0.x.y`) ship as needed for bugs and security. Minor releases (`0.x.0`) cluster
 features around the themes above and never break documented public APIs without a deprecation
