@@ -51,6 +51,10 @@ public static class AuditModelBuilderExtensions
             : new AuditCaptureQueueEntityTypeConfiguration(captureQueueTableName);
         modelBuilder.ApplyConfiguration(queue);
 
+        // The tamper-evident chain's per-stream head anchor. Mapped unconditionally (like the cursor
+        // and queue companion tables); it stays empty unless o.UseHashChain(...) is configured.
+        modelBuilder.ApplyConfiguration(new Integrity.AuditChainAnchorEntityTypeConfiguration());
+
         return modelBuilder;
     }
 

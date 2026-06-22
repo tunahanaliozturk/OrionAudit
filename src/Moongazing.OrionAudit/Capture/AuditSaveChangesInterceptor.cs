@@ -99,6 +99,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         var snapshotPolicy = serviceProvider.GetService<SnapshotPolicy>() ?? SnapshotPolicy.Never;
         var jsonContext = serviceProvider.GetService<JsonSerializerContext>();
+        // Presence of AuditHashChainOptions is the opt-in switch for tamper-evidence (same gate
+        // pattern as AsyncCaptureOptions). null ⇒ chaining off ⇒ hash columns stay null.
+        var hashChain = serviceProvider.GetService<Integrity.AuditHashChainOptions>();
 
         // Async-capture mode: write a lightweight queue row per audited entity instead of an
         // AuditLog row. The diff and final AuditLog row are produced later by the dispatcher.
@@ -131,6 +134,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var publishEvents = publisher is null or NullAuditEventPublisher
             ? null
             : new List<AuditLogEvent>(auditedEntries.Count);
+        // Only materialised when hash-chaining is on; holds the rows to stamp after the loop.
+        var hashableRows = hashChain is null ? null : new List<AuditLog>(auditedEntries.Count);
 
         foreach (var entry in auditedEntries)
         {
@@ -162,7 +167,24 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 failedCount++;
             }
 
+            hashableRows?.Add(auditLog);
             publishEvents?.Add(ToEvent(auditLog));
+        }
+
+        // Tamper-evidence: stamp the hash chain across the rows just added, chaining each onto its
+        // entity stream's persisted anchor (which is locked + advanced in this same transaction).
+        // Done after the build loop (so every row's content is final, including any SnapshotPolicy
+        // snapshot stamped above and the custom-column shadow values applied by ApplyCustomColumns)
+        // and before publish/SaveChanges so the hashes commit atomically with the rows. Every captured
+        // row is chained, including ones that recorded a diff Error, so an error row cannot silently
+        // create a gap.
+        if (hashChain is not null && hashableRows is { Count: > 0 })
+        {
+            var keyProvider = serviceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
+            await Integrity.EfCoreAuditHashChainWriter
+                .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
+                    configuration.CustomColumns, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         OrionAuditTelemetry.EntriesWritten.Add(writtenCount);

@@ -64,6 +64,16 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
         builder.Property(x => x.TenantId).HasMaxLength(128);
         builder.Property(x => x.CorrelationId).HasMaxLength(64);
 
+        // Tamper-evidence hash chain (v0.9.0). All nullable: null is the off-state for consumers
+        // who never enable hash-chaining, and the genesis/unverified-prefix marker for those who
+        // do. HMAC-SHA256 rendered as lowercase hex is exactly 64 chars. Fixed-length so a provider
+        // that supports CHAR can store them compactly; EF treats them as ordinary optional columns.
+        // HashKeyId records which key version MAC'd the row so keys can rotate without invalidating
+        // older rows.
+        builder.Property(x => x.EntryHash).HasMaxLength(64).IsFixedLength();
+        builder.Property(x => x.PreviousHash).HasMaxLength(64).IsFixedLength();
+        builder.Property(x => x.HashKeyId);
+
         var diffProperty = builder.Property(x => x.Diff).IsRequired();
         var snapshotProperty = builder.Property(x => x.Snapshot);
         var hintedType = columnHints switch

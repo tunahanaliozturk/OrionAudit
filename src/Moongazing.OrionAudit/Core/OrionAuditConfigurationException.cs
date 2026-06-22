@@ -5,4 +5,7 @@ public sealed class OrionAuditConfigurationException : OrionAuditException
 {
     /// <summary>Initializes a new instance with the supplied message.</summary>
     public OrionAuditConfigurationException(string message) : base(message) { }
+
+    /// <summary>Initializes a new instance with the supplied message and inner exception.</summary>
+    public OrionAuditConfigurationException(string message, Exception inner) : base(message, inner) { }
 }

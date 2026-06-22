@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.8.0 is here — queryable audit-history read API and snapshot compaction.** A new storage-agnostic `IAuditHistoryStore` lets you query recorded `AuditLog` rows by entity, subject, action, user, tenant, and a UTC time range, with paging and ordering, without binding to a specific persistence backend. The same surface adds snapshot compaction, which folds a long change-history for one entity into a compacted base snapshot plus a bounded retained tail, keeping the latest state fully reconstructable while bounding storage growth. The default `EfCoreAuditHistoryStore` is registered by `AddOrionAudit`; an `InMemoryAuditHistoryStore` ships in `OrionAudit.Testing`. On top of v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
-> [See the v0.8.0 changelog](CHANGELOG.md#080---2026-06-19) and [what's next](ROADMAP.md).
+> **v0.9.0 is here — tamper-evident hash-chaining.** Opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable — and unforgeable without the MAC key, which lives outside the audit database. A per-stream anchor makes concurrent same-stream writes safe and truncation visible. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive: rows written before you enabled it verify as an unchained prefix, and capture, diffs, compaction, and the read APIs are unchanged. On top of v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the v0.9.0 changelog](CHANGELOG.md#090---2026-06-22) and [what's next](ROADMAP.md).
 
 ---
 
@@ -140,6 +140,71 @@ same transaction.
 | `OrionAudit.Testing`     | `dotnet add package OrionAudit.Testing`        | `AuditCapture` + fluent assertions, framework-free |
 
 ---
+
+## What's new in v0.9.0
+
+### Tamper-evident hash-chaining
+
+Opt in with `o.UseHashChain(...)`. Each captured `AuditLog` row then gets a **keyed** HMAC-SHA256
+`EntryHash` that binds its content (including any registered custom columns) to the row before it in
+the same chain scope (per entity stream, per tenant), plus a `PreviousHash` column and a `HashKeyId`.
+A later edit, deletion (including deleting the tail or an entire stream), reordering, or out-of-band
+insertion of any row is detected by the verifier.
+
+The chain is a **keyed MAC**, not a bare hash: the key comes from an `IAuditChainKeyProvider` that
+lives outside the audit database. That is what makes the chain unforgeable - with a plain SHA-256
+chain, anyone who can write rows could recompute the hashes and fake a valid chain. So a key is
+required; enabling without one fails fast. Store the secret outside the audit database (a secret
+manager / KMS / environment secret).
+
+```csharp
+services.AddOrionAudit<AppDbContext>(o =>
+{
+    o.Audit<Order>();
+    // off by default; supply a key (base64, >= 16 bytes) loaded from a secret store.
+    o.UseHashChain(h => h.UseKey(keyId: 1, base64Key: Environment.GetEnvironmentVariable("AUDIT_CHAIN_KEY")!));
+});
+```
+
+A persisted per-stream anchor (`OrionAudit_Chain_Anchor`) makes concurrent same-stream writes safe
+(they serialize on the anchor row inside your transaction) and makes tail/whole-stream deletion
+detectable (the anchor remembers the true tail hash and row count). The key id is stored per row, so
+you can rotate keys later without invalidating rows written under an older (still-registered) key.
+
+`UseHashChain()` adds three nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`) to the audit
+table plus the `OrionAudit_Chain_Anchor` table, so add a migration after enabling it:
+
+```bash
+dotnet ef migrations add AddOrionAuditHashChain
+```
+
+Verify the chain through the DI-registered `IAuditIntegrityVerifier`:
+
+```csharp
+using Moongazing.OrionAudit.Integrity;
+
+var verifier = serviceProvider.GetRequiredService<IAuditIntegrityVerifier>();
+
+// One entity's trail...
+var result = await verifier.VerifyChainAsync(
+    AuditChainVerificationRequest.ForEntity(typeof(Order).AssemblyQualifiedName!, order.Id.ToString()));
+
+// ...or the whole table.
+var all = await verifier.VerifyChainAsync(AuditChainVerificationRequest.All());
+
+if (!all.IsValid)
+{
+    // all.BrokenAtId / all.BrokenEntityType / all.BrokenEntityId / all.Reason pinpoint the first break.
+    Console.WriteLine($"Audit chain broken at {all.BrokenAtId}: {all.Reason} ({all.Detail})");
+}
+```
+
+The chain is **opt-in and backward compatible**: rows written before you enabled it keep a null
+hash and verify as an unchained prefix the verifier skips, so verification begins at each stream's
+first hashed (genesis) row. Capture, diffs, snapshot compaction, and the read APIs are unchanged
+whether or not chaining is on. Canonicalization is deterministic and stable across a database
+round-trip (fixed field order, length-prefixed fields, invariant culture, UTF-8, and a
+precision-stable timestamp), so a legitimately persisted row always re-verifies.
 
 ## What's new in v0.8.0
 
@@ -570,7 +635,7 @@ you can scan the output instead of reading source.
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md) — twelve-month forward plan through v1.0.0 (Q2 2027): v0.6.0 developer experience, v0.7.0 outbox + polymorphic capture, v0.8.0 separate-DB audit store, v0.9.0 docs site + AOT polish, then API freeze.
+- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027): v0.8.0 queryable history + compaction, v0.9.0 tamper-evident hash chain, then audit-log lifecycle + export, richer queries + separate store, AOT polish, and the API freeze.
 - [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)

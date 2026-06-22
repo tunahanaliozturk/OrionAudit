@@ -33,15 +33,25 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
     private readonly IAuditConfiguration configuration;
     private readonly TimeProvider clock;
     private readonly ILogger<AuditDispatcher<TDbContext>> logger;
+    private readonly Integrity.AuditHashChainOptions? hashChain;
 
     /// <summary>Initializes a new dispatcher.</summary>
+    /// <param name="scopeFactory">Factory for the per-cycle DI scope and its scoped <typeparamref name="TDbContext"/>.</param>
+    /// <param name="options">Async-capture tunables (batch size, claim lease, retry limits).</param>
+    /// <param name="snapshotPolicy">Policy deciding when a dispatched Updated row also stores a snapshot.</param>
+    /// <param name="configuration">Frozen audit configuration (custom columns applied to dispatched rows).</param>
+    /// <param name="clock">Time source for claim leases and dispatch-lag metrics.</param>
+    /// <param name="logger">Logger for per-row dispatch failures and dead-letter events.</param>
+    /// <param name="hashChain">Tamper-evidence options, or null when hash-chaining is not enabled.
+    /// Optional so the async-capture wiring composes with or without the chain feature.</param>
     public AuditDispatcher(
         IServiceScopeFactory scopeFactory,
         AsyncCaptureOptions options,
         SnapshotPolicy snapshotPolicy,
         IAuditConfiguration configuration,
         TimeProvider clock,
-        ILogger<AuditDispatcher<TDbContext>> logger)
+        ILogger<AuditDispatcher<TDbContext>> logger,
+        Integrity.AuditHashChainOptions? hashChain = null)
     {
         this.scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
@@ -49,6 +59,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         this.configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
         this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        this.hashChain = hashChain;
     }
 
     /// <inheritdoc />
@@ -154,6 +165,9 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         // publish or commit failure re-dispatches the row, which would otherwise record a second
         // sample for the same envelope.
         List<int>? pendingRetriesBeforeSuccess = null;
+        // Only materialised when hash-chaining is on; holds the successfully-built rows to stamp
+        // after the loop (so a dead-lettered row never enters the chain).
+        var hashableRows = hashChain is null ? null : new List<AuditLog>(claimed.Count);
 
         foreach (var row in claimed)
         {
@@ -163,6 +177,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                 ctx.Add(auditLog);
                 ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
+                hashableRows?.Add(auditLog);
                 processed++;
                 // v0.7.20: stash the entry size so it can be emitted AFTER SaveChangesAsync
                 // confirms persistence. Recording before commit would double-count when the
@@ -209,6 +224,20 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
                     LogRowDeadLettered(row.Id, row.Attempts);
                 }
             }
+        }
+
+        // Tamper-evidence: stamp the hash chain across the rows built this cycle, chaining each onto
+        // its entity stream's persisted anchor (locked + advanced in this same transaction), before
+        // publish + SaveChanges so the hashes commit in the same transaction as the AuditLog inserts.
+        // Dead-lettered rows were never added to hashableRows, so a poisoned queue row does not enter
+        // (or break) the chain.
+        if (hashChain is not null && hashableRows is { Count: > 0 })
+        {
+            var keyProvider = scope.ServiceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
+            await Integrity.EfCoreAuditHashChainWriter
+                .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
+                    configuration.CustomColumns, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // Publish BEFORE the dispatcher's SaveChanges so a publisher exception aborts the same

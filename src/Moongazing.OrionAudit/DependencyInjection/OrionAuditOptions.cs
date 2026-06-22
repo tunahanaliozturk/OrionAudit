@@ -27,6 +27,11 @@ public sealed class OrionAuditOptions
     internal RetentionSweepOptions SweepOptions { get; } = new();
     internal JsonSerializerContext? JsonContext { get; private set; }
 
+    /// <summary>
+    /// Non-null when <see cref="UseHashChain"/> has been called; gates tamper-evident hash-chaining.
+    /// </summary>
+    internal Integrity.AuditHashChainOptions? HashChainOptions { get; private set; }
+
     private readonly List<CustomColumn> customColumns = new();
 
     /// <summary>
@@ -187,6 +192,34 @@ public sealed class OrionAuditOptions
         configure?.Invoke(builder);
         AsyncCaptureOptions = builder.Options;
         AsyncCaptureEnabled = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Opts into tamper-evident hash-chaining. Each captured <see cref="AuditLog"/> row gains a keyed
+    /// HMAC-SHA256 <see cref="AuditLog.EntryHash"/> binding its content (including any registered custom
+    /// columns) to the immediately preceding row in the same chain scope (per entity stream, per
+    /// tenant, by default), so a later edit, deletion, reordering, or out-of-band insertion of any row
+    /// is detectable via the registered <see cref="Integrity.IAuditIntegrityVerifier"/>. A persisted
+    /// per-stream anchor makes concurrent same-stream appends safe and makes tail-row / whole-stream
+    /// deletion detectable.
+    /// </summary>
+    /// <remarks>
+    /// The chain is a <strong>keyed</strong> MAC, so a key is required: supply one via
+    /// <c>UseHashChain(h =&gt; h.UseKey(keyId, base64Key))</c> (the secret must live OUTSIDE the audit
+    /// database) or register a custom <see cref="Integrity.IAuditChainKeyProvider"/>. Enabling
+    /// hash-chaining without a key throws at startup - an unkeyed chain would be forgeable by anyone
+    /// able to write audit rows. Additive and backward compatible: rows written before this was enabled
+    /// keep a null hash and verify as an unchained prefix. When not called, the hash columns stay null
+    /// and capture is unchanged. Requires the consumer to add an EF Core migration for the new
+    /// <see cref="AuditLog.EntryHash"/> / <see cref="AuditLog.PreviousHash"/> / <see cref="AuditLog.HashKeyId"/>
+    /// columns and the <see cref="Integrity.AuditChainAnchor"/> table.
+    /// </remarks>
+    public OrionAuditOptions UseHashChain(Action<Integrity.AuditHashChainOptions>? configure = null)
+    {
+        var options = new Integrity.AuditHashChainOptions();
+        configure?.Invoke(options);
+        HashChainOptions = options;
         return this;
     }
 

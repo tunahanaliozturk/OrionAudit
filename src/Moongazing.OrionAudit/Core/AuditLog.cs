@@ -62,4 +62,38 @@ public sealed class AuditLog
     /// broken; operators see the error via telemetry and can investigate.
     /// </summary>
     public string? Error { get; set; }
+
+    /// <summary>
+    /// Lowercase hex HMAC-SHA256 integrity MAC binding this row's content to the row immediately
+    /// preceding it in the same chain scope (per entity stream, per tenant). Computed as
+    /// <c>HMAC(key, canonical(this row) || PreviousHash)</c> at capture time when tamper-evident
+    /// hash-chaining is enabled (<c>o.UseHashChain()</c>); <see langword="null"/> otherwise. The key is
+    /// supplied by an <see cref="Integrity.IAuditChainKeyProvider"/> that lives outside the audit
+    /// database, so the chain is unforgeable by an attacker who can write rows but not read the key.
+    /// </summary>
+    /// <remarks>
+    /// Additive and opt-in (v0.9.0). Rows written before hash-chaining was enabled keep a
+    /// <see langword="null"/> hash and form an <em>unverified prefix</em> that
+    /// <c>IAuditIntegrityVerifier.VerifyChainAsync</c> skips; verification begins at the first
+    /// hashed (genesis) row in each stream. Never read by capture, diff, compaction, or the
+    /// public query APIs, so it cannot alter existing behaviour.
+    /// </remarks>
+    public string? EntryHash { get; set; }
+
+    /// <summary>
+    /// The <see cref="EntryHash"/> of the immediately preceding row in this row's chain scope, or
+    /// <see langword="null"/> for the genesis row of a stream (the first hashed row). Persisted so
+    /// the chain is self-describing: a verifier can detect a removed or reordered link by comparing
+    /// each row's <see cref="PreviousHash"/> against the actual predecessor's <see cref="EntryHash"/>
+    /// without re-deriving the whole chain from a side channel.
+    /// </summary>
+    public string? PreviousHash { get; set; }
+
+    /// <summary>
+    /// The id of the chain key (<see cref="Integrity.IAuditChainKeyProvider.ActiveKeyId"/>) used to
+    /// compute <see cref="EntryHash"/>, or <see langword="null"/> when the row is unchained. Stored so
+    /// verification can look up the exact key version a row was MAC'd with, which lets the key be
+    /// rotated (newer rows stamped with a new id) without invalidating rows written under an older key.
+    /// </summary>
+    public int? HashKeyId { get; set; }
 }
