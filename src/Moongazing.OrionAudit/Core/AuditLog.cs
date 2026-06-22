@@ -62,4 +62,28 @@ public sealed class AuditLog
     /// broken; operators see the error via telemetry and can investigate.
     /// </summary>
     public string? Error { get; set; }
+
+    /// <summary>
+    /// Lowercase hex SHA-256 integrity hash binding this row's content to the row immediately
+    /// preceding it in the same chain scope (per entity stream). Computed as
+    /// <c>H(canonical(this row) || PreviousHash)</c> at capture time when tamper-evident
+    /// hash-chaining is enabled (<c>o.UseHashChain()</c>); <see langword="null"/> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Additive and opt-in (v0.9.0). Rows written before hash-chaining was enabled keep a
+    /// <see langword="null"/> hash and form an <em>unverified prefix</em> that
+    /// <c>IAuditIntegrityVerifier.VerifyChainAsync</c> skips; verification begins at the first
+    /// hashed (genesis) row in each stream. Never read by capture, diff, compaction, or the
+    /// public query APIs, so it cannot alter existing behaviour.
+    /// </remarks>
+    public string? EntryHash { get; set; }
+
+    /// <summary>
+    /// The <see cref="EntryHash"/> of the immediately preceding row in this row's chain scope, or
+    /// <see langword="null"/> for the genesis row of a stream (the first hashed row). Persisted so
+    /// the chain is self-describing: a verifier can detect a removed or reordered link by comparing
+    /// each row's <see cref="PreviousHash"/> against the actual predecessor's <see cref="EntryHash"/>
+    /// without re-deriving the whole chain from a side channel.
+    /// </summary>
+    public string? PreviousHash { get; set; }
 }

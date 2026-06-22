@@ -27,6 +27,11 @@ public sealed class OrionAuditOptions
     internal RetentionSweepOptions SweepOptions { get; } = new();
     internal JsonSerializerContext? JsonContext { get; private set; }
 
+    /// <summary>
+    /// Non-null when <see cref="UseHashChain"/> has been called; gates tamper-evident hash-chaining.
+    /// </summary>
+    internal Integrity.AuditHashChainOptions? HashChainOptions { get; private set; }
+
     private readonly List<CustomColumn> customColumns = new();
 
     /// <summary>
@@ -187,6 +192,24 @@ public sealed class OrionAuditOptions
         configure?.Invoke(builder);
         AsyncCaptureOptions = builder.Options;
         AsyncCaptureEnabled = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Opts into tamper-evident hash-chaining. Each captured <see cref="AuditLog"/> row gains a
+    /// SHA-256 <see cref="AuditLog.EntryHash"/> binding its content to the immediately preceding row
+    /// in the same chain scope (per entity stream by default), so a later edit, deletion, or
+    /// reordering of any row is detectable via the registered <see cref="Integrity.IAuditIntegrityVerifier"/>.
+    /// Additive and backward compatible: rows written before this was enabled keep a null hash and
+    /// verify as an unchained prefix. When not called, the hash columns stay null and capture is
+    /// unchanged. Requires the consumer to add an EF Core migration for the new
+    /// <see cref="AuditLog.EntryHash"/> / <see cref="AuditLog.PreviousHash"/> columns.
+    /// </summary>
+    public OrionAuditOptions UseHashChain(Action<Integrity.AuditHashChainOptions>? configure = null)
+    {
+        var options = new Integrity.AuditHashChainOptions();
+        configure?.Invoke(options);
+        HashChainOptions = options;
         return this;
     }
 

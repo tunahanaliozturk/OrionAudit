@@ -4,10 +4,11 @@ This document lists what's shipped, what's actively planned, and what we're deli
 building. It's a planning artifact, not a contract — dates slip, priorities reshuffle. If
 something here matters to you, open a GitHub issue so we can weigh it against everything else.
 
-**Current version: 0.8.1** (shipped 2026-06-20). Queryable audit-history read API and snapshot
+**Current version: 0.9.0** (shipped 2026-06-22). Queryable audit-history read API and snapshot
 compaction landed in 0.8.0; 0.8.1 removed a redundant deep-equals pass from the JSON Patch diff
-hot path. Next up is 0.9.0 (audit-log lifecycle: retention/archival of the log itself,
-tamper-evidence, export/streaming) on the way to the 1.0.0 API freeze.
+hot path; 0.9.0 added opt-in tamper-evident hash-chaining (a per-row SHA-256 chain plus an
+`IAuditIntegrityVerifier`). Next up is audit-log lifecycle (retention/archival of the log itself,
+export/streaming) and richer queries on the way to the 1.0.0 API freeze.
 
 ## Status legend
 
@@ -256,7 +257,7 @@ growth without losing fidelity.*
 
 Scope was narrowed from the original "separate audit store & operator tools" entry. The two
 read/maintenance items below shipped at quality; the separate-DB store, CLI diff renderer, and
-viewer auth presets are retargeted to v0.9.0 / v1.0.0 below.
+viewer auth presets are retargeted to the v0.10.0 / v0.11.0 milestones below.
 
 - **Queryable audit-history read API (`IAuditHistoryStore`).** A storage-agnostic read surface
   in the new `Moongazing.OrionAudit.Store` namespace. `QueryAsync(AuditHistoryQuery, ...)`
@@ -291,7 +292,39 @@ viewer auth presets are retargeted to v0.9.0 / v1.0.0 below.
 
 ---
 
-## v0.9.0 - Audit-log lifecycle, export & docs *(planned, Q3 2026)*
+## v0.9.0 - Tamper-evident hash chain *(shipped 2026-06-22)*
+
+Theme: *make the audit log defensible as evidence: prove no row was altered, deleted, or
+reordered after it was written.*
+
+Pulled forward from the original v0.10.0 entry as the strongest self-contained integrity feature.
+Opt-in and fully additive; capture, diff, compaction, and the read APIs are unchanged when it is
+off.
+
+- **Tamper-evident hash-chaining (`o.UseHashChain()`).** Each captured `AuditLog` row gains a
+  SHA-256 `EntryHash = H(canonical(row fields) || PreviousHash)`, plus a `PreviousHash` column so
+  the chain is self-describing. Canonicalization is deterministic and round-trip-stable: fixed
+  field order, length-prefixed fields (content cannot migrate across field boundaries undetected),
+  invariant culture, UTF-8, and a Kind/precision-stable timestamp (epoch milliseconds) so a row
+  hashes identically before and after persistence across SQLite / SQL Server / PostgreSQL / MySQL.
+  The chain scope is **per entity stream** (rows sharing `EntityType` + `EntityId`, ordered by
+  `OccurredOnUtc` then `Id`) - the order the store already indexes, compacts, and reconstructs by -
+  so each entity's trail is independently verifiable; the tenant id is hashed into each row, so
+  cross-tenant tampering on a shared entity id is still caught. Stamping runs inside the capture
+  transaction on both the synchronous interceptor and the async dispatcher.
+- **`IAuditIntegrityVerifier.VerifyChainAsync`.** Walks rows in chain order and returns either
+  valid (with the hashed-row count) or the first broken row's id + entity and an
+  `AuditChainBreakReason` (`ContentMismatch`, `BrokenLink`, `MissingHashAfterChainStart`). Verify
+  one entity stream or the whole table, optionally tenant-scoped. Read-only and idempotent.
+  `EfCoreAuditIntegrityVerifier` is the default, registered automatically when chaining is enabled.
+- **Backward compatible.** Pre-existing rows (null `EntryHash`) verify as an unchained prefix the
+  verifier skips; verification begins at each stream's first hashed (genesis) row. Enabling the
+  feature requires the consumer to add an EF Core migration for the two new columns; the columns
+  are emitted by `AuditLogEntityTypeConfiguration` like every other audit column.
+
+---
+
+## v0.10.0 - Audit-log lifecycle, export & docs *(planned, Q3 2026)*
 
 Theme: *manage the audit log itself as a first-class, long-lived store (its retention,
 its integrity, and getting data out of it), and finish the docs.*
@@ -316,14 +349,13 @@ its integrity, and getting data out of it), and finish the docs.*
 
 ---
 
-## v0.10.0 - Tamper-evidence & richer queries *(planned, Q4 2026)*
+## v0.11.0 - Richer queries & separate-store audit *(planned, Q4 2026)*
 
-Theme: *make the audit log defensible as evidence, and richer to slice.*
+Theme: *richer to slice, and able to live off the primary database.*
 
-- **Tamper-evident hash-chaining.** Optional per-row hash that chains each `AuditLog` entry to
-  its predecessor (per entity, or per tenant) so a deleted or edited row is detectable. A
-  `VerifyChainAsync` operation on `IAuditHistoryStore` walks the chain and reports the first
-  break. Opt-in, additive column; existing rows verify as an unchained prefix.
+Tamper-evident hash-chaining shipped early in v0.9.0; this milestone keeps the remaining
+query/storage items from the original entry.
+
 - **Richer query filters / aggregations.** Promote the v0.7.6 / v0.7.7 composable filters and
   rollups onto `IAuditHistoryStore` so the backend-agnostic surface gains correlation-id and
   free-predicate filters plus count/by-day/by-action aggregations, not just paged row reads.
@@ -338,7 +370,7 @@ Theme: *make the audit log defensible as evidence, and richer to slice.*
 
 ---
 
-## v0.11.0 - Store backends & AOT polish *(planned, Q1 2027)*
+## v0.12.0 - Store backends & AOT polish *(planned, Q1 2027)*
 
 Theme: *more places to put the audit log, and finish the AOT story.*
 
@@ -385,7 +417,7 @@ Target theme: *commit to the surface, slow down, support it.*
   REST endpoint. Only worth it if the viewer grows beyond "browse and filter".
 - **Optional row-level encryption** for `AuditLog.Diff`/`Snapshot` columns, against a
   consumer-supplied KMS. Soft veto today (see "Out of scope") but the consumer demand signal is
-  growing; revisit before v1. Distinct from the v0.10.0 tamper-evidence work, which proves a row
+  growing; revisit before v1. Distinct from the v0.9.0 tamper-evidence work, which proves a row
   was not altered but does not encrypt its contents.
 
 If any of the above maps to a real workload you are on right now, open an issue with the
@@ -441,9 +473,10 @@ These come up in conversation; we're saying no on purpose.
 | v0.7.5    | shipped 2026-06-10 | LDAP / IdP user resolution       |
 | v0.8.0    | shipped 2026-06-19 | queryable history + compaction   |
 | v0.8.1    | shipped 2026-06-20 | diff hot-path perf               |
-| v0.9.0    | Q3 2026            | log lifecycle + export + docs    |
-| v0.10.0   | Q4 2026            | tamper-evidence + richer queries |
-| v0.11.0   | Q1 2027            | store backends + AOT polish      |
+| v0.9.0    | shipped 2026-06-22 | tamper-evident hash chain        |
+| v0.10.0   | Q3 2026            | log lifecycle + export + docs    |
+| v0.11.0   | Q4 2026            | richer queries + separate store  |
+| v0.12.0   | Q1 2027            | store backends + AOT polish      |
 | v1.0.0    | Q1-Q2 2027         | API freeze                       |
 
 Patch releases (`0.x.y`) ship as needed for bugs and security. Minor releases (`0.x.0`) cluster

@@ -20,6 +20,13 @@
     <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
   </ItemGroup>
 
+  <!-- Expose internal building blocks (the hash-chain writer and the canonicalization helper) to
+       the test assemblies so they can be unit-tested without widening the public API surface. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Moongazing.OrionAudit.Tests" />
+    <InternalsVisibleTo Include="Moongazing.OrionAudit.IntegrationTests" />
+  </ItemGroup>
+
   <!--
     Ship the source generator inside the same NuGet (analyzers/dotnet/cs/) rather than as a
     separate package. ReferenceOutputAssembly=false means we don't link the generator dll

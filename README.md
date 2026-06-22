@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.8.0 is here — queryable audit-history read API and snapshot compaction.** A new storage-agnostic `IAuditHistoryStore` lets you query recorded `AuditLog` rows by entity, subject, action, user, tenant, and a UTC time range, with paging and ordering, without binding to a specific persistence backend. The same surface adds snapshot compaction, which folds a long change-history for one entity into a compacted base snapshot plus a bounded retained tail, keeping the latest state fully reconstructable while bounding storage growth. The default `EfCoreAuditHistoryStore` is registered by `AddOrionAudit`; an `InMemoryAuditHistoryStore` ships in `OrionAudit.Testing`. On top of v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
-> [See the v0.8.0 changelog](CHANGELOG.md#080---2026-06-19) and [what's next](ROADMAP.md).
+> **v0.9.0 is here — tamper-evident hash-chaining.** Opt in with `o.UseHashChain()` and every captured `AuditLog` row gains a SHA-256 `EntryHash` that chains it to the row before it (per entity stream), so a later edit, deletion, or reordering of any row is detectable. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive: rows written before you enabled it verify as an unchained prefix, and capture, diffs, compaction, and the read APIs are unchanged. On top of v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the v0.9.0 changelog](CHANGELOG.md#090---2026-06-22) and [what's next](ROADMAP.md).
 
 ---
 
@@ -140,6 +140,58 @@ same transaction.
 | `OrionAudit.Testing`     | `dotnet add package OrionAudit.Testing`        | `AuditCapture` + fluent assertions, framework-free |
 
 ---
+
+## What's new in v0.9.0
+
+### Tamper-evident hash-chaining
+
+Opt in with `o.UseHashChain()`. Each captured `AuditLog` row then gets a SHA-256 `EntryHash`
+that binds its content to the row before it in the same chain scope (per entity stream), plus a
+`PreviousHash` column so the chain is self-describing. A later edit, deletion, reordering, or
+out-of-band insertion of any row breaks every hash from that point on, which the verifier detects.
+
+```csharp
+services.AddOrionAudit<AppDbContext>(o =>
+{
+    o.Audit<Order>();
+    o.UseHashChain(); // off by default; turn it on to start chaining new rows
+});
+```
+
+`UseHashChain()` adds two nullable columns (`EntryHash`, `PreviousHash`) to the audit table, so
+add a migration after enabling it:
+
+```bash
+dotnet ef migrations add AddOrionAuditHashChain
+```
+
+Verify the chain through the DI-registered `IAuditIntegrityVerifier`:
+
+```csharp
+using Moongazing.OrionAudit.Integrity;
+
+var verifier = serviceProvider.GetRequiredService<IAuditIntegrityVerifier>();
+
+// One entity's trail...
+var result = await verifier.VerifyChainAsync(
+    AuditChainVerificationRequest.ForEntity(typeof(Order).AssemblyQualifiedName!, order.Id.ToString()));
+
+// ...or the whole table.
+var all = await verifier.VerifyChainAsync(AuditChainVerificationRequest.All());
+
+if (!all.IsValid)
+{
+    // all.BrokenAtId / all.BrokenEntityType / all.BrokenEntityId / all.Reason pinpoint the first break.
+    Console.WriteLine($"Audit chain broken at {all.BrokenAtId}: {all.Reason} ({all.Detail})");
+}
+```
+
+The chain is **opt-in and backward compatible**: rows written before you enabled it keep a null
+hash and verify as an unchained prefix the verifier skips, so verification begins at each stream's
+first hashed (genesis) row. Capture, diffs, snapshot compaction, and the read APIs are unchanged
+whether or not chaining is on. Canonicalization is deterministic and stable across a database
+round-trip (fixed field order, length-prefixed fields, invariant culture, UTF-8, and a
+precision-stable timestamp), so a legitimately persisted row always re-verifies.
 
 ## What's new in v0.8.0
 
@@ -570,7 +622,7 @@ you can scan the output instead of reading source.
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md) — twelve-month forward plan through v1.0.0 (Q2 2027): v0.6.0 developer experience, v0.7.0 outbox + polymorphic capture, v0.8.0 separate-DB audit store, v0.9.0 docs site + AOT polish, then API freeze.
+- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027): v0.8.0 queryable history + compaction, v0.9.0 tamper-evident hash chain, then audit-log lifecycle + export, richer queries + separate store, AOT polish, and the API freeze.
 - [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)

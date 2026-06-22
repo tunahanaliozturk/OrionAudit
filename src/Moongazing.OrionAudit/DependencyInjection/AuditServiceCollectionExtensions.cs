@@ -47,6 +47,17 @@ public static class AuditServiceCollectionExtensions
         services.TryAddScoped<Store.IAuditHistoryStore>(sp =>
             new Store.EfCoreAuditHistoryStore(sp.GetRequiredService<TDbContext>()));
         services.TryAddSingleton(TimeProvider.System);
+
+        if (options.HashChainOptions is { } hashChainOptions)
+        {
+            // Tamper-evidence opt-in. The singleton options object is the gate the capture
+            // interceptor and async dispatcher check to switch chaining on (same presence-based
+            // pattern as AsyncCaptureOptions). The verifier resolves the consumer's context, like
+            // the history store, so it reads the same audit table the chain was written to.
+            services.TryAddSingleton(hashChainOptions);
+            services.TryAddScoped<Integrity.IAuditIntegrityVerifier>(sp =>
+                new Integrity.EfCoreAuditIntegrityVerifier(sp.GetRequiredService<TDbContext>()));
+        }
         if (options.JsonContext is not null)
         {
             services.TryAddSingleton(options.JsonContext);

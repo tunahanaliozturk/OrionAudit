@@ -7,6 +7,28 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-22
+
+### Added
+
+#### Tamper-evident hash-chaining of audit entries
+
+An opt-in integrity layer that chains each persisted `AuditLog` row to the one before it, so a later edit, deletion, reordering, or out-of-band insertion of any row is detectable. Off by default and fully additive: existing behaviour, schema reads, and the public query / compaction APIs are unchanged.
+
+- **Per-row hash.** Each row gains a SHA-256 `EntryHash` computed as `H(canonical(row fields) || PreviousHash)`, plus a `PreviousHash` column carrying the predecessor's hash so the chain is self-describing. Canonicalization is deterministic and stable: a fixed field order, length-prefixed fields (so content cannot migrate across field boundaries undetected), invariant culture, UTF-8, and a Kind- and precision-stable timestamp (normalized to integer epoch milliseconds) so a row's hash survives a database round-trip identically across SQLite / SQL Server / PostgreSQL / MySQL. Both columns are nullable, fixed-length(64).
+- **Chain scope is per entity stream.** The "preceding entry" is the prior row sharing an (`EntityType`, `EntityId`) key, ordered by (`OccurredOnUtc`, `Id`) - the same order the store already indexes, compacts, and reconstructs by, so each entity's trail is independently verifiable. The tenant id is part of each row's hashed content, so cross-tenant tampering on a shared entity id is still detected even though the chain key omits the tenant.
+- **`IAuditIntegrityVerifier.VerifyChainAsync`.** Walks rows in chain order and returns an `AuditChainVerificationResult`: either valid (with the count of hashed rows verified) or the first broken row's `Id` + `EntityType` / `EntityId` and an `AuditChainBreakReason` (`ContentMismatch` for an altered row, `BrokenLink` for a deleted / reordered / inserted row, `MissingHashAfterChainStart` for an unhashed forgery inside the hashed region). Verify one entity stream (`AuditChainVerificationRequest.ForEntity`) or the whole table (`.All`), optionally tenant-scoped. Read-only and idempotent - safe to run on a live table or a replica. `EfCoreAuditIntegrityVerifier` is the default implementation, registered automatically when hash-chaining is enabled.
+- **Opt-in via `o.UseHashChain()`.** Enables stamping in both the synchronous capture interceptor and the asynchronous dispatcher (the hash is stamped inside the same transaction that writes the row, chaining onto the stream's persisted head). When not called, the hash columns stay null and capture is byte-for-byte unchanged.
+- **Backward compatible.** Rows written before hash-chaining was enabled keep a null `EntryHash` and form an *unverified prefix* that the verifier skips; verification begins at each stream's first hashed (genesis) row, whose `PreviousHash` is null. Enabling the feature on an existing table therefore never invalidates the history already there - it starts a fresh chain from the next captured row.
+- **Schema / migration.** `UseHashChain()` requires the consumer to add an EF Core migration for the new `EntryHash` / `PreviousHash` columns (`dotnet ef migrations add AddOrionAuditHashChain`); the columns are emitted by `AuditLogEntityTypeConfiguration` like every other audit column. As a library OrionAudit ships the schema via its entity configuration, not a bundled migration, so the migration lands in the consumer's own migrations assembly.
+
+### Tests
+
+- `AuditEntryHasherTests`: hashing is deterministic; output is 64-char lowercase hex; the hash changes when any content field or the previous hash changes; canonicalization distinguishes null from empty string, is injective across field boundaries, and ignores the row's own (mutable) hash columns.
+- `AuditChainVerifierTests` (pure engine): a clean chain verifies; verification is idempotent; the genesis row has a null previous hash; a mutated row fails at that row with `ContentMismatch`; a deleted row fails at its successor with `BrokenLink`; reordered rows fail with `BrokenLink`; an appended row continues the chain; an unhashed prefix followed by a hashed suffix verifies only the hashed tail; an unhashed row inside the hashed region fails with `MissingHashAfterChainStart`.
+- `EfCoreAuditIntegrityVerifierTests` (real SQLite): clean persisted chains verify; mutating / deleting a stored row is detected; verification is idempotent; appending in a later save continues the persisted chain; a whole-table walk pinpoints the broken stream; tenant-scoped verification isolates each tenant's chain. Ids and timestamps are pinned (deterministic `SeqId` Guids, fixed UTC timestamps) so ordering never depends on random Guid tie-breaks.
+- `HashChainCaptureTests` (end-to-end through the interceptor + dispatcher): disabled mode leaves the hash columns null and registers no verifier; enabled mode stamps and verifies across multiple saves (the cross-save head-read seam); post-capture tampering is caught; multiple entities in one save each start their own genesis; the async-capture dispatcher path chains and verifies.
+
 ## [0.8.1] - 2026-06-20
 
 ### Performance
