@@ -55,8 +55,12 @@ public static class AuditServiceCollectionExtensions
             // pattern as AsyncCaptureOptions). The verifier resolves the consumer's context, like
             // the history store, so it reads the same audit table the chain was written to.
             services.TryAddSingleton(hashChainOptions);
+            RegisterChainKeyProvider(services, hashChainOptions);
             services.TryAddScoped<Integrity.IAuditIntegrityVerifier>(sp =>
-                new Integrity.EfCoreAuditIntegrityVerifier(sp.GetRequiredService<TDbContext>()));
+                new Integrity.EfCoreAuditIntegrityVerifier(
+                    sp.GetRequiredService<TDbContext>(),
+                    sp.GetRequiredService<Integrity.IAuditChainKeyProvider>(),
+                    configuration.CustomColumns));
         }
         if (options.JsonContext is not null)
         {
@@ -102,6 +106,36 @@ public static class AuditServiceCollectionExtensions
         RegisterEventPublisher(services, options);
 
         return services;
+    }
+
+    // Registers the chain's MAC key provider. The chain is a keyed MAC (HMAC-SHA256), so a key is
+    // mandatory: an unkeyed chain is forgeable by anyone who can write rows. Precedence:
+    //   1) A consumer-registered IAuditChainKeyProvider (e.g. a KMS / Key Vault provider) wins -
+    //      TryAdd below is a no-op when one is already present.
+    //   2) Otherwise, if keys were supplied via o.UseHashChain(h => h.UseKey(...)), register the
+    //      in-config StaticAuditChainKeyProvider over them (validated at construction).
+    //   3) Otherwise register a guard that throws a clear OrionAuditConfigurationException the first
+    //      time the provider is resolved (capture or verification), so enabling hash-chaining without
+    //      a key fails loudly rather than silently producing an unkeyed/forgeable chain.
+    private static void RegisterChainKeyProvider(
+        IServiceCollection services,
+        Integrity.AuditHashChainOptions hashChainOptions)
+    {
+        if (hashChainOptions.KeysBuilder is { HasAny: true } keysBuilder)
+        {
+            var keys = keysBuilder.Build();
+            var activeKeyId = hashChainOptions.ActiveKeyId;
+            services.TryAddSingleton<Integrity.IAuditChainKeyProvider>(
+                _ => new Integrity.StaticAuditChainKeyProvider(keys, activeKeyId));
+            return;
+        }
+
+        services.TryAddSingleton<Integrity.IAuditChainKeyProvider>(_ =>
+            throw new OrionAuditConfigurationException(
+                "UseHashChain() was called without a key. The audit hash chain is a keyed MAC and "
+                + "requires a key: call o.UseHashChain(h => h.UseKey(keyId, base64Key)) with a secret "
+                + "stored OUTSIDE the audit database, or register a custom IAuditChainKeyProvider. An "
+                + "unkeyed chain would be forgeable by anyone able to write audit rows."));
     }
 
     // Publisher registration order:

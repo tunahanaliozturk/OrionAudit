@@ -19,7 +19,7 @@
 
 ---
 
-> **v0.9.0 is here — tamper-evident hash-chaining.** Opt in with `o.UseHashChain()` and every captured `AuditLog` row gains a SHA-256 `EntryHash` that chains it to the row before it (per entity stream), so a later edit, deletion, or reordering of any row is detectable. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive: rows written before you enabled it verify as an unchained prefix, and capture, diffs, compaction, and the read APIs are unchanged. On top of v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> **v0.9.0 is here — tamper-evident hash-chaining.** Opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable — and unforgeable without the MAC key, which lives outside the audit database. A per-stream anchor makes concurrent same-stream writes safe and truncation visible. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive: rows written before you enabled it verify as an unchained prefix, and capture, diffs, compaction, and the read APIs are unchanged. On top of v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
 > [See the v0.9.0 changelog](CHANGELOG.md#090---2026-06-22) and [what's next](ROADMAP.md).
 
 ---
@@ -145,21 +145,34 @@ same transaction.
 
 ### Tamper-evident hash-chaining
 
-Opt in with `o.UseHashChain()`. Each captured `AuditLog` row then gets a SHA-256 `EntryHash`
-that binds its content to the row before it in the same chain scope (per entity stream), plus a
-`PreviousHash` column so the chain is self-describing. A later edit, deletion, reordering, or
-out-of-band insertion of any row breaks every hash from that point on, which the verifier detects.
+Opt in with `o.UseHashChain(...)`. Each captured `AuditLog` row then gets a **keyed** HMAC-SHA256
+`EntryHash` that binds its content (including any registered custom columns) to the row before it in
+the same chain scope (per entity stream, per tenant), plus a `PreviousHash` column and a `HashKeyId`.
+A later edit, deletion (including deleting the tail or an entire stream), reordering, or out-of-band
+insertion of any row is detected by the verifier.
+
+The chain is a **keyed MAC**, not a bare hash: the key comes from an `IAuditChainKeyProvider` that
+lives outside the audit database. That is what makes the chain unforgeable - with a plain SHA-256
+chain, anyone who can write rows could recompute the hashes and fake a valid chain. So a key is
+required; enabling without one fails fast. Store the secret outside the audit database (a secret
+manager / KMS / environment secret).
 
 ```csharp
 services.AddOrionAudit<AppDbContext>(o =>
 {
     o.Audit<Order>();
-    o.UseHashChain(); // off by default; turn it on to start chaining new rows
+    // off by default; supply a key (base64, >= 16 bytes) loaded from a secret store.
+    o.UseHashChain(h => h.UseKey(keyId: 1, base64Key: Environment.GetEnvironmentVariable("AUDIT_CHAIN_KEY")!));
 });
 ```
 
-`UseHashChain()` adds two nullable columns (`EntryHash`, `PreviousHash`) to the audit table, so
-add a migration after enabling it:
+A persisted per-stream anchor (`OrionAudit_Chain_Anchor`) makes concurrent same-stream writes safe
+(they serialize on the anchor row inside your transaction) and makes tail/whole-stream deletion
+detectable (the anchor remembers the true tail hash and row count). The key id is stored per row, so
+you can rotate keys later without invalidating rows written under an older (still-registered) key.
+
+`UseHashChain()` adds three nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`) to the audit
+table plus the `OrionAudit_Chain_Anchor` table, so add a migration after enabling it:
 
 ```bash
 dotnet ef migrations add AddOrionAuditHashChain

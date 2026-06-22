@@ -30,6 +30,21 @@ public enum AuditChainBreakReason
     /// suffix was tampered with (for example a hashed row replaced by an unhashed forgery).
     /// </summary>
     MissingHashAfterChainStart = 3,
+
+    /// <summary>
+    /// The stream's walked rows form an intact chain, but its tail hash or row count disagrees with the
+    /// persisted <see cref="AuditChainAnchor"/> - i.e. one or more tail rows (or the whole stream) were
+    /// deleted, leaving a consistent prefix that would otherwise verify. The anchor proves rows are
+    /// missing even though no surviving link is broken.
+    /// </summary>
+    Truncated = 4,
+
+    /// <summary>
+    /// A row references a <see cref="AuditLog.HashKeyId"/> whose key is not registered with the
+    /// configured <see cref="IAuditChainKeyProvider"/>, so its MAC cannot be recomputed. Verification
+    /// cannot prove the row intact; surfaced rather than silently skipped.
+    /// </summary>
+    UnknownKey = 5,
 }
 
 /// <summary>
@@ -98,4 +113,17 @@ public sealed class AuditChainVerificationResult
         return new AuditChainVerificationResult(
             false, verifiedRowCount, brokenRow.Id, brokenRow.EntityType, brokenRow.EntityId, reason, detail);
     }
+
+    /// <summary>
+    /// Builds a failure result for a stream-level break that has no single offending row (for example
+    /// a whole-stream deletion detected via the anchor): <see cref="BrokenAtId"/> stays null while the
+    /// entity type / id identify the stream.
+    /// </summary>
+    public static AuditChainVerificationResult BrokenAt(
+        long verifiedRowCount,
+        string entityType,
+        string entityId,
+        AuditChainBreakReason reason,
+        string detail)
+        => new(false, verifiedRowCount, null, entityType, entityId, reason, detail);
 }

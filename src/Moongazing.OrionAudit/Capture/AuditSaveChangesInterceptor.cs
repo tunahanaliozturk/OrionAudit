@@ -172,14 +172,18 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         }
 
         // Tamper-evidence: stamp the hash chain across the rows just added, chaining each onto its
-        // entity stream's persisted head. Done after the build loop (so every row's content is
-        // final, including any SnapshotPolicy snapshot stamped above) and before publish/SaveChanges
-        // so the hashes commit atomically with the rows. Every captured row is chained, including
-        // ones that recorded a diff Error, so an error row cannot silently create a gap.
+        // entity stream's persisted anchor (which is locked + advanced in this same transaction).
+        // Done after the build loop (so every row's content is final, including any SnapshotPolicy
+        // snapshot stamped above and the custom-column shadow values applied by ApplyCustomColumns)
+        // and before publish/SaveChanges so the hashes commit atomically with the rows. Every captured
+        // row is chained, including ones that recorded a diff Error, so an error row cannot silently
+        // create a gap.
         if (hashChain is not null && hashableRows is { Count: > 0 })
         {
+            var keyProvider = serviceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
             await Integrity.EfCoreAuditHashChainWriter
-                .StampAsync(ctx, hashableRows, hashChain.Scope, cancellationToken)
+                .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
+                    configuration.CustomColumns, cancellationToken)
                 .ConfigureAwait(false);
         }
 

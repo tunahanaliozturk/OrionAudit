@@ -51,10 +51,13 @@ public sealed record AuditChainVerificationRequest
     public string? TenantId { get; init; }
 
     /// <summary>Verifies the chain for one entity stream.</summary>
+    /// <exception cref="ArgumentException"><paramref name="entityType"/> or <paramref name="entityId"/>
+    /// is null, empty, or whitespace-only. A whitespace-only key would silently match no stream (or the
+    /// wrong one), so it is rejected up front rather than producing a misleading "valid" result.</exception>
     public static AuditChainVerificationRequest ForEntity(string entityType, string entityId, string? tenantId = null)
     {
-        ArgumentException.ThrowIfNullOrEmpty(entityType);
-        ArgumentException.ThrowIfNullOrEmpty(entityId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityId);
         return new AuditChainVerificationRequest { EntityType = entityType, EntityId = entityId, TenantId = tenantId };
     }
 
@@ -63,13 +66,27 @@ public sealed record AuditChainVerificationRequest
         => new() { TenantId = tenantId };
 
     /// <summary>Validates the request, throwing <see cref="ArgumentException"/> on an inconsistent shape.</summary>
-    /// <exception cref="ArgumentException"><see cref="EntityId"/> is set without <see cref="EntityType"/>.</exception>
+    /// <exception cref="ArgumentException"><see cref="EntityId"/> is set without <see cref="EntityType"/>,
+    /// or either is present but whitespace-only (which would match no stream).</exception>
     public void Validate()
     {
         if (EntityId is not null && EntityType is null)
         {
             throw new ArgumentException(
                 "AuditChainVerificationRequest.EntityId requires EntityType to be set.", nameof(EntityType));
+        }
+        // A present-but-blank key is never legitimate: it cannot match a real stream and would make a
+        // scoped verify silently pass. Reject it so a malformed request fails loudly. (null stays
+        // valid - it means "every type" / "every entity".)
+        if (EntityType is not null && string.IsNullOrWhiteSpace(EntityType))
+        {
+            throw new ArgumentException(
+                "AuditChainVerificationRequest.EntityType must not be whitespace-only.", nameof(EntityType));
+        }
+        if (EntityId is not null && string.IsNullOrWhiteSpace(EntityId))
+        {
+            throw new ArgumentException(
+                "AuditChainVerificationRequest.EntityId must not be whitespace-only.", nameof(EntityId));
         }
     }
 }

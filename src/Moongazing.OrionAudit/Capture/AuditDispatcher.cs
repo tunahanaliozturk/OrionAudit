@@ -227,13 +227,16 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         }
 
         // Tamper-evidence: stamp the hash chain across the rows built this cycle, chaining each onto
-        // its entity stream's persisted head, before publish + SaveChanges so the hashes commit in
-        // the same transaction as the AuditLog inserts. Dead-lettered rows were never added to
-        // hashableRows, so a poisoned queue row does not enter (or break) the chain.
+        // its entity stream's persisted anchor (locked + advanced in this same transaction), before
+        // publish + SaveChanges so the hashes commit in the same transaction as the AuditLog inserts.
+        // Dead-lettered rows were never added to hashableRows, so a poisoned queue row does not enter
+        // (or break) the chain.
         if (hashChain is not null && hashableRows is { Count: > 0 })
         {
+            var keyProvider = scope.ServiceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
             await Integrity.EfCoreAuditHashChainWriter
-                .StampAsync(ctx, hashableRows, hashChain.Scope, cancellationToken)
+                .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
+                    configuration.CustomColumns, cancellationToken)
                 .ConfigureAwait(false);
         }
 

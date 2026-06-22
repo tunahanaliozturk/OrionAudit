@@ -6,9 +6,10 @@ something here matters to you, open a GitHub issue so we can weigh it against ev
 
 **Current version: 0.9.0** (shipped 2026-06-22). Queryable audit-history read API and snapshot
 compaction landed in 0.8.0; 0.8.1 removed a redundant deep-equals pass from the JSON Patch diff
-hot path; 0.9.0 added opt-in tamper-evident hash-chaining (a per-row SHA-256 chain plus an
-`IAuditIntegrityVerifier`). Next up is audit-log lifecycle (retention/archival of the log itself,
-export/streaming) and richer queries on the way to the 1.0.0 API freeze.
+hot path; 0.9.0 added opt-in tamper-evident hash-chaining (a keyed-MAC per-row chain with a
+per-stream anchor, plus an `IAuditIntegrityVerifier`). Next up is audit-log lifecycle
+(retention/archival of the log itself, export/streaming) and richer queries on the way to the 1.0.0
+API freeze.
 
 ## Status legend
 
@@ -301,26 +302,43 @@ Pulled forward from the original v0.10.0 entry as the strongest self-contained i
 Opt-in and fully additive; capture, diff, compaction, and the read APIs are unchanged when it is
 off.
 
-- **Tamper-evident hash-chaining (`o.UseHashChain()`).** Each captured `AuditLog` row gains a
-  SHA-256 `EntryHash = H(canonical(row fields) || PreviousHash)`, plus a `PreviousHash` column so
-  the chain is self-describing. Canonicalization is deterministic and round-trip-stable: fixed
-  field order, length-prefixed fields (content cannot migrate across field boundaries undetected),
-  invariant culture, UTF-8, and a Kind/precision-stable timestamp (epoch milliseconds) so a row
-  hashes identically before and after persistence across SQLite / SQL Server / PostgreSQL / MySQL.
-  The chain scope is **per entity stream** (rows sharing `EntityType` + `EntityId`, ordered by
-  `OccurredOnUtc` then `Id`) - the order the store already indexes, compacts, and reconstructs by -
-  so each entity's trail is independently verifiable; the tenant id is hashed into each row, so
-  cross-tenant tampering on a shared entity id is still caught. Stamping runs inside the capture
+- **Tamper-evident hash-chaining (`o.UseHashChain(h => h.UseKey(...))`).** Each captured `AuditLog`
+  row gains a **keyed** HMAC-SHA256 `EntryHash = HMAC(key, canonical(row fields + custom columns) ||
+  PreviousHash)`, plus a `PreviousHash` column and a `HashKeyId` column. The key comes from an
+  `IAuditChainKeyProvider` that lives **outside** the audit database, which closes a bare hash's
+  weakness: with a plain SHA-256 chain, anyone able to write rows could recompute the hashes and forge
+  a valid-looking chain; a keyed MAC cannot be forged without the key. Canonicalization is
+  deterministic and round-trip-stable: fixed field order, length-prefixed fields (content cannot
+  migrate across field boundaries undetected), registered custom-column values folded in with
+  deterministic name ordering, invariant culture, UTF-8, and a Kind/precision-stable timestamp (epoch
+  milliseconds) so a row MACs identically before and after persistence across SQLite / SQL Server /
+  PostgreSQL / MySQL. A key is required - enabling without one fails clearly; the key id is stored per
+  row so keys can rotate without invalidating older rows.
+- **Per-stream anchor + concurrency + truncation.** A persisted head row per stream
+  (`OrionAudit_Chain_Anchor`, keyed by `EntityType` + `EntityId` + `TenantId`) stores the latest hash,
+  row count, and key id. The writer row-locks the anchor inside the consumer's `SaveChanges`
+  transaction, stamps `PreviousHash` from it, and advances it in the same transaction, so concurrent
+  same-stream appends serialize on the anchor (no two transactions stamp the same predecessor) while
+  different streams stay parallel. The anchor doubles as the truncation guard: verification compares
+  the walked tail hash + count against it, so deleting the tail row(s) - or an entire stream - is
+  caught (`Truncated`) even though the surviving prefix links intact.
+- **Chain scope is per entity stream, per tenant** (rows sharing `EntityType` + `EntityId` +
+  `TenantId`, ordered by `OccurredOnUtc` then `Id`). Putting the tenant in the chain key means
+  tenant-scoped verification walks a self-consistent chain - the first row of a second tenant is its
+  own genesis, not a broken link onto the first tenant's head. Stamping runs inside the capture
   transaction on both the synchronous interceptor and the async dispatcher.
-- **`IAuditIntegrityVerifier.VerifyChainAsync`.** Walks rows in chain order and returns either
-  valid (with the hashed-row count) or the first broken row's id + entity and an
-  `AuditChainBreakReason` (`ContentMismatch`, `BrokenLink`, `MissingHashAfterChainStart`). Verify
+- **`IAuditIntegrityVerifier.VerifyChainAsync`.** Walks rows in chain order, recomputes each keyed MAC
+  (binding registered custom columns), checks each stream against its anchor, and returns either valid
+  (with the hashed-row count) or the first broken row's id + entity and an `AuditChainBreakReason`
+  (`ContentMismatch`, `BrokenLink`, `MissingHashAfterChainStart`, `Truncated`, `UnknownKey`). Verify
   one entity stream or the whole table, optionally tenant-scoped. Read-only and idempotent.
   `EfCoreAuditIntegrityVerifier` is the default, registered automatically when chaining is enabled.
 - **Backward compatible.** Pre-existing rows (null `EntryHash`) verify as an unchained prefix the
   verifier skips; verification begins at each stream's first hashed (genesis) row. Enabling the
-  feature requires the consumer to add an EF Core migration for the two new columns; the columns
-  are emitted by `AuditLogEntityTypeConfiguration` like every other audit column.
+  feature requires the consumer to add an EF Core migration for the new columns and the
+  `OrionAudit_Chain_Anchor` table; both are emitted by the OrionAudit entity configurations like every
+  other audit table. Integrity holds against an attacker who can modify the DB but not obtain the MAC
+  key, which must be stored outside the audit database.
 
 ---
 

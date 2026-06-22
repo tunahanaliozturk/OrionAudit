@@ -64,10 +64,12 @@ public sealed class AuditLog
     public string? Error { get; set; }
 
     /// <summary>
-    /// Lowercase hex SHA-256 integrity hash binding this row's content to the row immediately
-    /// preceding it in the same chain scope (per entity stream). Computed as
-    /// <c>H(canonical(this row) || PreviousHash)</c> at capture time when tamper-evident
-    /// hash-chaining is enabled (<c>o.UseHashChain()</c>); <see langword="null"/> otherwise.
+    /// Lowercase hex HMAC-SHA256 integrity MAC binding this row's content to the row immediately
+    /// preceding it in the same chain scope (per entity stream, per tenant). Computed as
+    /// <c>HMAC(key, canonical(this row) || PreviousHash)</c> at capture time when tamper-evident
+    /// hash-chaining is enabled (<c>o.UseHashChain()</c>); <see langword="null"/> otherwise. The key is
+    /// supplied by an <see cref="Integrity.IAuditChainKeyProvider"/> that lives outside the audit
+    /// database, so the chain is unforgeable by an attacker who can write rows but not read the key.
     /// </summary>
     /// <remarks>
     /// Additive and opt-in (v0.9.0). Rows written before hash-chaining was enabled keep a
@@ -86,4 +88,12 @@ public sealed class AuditLog
     /// without re-deriving the whole chain from a side channel.
     /// </summary>
     public string? PreviousHash { get; set; }
+
+    /// <summary>
+    /// The id of the chain key (<see cref="Integrity.IAuditChainKeyProvider.ActiveKeyId"/>) used to
+    /// compute <see cref="EntryHash"/>, or <see langword="null"/> when the row is unchained. Stored so
+    /// verification can look up the exact key version a row was MAC'd with, which lets the key be
+    /// rotated (newer rows stamped with a new id) without invalidating rows written under an older key.
+    /// </summary>
+    public int? HashKeyId { get; set; }
 }
