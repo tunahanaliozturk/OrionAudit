@@ -91,10 +91,17 @@ public sealed class InMemoryAuditHistoryStore : AuditHistoryStoreBase
 
         lock (gate)
         {
+            // Tenant scoping mirrors EfCoreAuditHistoryStore.CompactAsync: null = all tenants,
+            // "" = the no-tenant stream only (column null OR ""), a concrete value = exact match. An
+            // empty-string tenant must never widen to all tenants.
+            var requestedTenant = request.TenantId;
+            var noTenantStream = requestedTenant is { Length: 0 };
             var history = rows
                 .Where(r => string.Equals(r.EntityType, request.EntityType, StringComparison.Ordinal)
                     && string.Equals(r.EntityId, request.EntityId, StringComparison.Ordinal)
-                    && (request.TenantId is null || string.Equals(r.TenantId, request.TenantId, StringComparison.Ordinal)))
+                    && (requestedTenant is null
+                        || (noTenantStream && string.IsNullOrEmpty(r.TenantId))
+                        || (!noTenantStream && string.Equals(r.TenantId, requestedTenant, StringComparison.Ordinal))))
                 .ToList();
 
             var plan = AuditHistoryCompactor.Plan(history, request.RetainTail);

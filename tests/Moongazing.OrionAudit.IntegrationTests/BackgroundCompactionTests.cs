@@ -225,6 +225,104 @@ public class BackgroundCompactionTests
     }
 
     [Fact]
+    public async Task BackgroundSweep_NoTenantCandidate_CompactsOnlyNoTenantRows_AndLeavesEveryConcreteTenantUntouched()
+    {
+        var (sp, conn, clock) = await BuildAsync(o =>
+        {
+            o.Audit<Widget>();
+            o.CompactInBackground(c =>
+            {
+                c.RetainTail = 2;
+                c.MinRowsBeforeCompaction = 4; // smallest candidate is 5 rows -> folds 3
+                c.MaxStreamsPerSweep = 10;
+            });
+        });
+        await using var _conn = conn;
+        await using var _sp = sp;
+
+        // One logical entity id appearing under three streams that share EntityType+EntityId but differ
+        // only by tenant: the no-tenant stream (column null, the pre-normalization shape), a concrete
+        // tenant "A", and a concrete tenant "B". All ids and timestamps are pinned so the sweep is fully
+        // deterministic. If the no-tenant predicate widened, it would fold A and B too.
+        const string entityType = "Widget";
+        const string entityId = "shared-entity";
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        static AuditLog Row(byte seq, string type, string id, string? tenant, DateTime when, AuditAction action, string? snapshot, string diff)
+        {
+            var bytes = new byte[16];
+            bytes[15] = seq;
+            return new AuditLog
+            {
+                Id = new Guid(bytes),
+                EntityType = type,
+                EntityId = id,
+                TenantId = tenant,
+                Action = action,
+                OccurredOnUtc = when,
+                Snapshot = snapshot,
+                Diff = diff,
+            };
+        }
+
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<CompactionDb>();
+
+            // No-tenant stream: 6 rows (1 Insert + 5 Update) -> a candidate (> 4).
+            ctx.AuditLogs.Add(Row(1, entityType, entityId, null, t0, AuditAction.Inserted, "{\"Value\":0}", "[]"));
+            for (byte i = 1; i <= 5; i++)
+            {
+                ctx.AuditLogs.Add(Row((byte)(1 + i), entityType, entityId, null, t0.AddMinutes(i), AuditAction.Updated, null,
+                    $"[{{\"op\":\"replace\",\"path\":\"/Value\",\"value\":{i}}}]"));
+            }
+
+            // Tenant "A": only 4 rows (== MinRowsBeforeCompaction, the filter is strictly greater-than),
+            // so A is NOT a candidate on its own. Any shrinkage of A can therefore ONLY come from a
+            // no-tenant candidate widening across tenants - which is the bug under test. Distinct id range
+            // so the assertions can count per tenant.
+            ctx.AuditLogs.Add(Row(20, entityType, entityId, "A", t0, AuditAction.Inserted, "{\"Value\":0}", "[]"));
+            for (byte i = 1; i <= 3; i++)
+            {
+                ctx.AuditLogs.Add(Row((byte)(20 + i), entityType, entityId, "A", t0.AddMinutes(i), AuditAction.Updated, null,
+                    $"[{{\"op\":\"replace\",\"path\":\"/Value\",\"value\":{i}}}]"));
+            }
+
+            // Tenant "B": 4 rows, same reasoning as A.
+            ctx.AuditLogs.Add(Row(40, entityType, entityId, "B", t0, AuditAction.Inserted, "{\"Value\":0}", "[]"));
+            for (byte i = 1; i <= 3; i++)
+            {
+                ctx.AuditLogs.Add(Row((byte)(40 + i), entityType, entityId, "B", t0.AddMinutes(i), AuditAction.Updated, null,
+                    $"[{{\"op\":\"replace\",\"path\":\"/Value\",\"value\":{i}}}]"));
+            }
+
+            await ctx.SaveChangesAsync();
+            ctx.ChangeTracker.Clear();
+        }
+
+        var sweep = ActivatorUtilities.CreateInstance<AuditCompactionHostedService<CompactionDb>>(sp);
+        await sweep.SweepOnceAsync();
+
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<CompactionDb>();
+
+            // No-tenant rows folded: 6 rows, RetainTail 2 -> snapshot + 2 tail = 3 survive.
+            var noTenant = await ctx.AuditLogs
+                .Where(a => a.EntityId == entityId && (a.TenantId == null || a.TenantId == ""))
+                .CountAsync();
+            Assert.Equal(3, noTenant);
+
+            // Every concrete tenant is completely untouched: still 4 rows each. Under the cross-tenant
+            // widening bug these would have been folded down to 3 by the no-tenant candidate.
+            var tenantA = await ctx.AuditLogs.Where(a => a.EntityId == entityId && a.TenantId == "A").CountAsync();
+            var tenantB = await ctx.AuditLogs.Where(a => a.EntityId == entityId && a.TenantId == "B").CountAsync();
+            Assert.Equal(4, tenantA);
+            Assert.Equal(4, tenantB);
+        }
+    }
+
+    [Fact]
     public async Task BackgroundSweep_RespectsMaxStreamsPerSweep()
     {
         var (sp, conn, clock) = await BuildAsync(o =>

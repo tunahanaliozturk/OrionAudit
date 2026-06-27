@@ -105,6 +105,50 @@ public class AuditHistoryExporterTests
     }
 
     [Fact]
+    public async Task Export_RowWithMalformedStoredJson_DoesNotCorruptStream_AndValidRowsStillExport()
+    {
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        // Row 1: a clean row with valid raw-JSON columns.
+        // Row 2: a row whose stored Diff is a TRUNCATED/partial JSON value and whose Snapshot is a
+        //        "valid-prefix-then-garbage" payload. A naive single-value parse would accept the prefix
+        //        and emit broken NDJSON; full-payload validation must reject both and string-fall-back.
+        // Row 3: another clean row, to prove the export continues past the bad one.
+        ctx.AuditLogs.AddRange(
+            new AuditLog { Id = SeqId(1), EntityType = OrderType, EntityId = "e1", Action = AuditAction.Inserted, OccurredOnUtc = t0, Diff = "[]", Snapshot = "{\"V\":1}" },
+            new AuditLog { Id = SeqId(2), EntityType = OrderType, EntityId = "e1", Action = AuditAction.Updated, OccurredOnUtc = t0.AddMinutes(1), Diff = "[{\"op\":\"replace\"", Snapshot = "{\"V\":2} trailing-garbage" },
+            new AuditLog { Id = SeqId(3), EntityType = OrderType, EntityId = "e1", Action = AuditAction.Updated, OccurredOnUtc = t0.AddMinutes(2), Diff = "[{\"op\":\"replace\",\"path\":\"/V\",\"value\":3}]", Snapshot = "{\"V\":3}" });
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+
+        var exporter = new AuditHistoryExporter(new EfCoreAuditHistoryStore(ctx));
+        using var ms = new MemoryStream();
+        var written = await exporter.ExportNdjsonAsync(ms, new AuditHistoryQuery { EntityId = "e1" });
+
+        Assert.Equal(3, written);
+        var text = Encoding.UTF8.GetString(ms.ToArray());
+
+        // The whole stream is still valid NDJSON: every line parses. The malformed row did not corrupt it.
+        var lines = ParseNdjson(text);
+        Assert.Equal(3, lines.Count);
+
+        // Clean rows keep their raw-JSON shape.
+        Assert.Equal(JsonValueKind.Object, lines[0].GetProperty("snapshot").ValueKind);
+        Assert.Equal(JsonValueKind.Array, lines[2].GetProperty("diff").ValueKind);
+        Assert.Equal(3, lines[2].GetProperty("snapshot").GetProperty("V").GetInt32());
+
+        // The malformed row's columns fell back to JSON STRINGS (valid NDJSON) rather than raw JSON, so
+        // the original text is preserved verbatim and downstream parsing never breaks.
+        Assert.Equal(JsonValueKind.String, lines[1].GetProperty("diff").ValueKind);
+        Assert.Equal("[{\"op\":\"replace\"", lines[1].GetProperty("diff").GetString());
+        Assert.Equal(JsonValueKind.String, lines[1].GetProperty("snapshot").ValueKind);
+        Assert.Equal("{\"V\":2} trailing-garbage", lines[1].GetProperty("snapshot").GetString());
+    }
+
+    [Fact]
     public async Task Export_EmptyResult_WritesNothing()
     {
         var (ctx, conn) = await NewDbAsync();

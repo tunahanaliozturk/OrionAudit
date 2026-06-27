@@ -49,10 +49,25 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
         ArgumentNullException.ThrowIfNull(request);
         request.Validate();
 
+        // Tenant scoping has three modes, and conflating them is what lets a no-tenant compaction
+        // bleed across tenants:
+        //   null  -> compact across ALL tenants for this entity id (operator-driven cross-tenant fold);
+        //   ""    -> the no-tenant stream ONLY. A row has "no tenant" whether its column is the canonical
+        //            "" (AuditTenant.Canonical, written since v0.9.0) or a pre-normalization null, so it
+        //            matches (TenantId == null || TenantId == ""). Mirrors the chain verifier's no-tenant
+        //            matching so a stream is scoped identically wherever it is keyed;
+        //   value -> exactly that tenant's rows.
+        // Critically, "" must NOT fall through to the null/all-tenants branch; that is the cross-tenant
+        // widening bug.
+        var requestedTenant = request.TenantId;
+        var noTenantStream = requestedTenant is { Length: 0 };
+
         var rows = await context.Set<AuditLog>()
             .Where(a => a.EntityType == request.EntityType
                 && a.EntityId == request.EntityId
-                && (request.TenantId == null || a.TenantId == request.TenantId))
+                && (requestedTenant == null
+                    || (noTenantStream && (a.TenantId == null || a.TenantId == ""))
+                    || (!noTenantStream && a.TenantId == requestedTenant)))
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 

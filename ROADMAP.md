@@ -342,7 +342,7 @@ off.
 
 ---
 
-## v0.10.0 - Audit-log lifecycle, export & docs *(partially shipped, Q3 2026)*
+## v0.10.0 - Audit-log lifecycle, export & docs *(partially shipped 2026-06-27)*
 
 Theme: *manage the audit log itself as a first-class, long-lived store (its retention,
 its integrity, and getting data out of it), and finish the docs.*

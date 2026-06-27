@@ -22,8 +22,9 @@ public sealed class CompactionSweepOptions
     /// <summary>
     /// A stream is only considered for compaction once it has strictly more than this many audit rows.
     /// Streams shorter than this are skipped so the sweep never thrashes over already-short histories.
-    /// Must be at least <c>RetainTail + 2</c> for a fold to be possible (the compactor needs at least
-    /// two rows beyond the retained tail to collapse). Default: 200.
+    /// Must be at least <c>RetainTail + 1</c> for a fold to be possible: the smallest candidate has
+    /// <c>MinRowsBeforeCompaction + 1</c> rows (the filter is strictly greater-than), and a fold needs at
+    /// least two rows beyond the retained tail to collapse. Default: 200.
     /// </summary>
     public int MinRowsBeforeCompaction { get; set; } = 200;
 

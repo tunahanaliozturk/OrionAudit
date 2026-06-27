@@ -132,11 +132,13 @@ public sealed partial class AuditCompactionHostedService<TDbContext> : Backgroun
                     EntityType = candidate.EntityType,
                     EntityId = candidate.EntityId,
                     RetainTail = options.RetainTail,
-                    // The candidate's tenant is the canonical "" for the no-tenant stream; pass null in
-                    // that case so CompactAsync compacts the no-tenant rows (its filter treats null as
-                    // "do not constrain tenant", and an empty-string tenant id never matches a row whose
-                    // TenantId column is null). A concrete tenant is passed through unchanged.
-                    TenantId = candidate.TenantId.Length == 0 ? null : candidate.TenantId,
+                    // Pass the candidate's CANONICAL tenant straight through. FindCandidatesAsync already
+                    // coalesces a no-tenant stream to "" (AuditTenant.Canonical), and CompactAsync reads ""
+                    // as "the no-tenant stream ONLY" (column null OR ""). Passing null here instead would
+                    // mean "all tenants" and a no-tenant candidate would cross-tenant-compact every tenant's
+                    // rows for this entity id. The sweep keys per (EntityType, EntityId, TenantId), so each
+                    // candidate must stay scoped to exactly its own tenant stream.
+                    TenantId = candidate.TenantId,
                 },
                 cancellationToken).ConfigureAwait(false);
 

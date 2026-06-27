@@ -87,12 +87,17 @@ public static class AuditNdjsonWriter
         }
     }
 
+    // Validates that the WHOLE payload is a single well-formed JSON value before it is embedded raw.
+    // JsonDocument.Parse consumes the entire input and rejects trailing content after the value, so a
+    // partial/truncated or "valid-prefix-then-garbage" column can never slip through as raw JSON and
+    // corrupt the NDJSON line; such a value falls back to being written as a JSON string. The parsed
+    // document is disposed (it rents pooled buffers) - we only need the parse to succeed, not its tree.
     private static bool IsValidJson(string value)
     {
         try
         {
-            var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(value));
-            return JsonDocument.TryParseValue(ref reader, out _);
+            using var doc = JsonDocument.Parse(value);
+            return true;
         }
         catch (JsonException)
         {

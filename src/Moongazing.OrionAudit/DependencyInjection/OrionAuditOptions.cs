@@ -208,13 +208,17 @@ public sealed class OrionAuditOptions
             throw new ArgumentException(
                 $"Compaction MaxStreamsPerSweep must be >= 1 (got {options.MaxStreamsPerSweep}).", nameof(configure));
         }
-        // A fold collapses (rowCount - RetainTail) rows and needs at least two of them, so the
-        // threshold must leave headroom past the retained tail or no stream could ever be folded. Reject
-        // a self-defeating configuration at startup rather than silently sweeping with no effect.
-        if (options.MinRowsBeforeCompaction < options.RetainTail + 2)
+        // A fold collapses (rowCount - RetainTail) rows and needs at least two of them. The candidate
+        // filter selects streams with STRICTLY MORE than MinRowsBeforeCompaction rows, so the smallest
+        // stream the sweep ever folds has (MinRowsBeforeCompaction + 1) rows. That fold is possible when
+        // (MinRowsBeforeCompaction + 1) - RetainTail >= 2, i.e. MinRowsBeforeCompaction >= RetainTail + 1.
+        // (Requiring RetainTail + 2 was off by one: it rejected the valid boundary where the smallest
+        // candidate folds exactly two rows.) Reject a self-defeating configuration at startup rather than
+        // silently sweeping with no effect.
+        if (options.MinRowsBeforeCompaction < options.RetainTail + 1)
         {
             throw new ArgumentException(
-                $"Compaction MinRowsBeforeCompaction must be at least RetainTail + 2 ({options.RetainTail + 2}) so a fold is possible (got {options.MinRowsBeforeCompaction}).",
+                $"Compaction MinRowsBeforeCompaction must be at least RetainTail + 1 ({options.RetainTail + 1}) so a fold is possible (got {options.MinRowsBeforeCompaction}).",
                 nameof(configure));
         }
         if (options.MaxSweepDuration is { } budget && budget <= TimeSpan.Zero)

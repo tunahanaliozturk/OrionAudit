@@ -36,8 +36,14 @@ public sealed record AuditCompactionRequest
     public required int RetainTail { get; init; }
 
     /// <summary>
-    /// Optional tenant id used to scope the compaction to one tenant's rows when the same
-    /// entity id can appear under multiple tenants. Null compacts across tenants for the entity.
+    /// Tenant scope for the compaction when the same entity id can appear under multiple tenants:
+    /// <list type="bullet">
+    /// <item><description><see langword="null"/> compacts across ALL tenants for the entity.</description></item>
+    /// <item><description><see cref="string.Empty"/> compacts the no-tenant stream ONLY (a row whose
+    /// <see cref="AuditLog.TenantId"/> is the canonical <c>""</c> or a pre-normalization <see langword="null"/>).
+    /// It does <em>not</em> widen to all tenants.</description></item>
+    /// <item><description>A concrete value compacts exactly that tenant's rows.</description></item>
+    /// </list>
     /// </summary>
     public string? TenantId { get; init; }
 
