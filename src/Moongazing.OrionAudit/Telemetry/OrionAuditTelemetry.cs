@@ -320,6 +320,51 @@ public static class OrionAuditTelemetry
         () => Interlocked.Read(ref dispatchDlqDepth),
         unit: "rows", description: "Capture-queue rows in dead-letter state (Error != null), as last observed by the dispatcher.");
 
+    /// <summary>
+    /// v0.10.0 background-compaction cycle counter. Increments once per
+    /// <c>AuditCompactionHostedService.SweepOnceAsync</c> cycle. Operators graph the rate to confirm
+    /// the background compactor is actually ticking on its configured interval.
+    /// </summary>
+    internal static readonly Counter<long> CompactionCycles = Meter.CreateCounter<long>(
+        "orionaudit.compaction.cycles", unit: "{cycles}",
+        description: "Background compaction sweep cycles run.");
+
+    /// <summary>
+    /// v0.10.0 count of entity streams compacted by the background sweep. Increments per stream that
+    /// the cycle actually folded (a no-op compaction does not increment it). Operators graph it
+    /// against <see cref="CompactionRowsFolded"/> to see how many entities a cycle is touching.
+    /// </summary>
+    internal static readonly Counter<long> CompactionStreamsCompacted = Meter.CreateCounter<long>(
+        "orionaudit.compaction.streams_compacted", unit: "{streams}",
+        description: "Entity streams folded into a snapshot by the background compaction sweep.");
+
+    /// <summary>
+    /// v0.10.0 count of audit rows folded away (removed) by the background compaction sweep across all
+    /// streams in a cycle. The snapshot-effectiveness signal for the background path, mirroring the
+    /// retention <c>rows_deleted</c> counter.
+    /// </summary>
+    internal static readonly Counter<long> CompactionRowsFolded = Meter.CreateCounter<long>(
+        "orionaudit.compaction.rows_folded", unit: "rows",
+        description: "Audit rows folded into snapshots and removed by the background compaction sweep.");
+
+    /// <summary>
+    /// v0.10.0 background-compaction sweep failure counter. Increments when the background loop
+    /// swallows an unexpected exception from a sweep cycle (cancellation does NOT emit). Operators page
+    /// on the rate to catch a stuck or thrashing compactor.
+    /// </summary>
+    internal static readonly Counter<long> CompactionErrors = Meter.CreateCounter<long>(
+        "orionaudit.compaction.errors", unit: "{errors}",
+        description: "Unexpected exceptions swallowed by the background compaction sweep loop.");
+
+    /// <summary>Record a swallowed exception from the compaction sweep loop, tagged with its type.</summary>
+    /// <param name="exceptionType">Short type name (e.g. <c>TimeoutException</c>).</param>
+    public static void RecordCompactionError(string exceptionType)
+        => CompactionErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
+
+    internal static readonly Histogram<double> CompactionSweepDuration = Meter.CreateHistogram<double>(
+        "orionaudit.compaction.sweep.duration", unit: "ms",
+        description: "Background compaction sweep duration per cycle.");
+
     internal static readonly Counter<long> ImportRowsWritten = Meter.CreateCounter<long>(
         "orionaudit.import.rows_written", unit: "rows", description: "Audit rows written by the bulk importer.");
 

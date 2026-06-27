@@ -4,12 +4,12 @@ This document lists what's shipped, what's actively planned, and what we're deli
 building. It's a planning artifact, not a contract — dates slip, priorities reshuffle. If
 something here matters to you, open a GitHub issue so we can weigh it against everything else.
 
-**Current version: 0.9.0** (shipped 2026-06-22). Queryable audit-history read API and snapshot
+**Current version: 0.10.0** (shipped 2026-06-27). Queryable audit-history read API and snapshot
 compaction landed in 0.8.0; 0.8.1 removed a redundant deep-equals pass from the JSON Patch diff
 hot path; 0.9.0 added opt-in tamper-evident hash-chaining (a keyed-MAC per-row chain with a
-per-stream anchor, plus an `IAuditIntegrityVerifier`). Next up is audit-log lifecycle
-(retention/archival of the log itself, export/streaming) and richer queries on the way to the 1.0.0
-API freeze.
+per-stream anchor, plus an `IAuditIntegrityVerifier`); 0.10.0 added a background compaction
+hosted service and NDJSON audit-history export/streaming. Next up is cold-store archival of the
+audit log itself (deferred from 0.10.0) and richer queries on the way to the 1.0.0 API freeze.
 
 ## Status legend
 
@@ -342,22 +342,29 @@ off.
 
 ---
 
-## v0.10.0 - Audit-log lifecycle, export & docs *(planned, Q3 2026)*
+## v0.10.0 - Audit-log lifecycle, export & docs *(partially shipped, Q3 2026)*
 
 Theme: *manage the audit log itself as a first-class, long-lived store (its retention,
 its integrity, and getting data out of it), and finish the docs.*
 
-- **Background compaction job.** A hosted-service variant of the v0.8.0 `CompactAsync` operation
-  that folds runs of small diffs into snapshot rows past a configurable age / depth threshold,
+- **Background compaction job.** *(shipped in 0.10.0)* A hosted-service variant of the v0.8.0
+  `CompactAsync` operation (`AuditCompactionHostedService`, opt-in via `o.CompactInBackground(...)`)
+  that folds runs of small diffs into a snapshot row past a configurable row-count threshold,
   bounding worst-case reconstruction cost without an operator script. Reuses the
-  `AuditHistoryCompactor` engine.
-- **Archival of the audit log itself.** Extends the v0.7.8 `IAuditArchiver` retention hook with
-  a cold-store path tuned for the audit table specifically (age-tiered move to S3 / Parquet /
-  archive table), so an aged audit row can leave the live DB while staying reconstructable on
-  demand from the archive.
-- **Audit-history export / streaming.** A bulk, paged export off `IAuditHistoryStore` (NDJSON /
-  CSV) plus a cursor-based streaming read for feeding a warehouse or SIEM, without holding an
-  unbounded result in memory. Builds on the v0.8.0 paged query.
+  `AuditHistoryCompactor` engine; bounded per cycle (max streams, optional wall-clock budget) and
+  cancellation-aware; skips hash-chained streams so the v0.9.0 tamper-evident chain stays
+  verifiable.
+- **Audit-history export / streaming.** *(shipped in 0.10.0)* A bulk, paged NDJSON export off
+  `IAuditHistoryStore` (`AuditHistoryExporter`) plus a page-walking streaming read
+  (`StreamRowsAsync`) for feeding a warehouse or SIEM, without holding an unbounded result in
+  memory. Builds on the v0.8.0 paged query. (CSV is not shipped; NDJSON covers the warehouse / SIEM
+  case and embeds the diff/snapshot columns as raw JSON.)
+- **Archival of the audit log itself.** *(deferred — still planned)* Extends the v0.7.8
+  `IAuditArchiver` retention hook with a cold-store path tuned for the audit table specifically
+  (age-tiered move to S3 / Parquet / archive table), so an aged audit row can leave the live DB
+  while staying reconstructable on demand from the archive. Deferred out of 0.10.0 because a
+  faithful cold-store path needs a new package or a provider abstraction that exceeds the
+  in-package scope; sequenced after the export surface it will reuse.
 - **Documentation site.** Hosted reference + recipes + migration guides, replacing the
   repo-readme-as-docs status quo. Runnable cookbook ("audit a multi-tenant SaaS", "audit with
   TPH", "query and compact history").
@@ -492,7 +499,7 @@ These come up in conversation; we're saying no on purpose.
 | v0.8.0    | shipped 2026-06-19 | queryable history + compaction   |
 | v0.8.1    | shipped 2026-06-20 | diff hot-path perf               |
 | v0.9.0    | shipped 2026-06-22 | tamper-evident hash chain        |
-| v0.10.0   | Q3 2026            | log lifecycle + export + docs    |
+| v0.10.0   | shipped 2026-06-27 | bg compaction + NDJSON export    |
 | v0.11.0   | Q4 2026            | richer queries + separate store  |
 | v0.12.0   | Q1 2027            | store backends + AOT polish      |
 | v1.0.0    | Q1-Q2 2027         | API freeze                       |

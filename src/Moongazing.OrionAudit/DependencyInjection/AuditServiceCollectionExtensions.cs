@@ -46,6 +46,9 @@ public static class AuditServiceCollectionExtensions
             sp.GetService<System.Text.Json.Serialization.JsonSerializerContext>()));
         services.TryAddScoped<Store.IAuditHistoryStore>(sp =>
             new Store.EfCoreAuditHistoryStore(sp.GetRequiredService<TDbContext>()));
+        // v0.10.0 NDJSON history export over whatever IAuditHistoryStore is registered (the EF Core
+        // store by default, or a consumer-supplied one). Scoped so it shares the store's DbContext scope.
+        services.TryAddScoped(sp => new Store.AuditHistoryExporter(sp.GetRequiredService<Store.IAuditHistoryStore>()));
         services.TryAddSingleton(TimeProvider.System);
 
         if (options.HashChainOptions is { } hashChainOptions)
@@ -65,6 +68,17 @@ public static class AuditServiceCollectionExtensions
         if (options.JsonContext is not null)
         {
             services.TryAddSingleton(options.JsonContext);
+        }
+
+        if (options.CompactionSweepOptions is { } compactionSweepOptions)
+        {
+            // Background compaction opt-in (v0.10.0). The sweep options singleton is the gate; the
+            // hosted service resolves the consumer's IAuditHistoryStore per cycle (same scoped store the
+            // operator-driven CompactAsync path uses) and reads the optional AuditHashChainOptions to
+            // decide whether to skip chained streams. Registered with the EF Core store as a fallback so
+            // background compaction works even when the consumer never resolved IAuditHistoryStore.
+            services.TryAddSingleton(compactionSweepOptions);
+            services.AddHostedService<Store.AuditCompactionHostedService<TDbContext>>();
         }
 
         if (options.RetentionPolicy is not RetentionPolicy.NonePolicy)

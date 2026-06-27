@@ -25,6 +25,13 @@ public sealed class OrionAuditOptions
     internal SnapshotPolicy SnapshotPolicy { get; private set; } = SnapshotPolicy.Never;
     internal RetentionPolicy RetentionPolicy { get; private set; } = RetentionPolicy.None;
     internal RetentionSweepOptions SweepOptions { get; } = new();
+
+    /// <summary>
+    /// Non-null when <see cref="CompactInBackground"/> has been called; gates registration of the
+    /// background compaction hosted service. Null leaves compaction operator-driven (the v0.8.0
+    /// behaviour).
+    /// </summary>
+    internal Store.CompactionSweepOptions? CompactionSweepOptions { get; private set; }
     internal JsonSerializerContext? JsonContext { get; private set; }
 
     /// <summary>
@@ -161,6 +168,62 @@ public sealed class OrionAuditOptions
             throw new ArgumentOutOfRangeException(nameof(max), max, "Must be >= 1.");
         }
         SweepOptions.MaxRowsPerSweep = max;
+        return this;
+    }
+
+    /// <summary>
+    /// Opts into background snapshot compaction. Registers a hosted service that periodically runs the
+    /// existing v0.8.0 <c>IAuditHistoryStore.CompactAsync</c> engine over the streams whose history has
+    /// grown past <see cref="Store.CompactionSweepOptions.MinRowsBeforeCompaction"/>, so long
+    /// per-entity histories are folded into snapshot rows without an operator script. Bounded per cycle
+    /// (interval, max streams, optional wall-clock budget) and cancellation-aware.
+    /// </summary>
+    /// <remarks>
+    /// When tamper-evident hash-chaining is enabled (<see cref="UseHashChain"/>), the sweep skips every
+    /// stream that carries a hashed row: compaction rewrites and removes rows, which the chain is
+    /// designed to detect, so chained streams are left intact and the chain stays verifiable. Only
+    /// unchained streams are folded. When not called, compaction remains entirely operator-driven and
+    /// behaviour is unchanged.
+    /// </remarks>
+    public OrionAuditOptions CompactInBackground(Action<Store.CompactionSweepOptions>? configure = null)
+    {
+        var options = new Store.CompactionSweepOptions();
+        configure?.Invoke(options);
+
+        // Validate the resulting options. Failures throw ArgumentException tied to the configure
+        // parameter (the surface the caller actually mutated through), avoiding CA2208's complaint about
+        // an ArgumentOutOfRangeException whose paramName is an options property rather than a parameter.
+        if (options.SweepInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                $"Compaction SweepInterval must be positive (got {options.SweepInterval}).", nameof(configure));
+        }
+        if (options.RetainTail < 0)
+        {
+            throw new ArgumentException(
+                $"Compaction RetainTail must be non-negative (got {options.RetainTail}).", nameof(configure));
+        }
+        if (options.MaxStreamsPerSweep < 1)
+        {
+            throw new ArgumentException(
+                $"Compaction MaxStreamsPerSweep must be >= 1 (got {options.MaxStreamsPerSweep}).", nameof(configure));
+        }
+        // A fold collapses (rowCount - RetainTail) rows and needs at least two of them, so the
+        // threshold must leave headroom past the retained tail or no stream could ever be folded. Reject
+        // a self-defeating configuration at startup rather than silently sweeping with no effect.
+        if (options.MinRowsBeforeCompaction < options.RetainTail + 2)
+        {
+            throw new ArgumentException(
+                $"Compaction MinRowsBeforeCompaction must be at least RetainTail + 2 ({options.RetainTail + 2}) so a fold is possible (got {options.MinRowsBeforeCompaction}).",
+                nameof(configure));
+        }
+        if (options.MaxSweepDuration is { } budget && budget <= TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                $"Compaction MaxSweepDuration must be positive when set (got {budget}).", nameof(configure));
+        }
+
+        CompactionSweepOptions = options;
         return this;
     }
 
