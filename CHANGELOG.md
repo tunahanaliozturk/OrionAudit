@@ -7,6 +7,37 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-27
+
+### Added
+
+#### Background snapshot compaction
+
+A hosted-service variant of the v0.8.0 `IAuditHistoryStore.CompactAsync` operation, so operators get bounded reconstruction cost and storage without invoking compaction by hand. Off by default and fully additive: existing diff / compaction / hash-chain / read behaviour is unchanged.
+
+- **`o.CompactInBackground(...)` opt-in.** Registers `AuditCompactionHostedService<TDbContext>`, a `BackgroundService` that runs a compaction sweep on a configurable `PeriodicTimer`. Each cycle discovers the entity streams (`EntityType`, `EntityId`, `TenantId`) whose history has grown past `MinRowsBeforeCompaction`, folds the oldest rows of each into a single in-place snapshot row past a retained tail (reusing the existing `AuditHistoryCompactor` engine through `CompactAsync`), and leaves the latest state fully reconstructable. The latest state replays identically before and after a fold.
+- **Bounded and cancellation-aware.** A cycle folds at most `MaxStreamsPerSweep` streams (default 100), ordered most-rows-first so the cap spends the budget on the highest-value streams, and stops starting new folds once the optional `MaxSweepDuration` wall-clock budget elapses. The background loop swallows unexpected per-cycle failures (emitting `orionaudit.compaction.errors`) and keeps ticking; shutdown cancels an in-flight cycle promptly. `SweepOnceAsync` is exposed for tests and operator-triggered runs.
+- **Safe alongside live writes.** Each per-stream fold runs through the existing single-`SaveChanges`-transaction compaction path, so a concurrent capture (which appends a new, later-timestamped row the in-flight fold never selected) does not contend with the fold; the appended row simply joins the retained tail.
+- **Hash-chain-aware.** Snapshot compaction rewrites the boundary row's content and removes the folded rows, both of which the v0.9.0 tamper-evident chain is designed to detect (`ContentMismatch` / `Truncated`). Compaction and an unforgeable chain are therefore mutually exclusive on the same stream, so when `o.UseHashChain()` is enabled the background sweep **skips every stream that carries a hashed row** and only folds unchained streams. The chain stays verifiable; the candidate query excludes chained streams server-side so a chained table is never materialised. Self-defeating configurations (for example `MinRowsBeforeCompaction` below `RetainTail + 2`, a non-positive interval, or a zero stream cap) are rejected at startup.
+- **Telemetry.** New instruments on the `OrionAudit` meter: `orionaudit.compaction.cycles`, `orionaudit.compaction.streams_compacted`, `orionaudit.compaction.rows_folded`, `orionaudit.compaction.errors`, and the `orionaudit.compaction.sweep.duration` histogram, plus an `OrionAudit.Compaction.Sweep` activity per cycle.
+
+#### NDJSON audit-history export / streaming
+
+A bulk, paged export off `IAuditHistoryStore` for feeding a warehouse or SIEM, built on the v0.8.0 paged query and sized for large result sets.
+
+- **`AuditHistoryExporter`** (registered automatically, scoped). `StreamRowsAsync(filter, pageSize)` yields the rows matching an `AuditHistoryQuery` filter (entity / subject / action / time-range) as an `IAsyncEnumerable<AuditLog>`, walking the store one bounded page at a time (forced oldest-first for a deterministic, resumable order) so no more than one page is ever held in memory. `ExportNdjsonAsync(stream, filter, pageSize)` writes the result as NDJSON straight to a destination stream, flushing per page, and returns the row count. An empty result writes nothing.
+- **Reflection-free NDJSON writer.** `AuditNdjsonWriter.WriteRow` serializes one `AuditLog` row to a compact JSON object over `Utf8JsonWriter` (no reflection, Native-AOT clean). The already-JSON `Diff` and `Snapshot` columns are embedded as **raw JSON** (not re-escaped into a string), with a JSON-string fallback for any legacy row whose column text does not parse, so a single malformed row never aborts the export.
+
+### Tests
+
+- `BackgroundCompactionTests` (real SQLite, frozen clock, pinned timestamps): the background sweep folds a long history and leaves it reconstructable through the production `IAuditReconstructor`; a short history is a no-op; with hash-chaining enabled the sweep skips the chained stream and the chain still verifies (`VerifyChainAsync` valid, full row count); `MaxStreamsPerSweep` bounds a cycle to one stream and a second cycle folds the rest.
+- `BackgroundCompactionWiringTests`: `CompactInBackground` registers the hosted service and options; without it neither is registered; the exporter is registered even without background compaction; invalid sweep options (`MinRowsBeforeCompaction` below `RetainTail + 2`, non-positive interval, zero stream cap) are rejected at `AddOrionAudit` time.
+- `AuditHistoryExporterTests` (real SQLite + a recording store double): a filtered dataset exports as valid NDJSON, oldest-first, with `Diff` / `Snapshot` embedded as raw JSON and the filter honoured; an empty result writes zero bytes; a 250-row dataset exported with a 40-row page size streams every row across multiple pages; the recording store proves the exporter never requests more than `pageSize` rows per call and advances `Skip` page-by-page.
+
+### Deferred
+
+- **Cold-store archival of the audit log itself** (age-tiered move to S3 / Parquet / archive table) remains planned but is **not** in this release: it would require a new package or a provider abstraction beyond the existing `IAuditArchiver` retention hook. It stays on the roadmap for a later milestone; this release keeps the audit-log-lifecycle work to in-package background compaction and export.
+
 ## [0.9.0] - 2026-06-22
 
 ### Added
