@@ -74,12 +74,106 @@ public sealed class InMemoryAuditHistoryStore : AuditHistoryStoreBase
             return Task.FromResult(AuditHistoryPage.Empty(query.Skip, query.EffectiveTake));
         }
 
-        IEnumerable<AuditLog> ordered = query.Order == AuditHistoryOrder.OldestFirst
-            ? matched.OrderBy(r => r.OccurredOnUtc).ThenBy(r => r.Id)
-            : matched.OrderByDescending(r => r.OccurredOnUtc).ThenByDescending(r => r.Id);
-
-        var items = ordered.Skip(query.Skip).Take(query.EffectiveTake).ToList();
+        var items = ApplyOrder(matched, query).Skip(query.Skip).Take(query.EffectiveTake).ToList();
         return Task.FromResult(new AuditHistoryPage(items, total, query.Skip, query.EffectiveTake));
+    }
+
+    /// <inheritdoc />
+    public override Task<IReadOnlyList<AuditAggregateBucket>> AggregateAsync(
+        AuditAggregationQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.Validate();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        List<AuditLog> matched;
+        lock (gate)
+        {
+            matched = rows.Where(r => Matches(r, query.Filter)).ToList();
+        }
+
+        IReadOnlyList<AuditAggregateBucket> buckets = query.GroupBy switch
+        {
+            AuditAggregateBy.Action => matched
+                .GroupBy(r => r.Action)
+                .Select(g => new AuditAggregateBucket(g.Key.ToString(), g.LongCount()))
+                .ToList(),
+            AuditAggregateBy.EntityType => matched
+                .GroupBy(r => r.EntityType, StringComparer.Ordinal)
+                .Select(g => new AuditAggregateBucket(g.Key, g.LongCount()))
+                .ToList(),
+            AuditAggregateBy.UserId => matched
+                .GroupBy(r => r.UserId, StringComparer.Ordinal)
+                .Select(g => new AuditAggregateBucket(g.Key, g.LongCount()))
+                .ToList(),
+            AuditAggregateBy.TenantId => matched
+                .GroupBy(r => r.TenantId, StringComparer.Ordinal)
+                .Select(g => new AuditAggregateBucket(g.Key, g.LongCount()))
+                .ToList(),
+            AuditAggregateBy.TimeBucket => matched
+                .GroupBy(r => TruncateToBucket(r.OccurredOnUtc, query.TimeBucket))
+                .Select(g => new AuditAggregateBucket(
+                    g.Key.ToString("O", System.Globalization.CultureInfo.InvariantCulture), g.LongCount())
+                {
+                    BucketStartUtc = g.Key,
+                })
+                .ToList(),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(query), query.GroupBy, "Unknown audit aggregation group."),
+        };
+
+        return Task.FromResult(buckets);
+    }
+
+    private static DateTime TruncateToBucket(DateTime occurredOnUtc, AuditTimeBucket bucket)
+    {
+        var u = occurredOnUtc.Kind == DateTimeKind.Utc
+            ? occurredOnUtc
+            : DateTime.SpecifyKind(occurredOnUtc, DateTimeKind.Utc);
+        return bucket switch
+        {
+            AuditTimeBucket.Hour => new DateTime(u.Year, u.Month, u.Day, u.Hour, 0, 0, DateTimeKind.Utc),
+            AuditTimeBucket.Month => new DateTime(u.Year, u.Month, 1, 0, 0, 0, DateTimeKind.Utc),
+            _ => new DateTime(u.Year, u.Month, u.Day, 0, 0, 0, DateTimeKind.Utc),
+        };
+    }
+
+    private static IEnumerable<AuditLog> ApplyOrder(IEnumerable<AuditLog> source, AuditHistoryQuery query)
+    {
+        var descending = query.Order == AuditHistoryOrder.NewestFirst;
+
+        // Mirror EfCoreAuditHistoryStore.ApplyOrder: the chosen field is primary, then OccurredOnUtc
+        // and Id are appended as stable tie-breaks. For the default OccurredOn field this collapses to
+        // the historical "(OccurredOnUtc, Id)" ordering.
+        IOrderedEnumerable<AuditLog> ordered = query.SortBy switch
+        {
+            AuditHistorySortField.EntityType => descending
+                ? source.OrderByDescending(r => r.EntityType, StringComparer.Ordinal)
+                : source.OrderBy(r => r.EntityType, StringComparer.Ordinal),
+            AuditHistorySortField.Action => descending
+                ? source.OrderByDescending(r => r.Action)
+                : source.OrderBy(r => r.Action),
+            // Mirror EfCoreAuditHistoryStore: a nullable sort key (UserId) is ordered NULLS LAST in
+            // both directions via a leading "key is null" sort (false before true), so paging is
+            // stable and matches the EF Core store row-for-row.
+            AuditHistorySortField.UserId => descending
+                ? source.OrderBy(r => r.UserId is null).ThenByDescending(r => r.UserId, StringComparer.Ordinal)
+                : source.OrderBy(r => r.UserId is null).ThenBy(r => r.UserId, StringComparer.Ordinal),
+            _ => descending
+                ? source.OrderByDescending(r => r.OccurredOnUtc)
+                : source.OrderBy(r => r.OccurredOnUtc),
+        };
+
+        if (query.SortBy != AuditHistorySortField.OccurredOn)
+        {
+            ordered = descending
+                ? ordered.ThenByDescending(r => r.OccurredOnUtc)
+                : ordered.ThenBy(r => r.OccurredOnUtc);
+        }
+
+        return descending
+            ? ordered.ThenByDescending(r => r.Id)
+            : ordered.ThenBy(r => r.Id);
     }
 
     /// <inheritdoc />
@@ -153,6 +247,53 @@ public sealed class InMemoryAuditHistoryStore : AuditHistoryStoreBase
         if (query.ToUtc is { } to && row.OccurredOnUtc > to)
         {
             return false;
+        }
+        // v0.11.0 richer filters, matching EfCoreAuditHistoryStore.ApplyFilters semantics.
+        if (query.HasEntityTypesFilter && !query.EntityTypes!.Contains(row.EntityType, StringComparer.Ordinal))
+        {
+            return false;
+        }
+        if (query.HasActionsFilter && !query.Actions!.Contains(row.Action))
+        {
+            return false;
+        }
+        if (query.CorrelationId is { } cid && !string.Equals(row.CorrelationId, cid, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        if (query.UserType is { } ut && !string.Equals(row.UserType, ut, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        // Mirror EfCoreAuditHistoryStore: a row matches the ChangedPath filter when its Diff contains
+        // any op-anchored exact or prefix token. The tokens already carry the "op":"<verb>", anchor, so
+        // a path inside an operation's value cannot satisfy the match.
+        if (query.ChangedPath is not null)
+        {
+            var matchesPath = false;
+            foreach (var token in query.ChangedPathExactTokens)
+            {
+                if (row.Diff.Contains(token, StringComparison.Ordinal))
+                {
+                    matchesPath = true;
+                    break;
+                }
+            }
+            if (!matchesPath)
+            {
+                foreach (var token in query.ChangedPathPrefixTokens)
+                {
+                    if (row.Diff.Contains(token, StringComparison.Ordinal))
+                    {
+                        matchesPath = true;
+                        break;
+                    }
+                }
+            }
+            if (!matchesPath)
+            {
+                return false;
+            }
         }
         return true;
     }

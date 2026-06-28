@@ -35,6 +35,14 @@ public class AuditHistoryStoreBaseTests
     }
 
     [Fact]
+    public async Task UnsupportedStore_Aggregate_ThrowsNotSupported()
+    {
+        var store = new UnsupportedStore();
+        await Assert.ThrowsAsync<NotSupportedException>(
+            () => store.AggregateAsync(new AuditAggregationQuery()));
+    }
+
+    [Fact]
     public async Task QueryOnlyStore_QuerySupported_CompactStillThrows()
     {
         var store = new QueryOnlyStore();

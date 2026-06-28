@@ -39,6 +39,23 @@ public interface IAuditHistoryStore
     Task<AuditHistoryPage> QueryAsync(AuditHistoryQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Aggregates audit history into grouped counts: applies <paramref name="query"/>'s filters, then
+    /// groups the matching rows by <see cref="AuditAggregationQuery.GroupBy"/> and returns one
+    /// <see cref="AuditAggregateBucket"/> (key + count) per distinct group. The returned result is
+    /// always bounded by the number of distinct buckets, not the table size. Where the grouping
+    /// executes, and whether the full row set is materialised, is backend-dependent: a relational store
+    /// pushes the grouping down to a server-side <c>GROUP BY</c> (the bundled <c>EfCoreAuditHistoryStore</c>
+    /// does), whereas an in-memory or non-relational store may enumerate the matching rows in process.
+    /// Implementations call <see cref="AuditAggregationQuery.Validate"/> first.
+    /// </summary>
+    /// <param name="query">The filter plus grouping specification.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>One bucket per distinct group key, each with its row count. Empty when nothing matches.</returns>
+    /// <exception cref="NotSupportedException">The backend cannot aggregate.</exception>
+    /// <exception cref="ArgumentException">The query fails <see cref="AuditAggregationQuery.Validate"/>.</exception>
+    Task<IReadOnlyList<AuditAggregateBucket>> AggregateAsync(AuditAggregationQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Compacts the audit history of a single entity: folds rows older than the requested retained
     /// tail into one compacted snapshot row that carries the entity's reconstructed state at the
     /// compaction boundary, removes the folded rows, and leaves the snapshot plus the bounded tail.

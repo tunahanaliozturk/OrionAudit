@@ -4,12 +4,15 @@ This document lists what's shipped, what's actively planned, and what we're deli
 building. It's a planning artifact, not a contract — dates slip, priorities reshuffle. If
 something here matters to you, open a GitHub issue so we can weigh it against everything else.
 
-**Current version: 0.10.0** (shipped 2026-06-27). Queryable audit-history read API and snapshot
+**Current version: 0.11.0** (shipped 2026-06-28). Queryable audit-history read API and snapshot
 compaction landed in 0.8.0; 0.8.1 removed a redundant deep-equals pass from the JSON Patch diff
 hot path; 0.9.0 added opt-in tamper-evident hash-chaining (a keyed-MAC per-row chain with a
 per-stream anchor, plus an `IAuditIntegrityVerifier`); 0.10.0 added a background compaction
-hosted service and NDJSON audit-history export/streaming. Next up is cold-store archival of the
-audit log itself (deferred from 0.10.0) and richer queries on the way to the 1.0.0 API freeze.
+hosted service and NDJSON audit-history export/streaming; 0.11.0 added richer query filters
+(set / correlation / user-type / value-change-path filters and `SortBy` ordering) plus
+read-side aggregations on `IAuditHistoryStore`. Next up is cold-store archival of the audit log
+itself (deferred from 0.10.0), separate-database audit storage and the CLI diff renderer
+(both deferred from 0.11.0) on the way to the 1.0.0 API freeze.
 
 ## Status legend
 
@@ -374,24 +377,33 @@ its integrity, and getting data out of it), and finish the docs.*
 
 ---
 
-## v0.11.0 - Richer queries & separate-store audit *(planned, Q4 2026)*
+## v0.11.0 - Richer queries & separate-store audit *(partially shipped 2026-06-28)*
 
 Theme: *richer to slice, and able to live off the primary database.*
 
 Tamper-evident hash-chaining shipped early in v0.9.0; this milestone keeps the remaining
-query/storage items from the original entry.
+query/storage items from the original entry. The richer query/aggregation surface shipped at
+quality; the separate-DB store and the CLI diff renderer both need a new package / tool and are
+retargeted to a later milestone (still planned).
 
-- **Richer query filters / aggregations.** Promote the v0.7.6 / v0.7.7 composable filters and
-  rollups onto `IAuditHistoryStore` so the backend-agnostic surface gains correlation-id and
-  free-predicate filters plus count/by-day/by-action aggregations, not just paged row reads.
-- **Separate-database audit storage (`o.UseSeparateAuditDb(...)`).** Audit table moves to its
-  own connection / schema / DB so primary-write throughput stops paying for audit growth. The
-  single-transaction capture guarantee is preserved on the primary DB; the audit-side write
-  becomes outbox-dispatched. Carried from the original v0.8.0 entry; sequenced after the read
-  surface so cross-store queries land on a stable `IAuditHistoryStore`.
-- **CLI diff renderer (`dotnet orionaudit diff`).** Reads an `AuditLog.Id` (or stdin JSON) and
-  pretty-prints the patch with red/green inline rendering for CI log inspection and ops
-  scripting. Carried from the original v0.8.0 entry.
+- **Richer query filters / aggregations.** *(shipped in 0.11.0)* Promotes composable filters and
+  rollups onto `IAuditHistoryStore` so the backend-agnostic surface gains set filters
+  (`EntityTypes` / `Actions`), a correlation-id and user-type scope, a value-change predicate
+  (`ChangedPath`, matching the exact JSON Pointer or a nested descendant in a row's diff), and
+  `SortBy` ordering options, all composing with the existing entity / subject / action / time
+  filters and paging. Plus `AggregateAsync` for read-side grouped counts (by action / entity type /
+  user / tenant / per-hour/day/month time bucket), run as a server-side `GROUP BY` so the row set
+  is never materialised. Additive: an unchanged `AuditHistoryQuery` reads identically to v0.10.
+- **Separate-database audit storage (`o.UseSeparateAuditDb(...)`).** *(deferred — still planned)*
+  Audit table moves to its own connection / schema / DB so primary-write throughput stops paying
+  for audit growth. The single-transaction capture guarantee is preserved on the primary DB; the
+  audit-side write becomes outbox-dispatched. Deferred out of 0.11.0 because it needs a new package
+  or a provider abstraction beyond the in-package read surface; sequenced after the read surface so
+  cross-store queries land on a stable `IAuditHistoryStore`.
+- **CLI diff renderer (`dotnet orionaudit diff`).** *(deferred — still planned)* Reads an
+  `AuditLog.Id` (or stdin JSON) and pretty-prints the patch with red/green inline rendering for CI
+  log inspection and ops scripting. Deferred out of 0.11.0 because it requires a new `dotnet tool`
+  package.
 
 ---
 
@@ -500,7 +512,7 @@ These come up in conversation; we're saying no on purpose.
 | v0.8.1    | shipped 2026-06-20 | diff hot-path perf               |
 | v0.9.0    | shipped 2026-06-22 | tamper-evident hash chain        |
 | v0.10.0   | shipped 2026-06-27 | bg compaction + NDJSON export    |
-| v0.11.0   | Q4 2026            | richer queries + separate store  |
+| v0.11.0   | shipped 2026-06-28 | richer queries + aggregations    |
 | v0.12.0   | Q1 2027            | store backends + AOT polish      |
 | v1.0.0    | Q1-Q2 2027         | API freeze                       |
 
