@@ -136,6 +136,77 @@ public class InMemoryAuditHistoryRicherQueryTests
     }
 
     [Fact]
+    public async Task Validate_RejectsMalformedJsonPointerAndNullAggregationFilter()
+    {
+        var store = SeededStore();
+
+        // Dangling '~' escape is malformed per RFC 6901.
+        var bad = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.QueryAsync(new AuditHistoryQuery { ChangedPath = "/a~x" }));
+        Assert.Contains("ChangedPath", bad.Message, StringComparison.Ordinal);
+
+        // A null aggregation Filter is rejected with a clear ArgumentException, not an NRE.
+        var nullFilter = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.AggregateAsync(new AuditAggregationQuery { Filter = null! }));
+        Assert.Contains(nameof(AuditAggregationQuery.Filter), nullFilter.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedPath_MatchesOpPathButNotCoincidentalValueMatch()
+    {
+        // Mirror AuditHistoryRicherQueryTests: a "path":"/status" appearing inside an operation's value
+        // (here the new value of "/config" is an object carrying a "path" member) must NOT match a
+        // ChangedPath query for "/status"; only the genuine "/status" change does.
+        var valueCollision = new JsonArray
+        {
+            new JsonObject
+            {
+                ["op"] = "replace",
+                ["path"] = "/config",
+                ["value"] = new JsonObject { ["path"] = "/status" },
+            },
+        }.ToJsonString();
+
+        var store = new InMemoryAuditHistoryStore(new[]
+        {
+            Row(1, OrderType, "o1", AuditAction.Updated, T0, diff: Replace("/status", "shipped")),
+            Row(2, OrderType, "o2", AuditAction.Updated, T0.AddHours(1), diff: valueCollision),
+        });
+
+        var page = await store.QueryAsync(new AuditHistoryQuery { ChangedPath = "/status", Take = 100 });
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal("o1", page.Items[0].EntityId);
+    }
+
+    [Fact]
+    public async Task SortByUserId_OrdersNullsLast_MatchesEfCore()
+    {
+        var store = new InMemoryAuditHistoryStore(new[]
+        {
+            Row(1, OrderType, "o1", AuditAction.Updated, T0, userId: "bob"),
+            Row(2, OrderType, "o2", AuditAction.Updated, T0.AddHours(1), userId: "alice"),
+            Row(3, OrderType, "o3", AuditAction.Updated, T0.AddHours(2), userId: null),
+            Row(4, OrderType, "o4", AuditAction.Updated, T0.AddHours(3), userId: null),
+        });
+
+        var asc = await store.QueryAsync(new AuditHistoryQuery
+        {
+            SortBy = AuditHistorySortField.UserId,
+            Order = AuditHistoryOrder.OldestFirst,
+            Take = 100,
+        });
+        Assert.Equal(new[] { "alice", "bob", null, null }, asc.Items.Select(r => r.UserId).ToArray());
+
+        var desc = await store.QueryAsync(new AuditHistoryQuery
+        {
+            SortBy = AuditHistorySortField.UserId,
+            Order = AuditHistoryOrder.NewestFirst,
+            Take = 100,
+        });
+        Assert.Equal(new[] { "bob", "alice", null, null }, desc.Items.Select(r => r.UserId).ToArray());
+    }
+
+    [Fact]
     public async Task EmptySetFilters_AreTreatedAsUnfiltered()
     {
         var store = SeededStore();

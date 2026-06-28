@@ -26,7 +26,12 @@ public enum AuditHistorySortField
     /// <summary>Sort by <see cref="AuditLog.Action"/>, then by <see cref="AuditLog.OccurredOnUtc"/> within an action.</summary>
     Action = 2,
 
-    /// <summary>Sort by <see cref="AuditLog.UserId"/>, then by <see cref="AuditLog.OccurredOnUtc"/> within a user.</summary>
+    /// <summary>
+    /// Sort by <see cref="AuditLog.UserId"/>, then by <see cref="AuditLog.OccurredOnUtc"/> within a user.
+    /// <see cref="AuditLog.UserId"/> is nullable; rows with no user always sort <em>last</em> regardless
+    /// of <see cref="AuditHistoryOrder"/> direction (a fixed NULLS LAST contract), so paging over this
+    /// field is stable and portable across providers whose default null placement differs.
+    /// </summary>
     UserId = 3,
 }
 
@@ -126,17 +131,27 @@ public sealed record AuditHistoryQuery
     /// against the RFC 6902 operations in <see cref="AuditLog.Diff"/>). A row matches when its
     /// <see cref="AuditLog.Diff"/> contains an operation whose <c>"path"</c> equals this value or is
     /// nested beneath it (so <c>"/address"</c> also matches a change to <c>"/address/city"</c>). The
-    /// value must be a JSON Pointer beginning with <c>'/'</c>. Null leaves the dimension unfiltered.
-    /// Added in v0.11.0.
+    /// value must be a valid RFC 6901 JSON Pointer beginning with <c>'/'</c>. Null leaves the dimension
+    /// unfiltered. Added in v0.11.0.
     /// </summary>
     /// <remarks>
-    /// The match is a substring/prefix test over the stored <see cref="AuditLog.Diff"/> JSON, chosen
-    /// so it can run server-side on every backend (a relational <c>LIKE</c>) without parsing JSON in
-    /// the database. It matches the exact path token <c>"path":"/p"</c> and the nested-prefix token
-    /// <c>"path":"/p/"</c>; it never matches a sibling whose name merely starts with the same text
-    /// (<c>/postalCode</c> does not match a query for <c>/post</c>) because the candidate tokens are
-    /// closed by either a quote or a slash. Whitespace-free canonical JSON is assumed, which is what
-    /// the capture path emits via <c>System.Text.Json</c>.
+    /// <para>
+    /// The match is a substring/prefix test over the stored <see cref="AuditLog.Diff"/> JSON, chosen so
+    /// it can run server-side on every backend (a relational <c>LIKE</c>) without parsing JSON in the
+    /// database. The candidate tokens are anchored to a patch operation's <c>"path"</c> member by
+    /// including the <c>"op":"&lt;verb&gt;",</c> prefix that always immediately precedes it in the
+    /// captured JSON (the operation object is serialized op-then-path). Anchoring this way means a path
+    /// string that appears inside an operation's <c>"value"</c> — for example an audited property
+    /// literally named <c>path</c> whose value serializes as <c>"value":{"path":"/status"}</c> — does
+    /// not falsely match, because that occurrence is not preceded by an <c>"op":"&lt;verb&gt;",</c>
+    /// member.
+    /// </para>
+    /// <para>
+    /// Each anchored token is closed by either a quote (exact match, <c>"path":"/p"</c>) or a slash
+    /// (nested-prefix, <c>"path":"/p/</c>), so a sibling whose name merely starts with the same text
+    /// (<c>/postalCode</c> does not match a query for <c>/post</c>) is never matched. Whitespace-free
+    /// canonical JSON is assumed, which is what the capture path emits via <c>System.Text.Json</c>.
+    /// </para>
     /// </remarks>
     public string? ChangedPath { get; init; }
 
@@ -210,15 +225,43 @@ public sealed record AuditHistoryQuery
             throw new ArgumentException(
                 $"AuditHistoryQuery time range is inverted: ToUtc ({to:O}) is earlier than FromUtc ({from:O}).");
         }
-        // A JSON Pointer is either the empty string (whole document) or a sequence of "/"-prefixed
-        // tokens. The audit diff never targets the whole document, so a usable predicate must start
-        // with '/'; rejecting anything else turns a typo ("name" for "/name") into a clear error
-        // rather than a silently-empty result.
-        if (ChangedPath is { } path && (path.Length == 0 || path[0] != '/'))
+        // A JSON Pointer (RFC 6901) is either the empty string (whole document) or a sequence of
+        // "/"-prefixed reference tokens. The audit diff never targets the whole document, so a usable
+        // predicate must start with '/'; rejecting anything else turns a typo ("name" for "/name") into
+        // a clear error rather than a silently-empty result. Beyond the leading slash, the token escape
+        // grammar is validated too: '~' is an escape introducer and must be followed by '0' (literal
+        // '~') or '1' (literal '/'); a dangling or mis-followed '~' is malformed, so we reject it rather
+        // than emit a LIKE token that can never match the persisted, correctly-escaped JSON.
+        if (ChangedPath is { } path && !IsValidJsonPointer(path))
         {
             throw new ArgumentException(
-                $"AuditHistoryQuery.ChangedPath must be a JSON Pointer beginning with '/' (got \"{path}\").");
+                $"AuditHistoryQuery.ChangedPath must be a valid RFC 6901 JSON Pointer beginning with '/' (got \"{path}\").");
         }
+    }
+
+    // RFC 6901: a non-empty JSON Pointer is "/" ( reference-token "/" )* where each reference-token
+    // is a run of unescaped chars and the escape sequences "~0" / "~1". We require a leading '/'
+    // (the audit diff never points at the whole document) and that every '~' be immediately followed
+    // by '0' or '1'. Any other character is a legal literal inside a token, so no further restriction
+    // is imposed.
+    private static bool IsValidJsonPointer(string pointer)
+    {
+        if (pointer.Length == 0 || pointer[0] != '/')
+        {
+            return false;
+        }
+        for (var i = 0; i < pointer.Length; i++)
+        {
+            if (pointer[i] != '~')
+            {
+                continue;
+            }
+            if (i + 1 >= pointer.Length || (pointer[i + 1] != '0' && pointer[i + 1] != '1'))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>The effective page size: <see cref="Take"/> when set, otherwise <see cref="DefaultPageSize"/>.</summary>
@@ -237,23 +280,51 @@ public sealed record AuditHistoryQuery
     /// </summary>
     public bool HasActionsFilter => Actions is { Count: > 0 };
 
-    /// <summary>
-    /// The exact-path token a <see cref="ChangedPath"/> match looks for in a row's
-    /// <see cref="AuditLog.Diff"/>: <c>"path":"/p"</c> (canonical, whitespace-free JSON). A row whose
-    /// diff contains this substring changed exactly the requested path. Null when no path filter is
-    /// set. Exposed so a custom store can reuse the exact match semantics the in-box stores apply.
-    /// </summary>
-    public string? ChangedPathExactToken
-        => ChangedPath is { } p ? $"\"path\":\"{EscapeForJsonString(p)}\"" : null;
+    // The RFC 6902 op verbs a stored diff can carry. Capture emits only add / remove / replace
+    // (Json6902.Compute), but an imported or replayed patch may carry move / copy / test, and those
+    // also have a "path" target worth matching. Each verb anchors a ChangedPath token so a "path"
+    // member is only matched when it belongs to a real operation object, never to operation value
+    // content that happens to contain a "path" key.
+    private static readonly string[] PatchOpVerbs =
+        { "add", "remove", "replace", "move", "copy", "test" };
 
     /// <summary>
-    /// The nested-prefix token a <see cref="ChangedPath"/> match also looks for:
-    /// <c>"path":"/p/</c> (note the trailing slash, no closing quote) so a change to a descendant
-    /// (<c>/p/child</c>) matches a query for <c>/p</c>. Null when no path filter is set. Exposed for the
-    /// same reason as <see cref="ChangedPathExactToken"/>.
+    /// The op-anchored exact-path tokens a <see cref="ChangedPath"/> match looks for in a row's
+    /// <see cref="AuditLog.Diff"/>: one <c>"op":"&lt;verb&gt;","path":"/p"</c> per RFC 6902 verb
+    /// (canonical, whitespace-free JSON). A row whose diff contains any of these substrings changed
+    /// exactly the requested path. Empty when no path filter is set. Exposed so a custom store can reuse
+    /// the exact match semantics the in-box stores apply.
     /// </summary>
-    public string? ChangedPathPrefixToken
-        => ChangedPath is { } p ? $"\"path\":\"{EscapeForJsonString(p)}/" : null;
+    /// <remarks>
+    /// Anchoring on the <c>"op":"&lt;verb&gt;",</c> prefix (which always precedes <c>"path"</c> in the
+    /// serialized operation object) is what keeps a path that appears inside an operation's
+    /// <c>"value"</c> from falsely matching. See the remarks on <see cref="ChangedPath"/>.
+    /// </remarks>
+    public IReadOnlyList<string> ChangedPathExactTokens
+        => ChangedPath is { } p
+            ? BuildAnchoredTokens(EscapeForJsonString(p), suffix: "\"")
+            : Array.Empty<string>();
+
+    /// <summary>
+    /// The op-anchored nested-prefix tokens a <see cref="ChangedPath"/> match also looks for: one
+    /// <c>"op":"&lt;verb&gt;","path":"/p/</c> per RFC 6902 verb (note the trailing slash, no closing
+    /// quote) so a change to a descendant (<c>/p/child</c>) matches a query for <c>/p</c>. Empty when no
+    /// path filter is set. Exposed for the same reason as <see cref="ChangedPathExactTokens"/>.
+    /// </summary>
+    public IReadOnlyList<string> ChangedPathPrefixTokens
+        => ChangedPath is { } p
+            ? BuildAnchoredTokens(EscapeForJsonString(p), suffix: "/")
+            : Array.Empty<string>();
+
+    private static string[] BuildAnchoredTokens(string escapedPath, string suffix)
+    {
+        var tokens = new string[PatchOpVerbs.Length];
+        for (var i = 0; i < PatchOpVerbs.Length; i++)
+        {
+            tokens[i] = $"\"op\":\"{PatchOpVerbs[i]}\",\"path\":\"{escapedPath}{suffix}";
+        }
+        return tokens;
+    }
 
     // The diff is stored as System.Text.Json output, so a path segment containing a quote or
     // backslash is escaped there too. Mirror the minimal escaping STJ applies to a JSON string's

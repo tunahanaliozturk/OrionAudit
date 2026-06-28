@@ -41,10 +41,12 @@ public interface IAuditHistoryStore
     /// <summary>
     /// Aggregates audit history into grouped counts: applies <paramref name="query"/>'s filters, then
     /// groups the matching rows by <see cref="AuditAggregationQuery.GroupBy"/> and returns one
-    /// <see cref="AuditAggregateBucket"/> (key + count) per distinct group. The grouping runs
-    /// server-side on a backend that can (a relational <c>GROUP BY</c>), so the full row set is never
-    /// materialised; only the bounded set of distinct buckets is returned. Implementations call
-    /// <see cref="AuditAggregationQuery.Validate"/> first.
+    /// <see cref="AuditAggregateBucket"/> (key + count) per distinct group. The returned result is
+    /// always bounded by the number of distinct buckets, not the table size. Where the grouping
+    /// executes, and whether the full row set is materialised, is backend-dependent: a relational store
+    /// pushes the grouping down to a server-side <c>GROUP BY</c> (the bundled <c>EfCoreAuditHistoryStore</c>
+    /// does), whereas an in-memory or non-relational store may enumerate the matching rows in process.
+    /// Implementations call <see cref="AuditAggregationQuery.Validate"/> first.
     /// </summary>
     /// <param name="query">The filter plus grouping specification.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

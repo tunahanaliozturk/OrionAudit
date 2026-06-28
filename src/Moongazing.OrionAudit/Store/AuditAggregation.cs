@@ -44,9 +44,10 @@ public enum AuditTimeBucket
 /// Storage-agnostic description of a read-side aggregation over audit history: the same filter
 /// dimensions an <see cref="AuditHistoryQuery"/> carries, plus the grouping key (and, for a time
 /// grouping, the bucket width). Passed to <see cref="IAuditHistoryStore.AggregateAsync"/>, which
-/// returns one <see cref="AuditAggregateBucket"/> per distinct key with its row count. The aggregation
-/// runs server-side (a <c>GROUP BY</c> on a relational backend) so the whole table is never
-/// materialised. Added in v0.11.0.
+/// returns one <see cref="AuditAggregateBucket"/> per distinct key with its row count. The result is
+/// bounded by the number of distinct buckets; a relational backend pushes the grouping down to a
+/// server-side <c>GROUP BY</c> (so the whole table is never materialised), while an in-memory backend
+/// may group the matching rows in process. Added in v0.11.0.
 /// </summary>
 /// <remarks>
 /// The filter surface is shared with <see cref="AuditHistoryQuery"/> by composition: the
@@ -74,8 +75,21 @@ public sealed record AuditAggregationQuery
     public AuditTimeBucket TimeBucket { get; init; } = AuditTimeBucket.Day;
 
     /// <summary>Validates the embedded <see cref="Filter"/>'s invariants. Stores call this before executing.</summary>
-    /// <exception cref="ArgumentException">The embedded filter fails <see cref="AuditHistoryQuery.Validate"/>.</exception>
-    public void Validate() => Filter.Validate();
+    /// <exception cref="ArgumentException">
+    /// <see cref="Filter"/> is null, or the embedded filter fails <see cref="AuditHistoryQuery.Validate"/>.
+    /// </exception>
+    public void Validate()
+    {
+        // Filter defaults to a non-null instance, but a caller can assign `Filter = null!` through the
+        // init setter; guard so the failure is a clear ArgumentException here rather than an opaque
+        // NullReferenceException deep inside a store's ApplyFilters.
+        if (Filter is null)
+        {
+            throw new ArgumentException(
+                $"{nameof(AuditAggregationQuery)}.{nameof(Filter)} must not be null.");
+        }
+        Filter.Validate();
+    }
 }
 
 /// <summary>

@@ -161,6 +161,13 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
         // The chosen field is the primary sort; OccurredOnUtc then Id are always appended as stable
         // tie-breaks so paging is deterministic. For the default OccurredOn field this collapses to the
         // pre-v0.11 "(OccurredOnUtc, Id)" ordering exactly.
+        //
+        // Null ordering is fixed at NULLS LAST regardless of direction (the documented contract on
+        // AuditHistorySortField.UserId): a nullable sort key (UserId) would otherwise sort nulls at
+        // opposite ends under ascending vs descending, AND providers disagree on the default placement
+        // of NULLs (PostgreSQL puts them last on ASC, SQL Server first), so paging would be neither
+        // stable nor portable. Emitting an explicit "key IS NULL" leading sort (false=0 before true=1)
+        // forces non-null rows first, then nulls, in BOTH directions, identically across providers.
         IOrderedQueryable<AuditLog> ordered = query.SortBy switch
         {
             AuditHistorySortField.EntityType => descending
@@ -170,8 +177,8 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
                 ? source.OrderByDescending(a => a.Action)
                 : source.OrderBy(a => a.Action),
             AuditHistorySortField.UserId => descending
-                ? source.OrderByDescending(a => a.UserId)
-                : source.OrderBy(a => a.UserId),
+                ? source.OrderBy(a => a.UserId == null).ThenByDescending(a => a.UserId)
+                : source.OrderBy(a => a.UserId == null).ThenBy(a => a.UserId),
             _ => descending
                 ? source.OrderByDescending(a => a.OccurredOnUtc)
                 : source.OrderBy(a => a.OccurredOnUtc),
@@ -290,13 +297,69 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
             source = source.Where(a => a.UserType == userType);
         }
         // Value-change predicate: keep rows whose Diff JSON references the requested path either
-        // exactly ("path":"/p") or as the parent of a nested change ("path":"/p/..."). Both tokens are
-        // closed (by a quote or a slash), so a sibling whose name merely starts with the same text does
-        // not match. EF translates Contains to a relational LIKE '%token%', evaluated server-side.
-        if (query.ChangedPathExactToken is { } exact && query.ChangedPathPrefixToken is { } prefix)
+        // exactly ("op":"<verb>","path":"/p") or as the parent of a nested change
+        // ("op":"<verb>","path":"/p/..."). The tokens are anchored to a patch operation's "path" member
+        // (each is preceded by the "op":"<verb>", that always introduces the path in the serialized
+        // operation), so a "path" string that appears inside an operation's "value" never falsely
+        // matches; each token is also closed (by a quote or a slash) so a same-prefix sibling does not
+        // match. We emit a relational LIKE per token via EF.Functions.Like rather than string.Contains
+        // because on PostgreSQL the Diff column is jsonb: the Npgsql LIKE translation casts the jsonb
+        // value to text (diff::text LIKE ...), which the bare Contains/LIKE over a jsonb column would
+        // not, and on the text-typed providers (SQLite / SQL Server / MySQL) it is the same LIKE.
+        var changedPathPredicate = BuildChangedPathPredicate(query);
+        if (changedPathPredicate is not null)
         {
-            source = source.Where(a => a.Diff.Contains(exact) || a.Diff.Contains(prefix));
+            source = source.Where(changedPathPredicate);
         }
         return source;
     }
+
+    // The character that escapes LIKE metacharacters in the patterns below. A JSON Pointer segment can
+    // legally contain '%', '_', or '\\', which are LIKE wildcards / the escape char; left unescaped they
+    // would widen the match. We escape them in the token and pass the same char to EF.Functions.Like so
+    // the pattern matches the literal token.
+    private const char LikeEscape = '\\';
+
+    // Builds "Diff LIKE %token% OR ..." over the op-anchored exact and prefix tokens, or null when no
+    // ChangedPath filter is set. The OR is assembled as an expression tree so it translates as one
+    // server-side predicate; each branch is an EF.Functions.Like with an explicit ESCAPE char.
+    private static System.Linq.Expressions.Expression<Func<AuditLog, bool>>? BuildChangedPathPredicate(
+        AuditHistoryQuery query)
+    {
+        var tokens = new List<string>(query.ChangedPathExactTokens.Count + query.ChangedPathPrefixTokens.Count);
+        tokens.AddRange(query.ChangedPathExactTokens);
+        tokens.AddRange(query.ChangedPathPrefixTokens);
+        if (tokens.Count == 0)
+        {
+            return null;
+        }
+
+        var parameter = System.Linq.Expressions.Expression.Parameter(typeof(AuditLog), "a");
+        var diff = System.Linq.Expressions.Expression.Property(parameter, nameof(AuditLog.Diff));
+        var likeMethod = typeof(Microsoft.EntityFrameworkCore.DbFunctionsExtensions).GetMethod(
+            nameof(Microsoft.EntityFrameworkCore.DbFunctionsExtensions.Like),
+            new[] { typeof(Microsoft.EntityFrameworkCore.DbFunctions), typeof(string), typeof(string), typeof(string) })!;
+        var efFunctions = System.Linq.Expressions.Expression.Constant(Microsoft.EntityFrameworkCore.EF.Functions);
+        var escapeArg = System.Linq.Expressions.Expression.Constant(LikeEscape.ToString());
+
+        System.Linq.Expressions.Expression? body = null;
+        foreach (var token in tokens)
+        {
+            var pattern = System.Linq.Expressions.Expression.Constant("%" + EscapeForLike(token) + "%");
+            var call = System.Linq.Expressions.Expression.Call(likeMethod, efFunctions, diff, pattern, escapeArg);
+            body = body is null
+                ? call
+                : System.Linq.Expressions.Expression.OrElse(body, call);
+        }
+
+        return System.Linq.Expressions.Expression.Lambda<Func<AuditLog, bool>>(body!, parameter);
+    }
+
+    // Escapes LIKE wildcards so a token matches literally: the escape char first (so it isn't
+    // double-escaped), then '%' and '_'. Pairs with the ESCAPE '\\' passed to EF.Functions.Like.
+    private static string EscapeForLike(string token)
+        => token
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 }

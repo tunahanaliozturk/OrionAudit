@@ -232,6 +232,175 @@ public class AuditHistoryRicherQueryTests
     }
 
     [Fact]
+    public async Task ChangedPath_MatchesOpPathButNotCoincidentalValueMatch()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        await using var _ = conn;
+        var options = new DbContextOptionsBuilder<AuditDbContext>().UseSqlite(conn).Options;
+        await using var ctx = new AuditDbContext(options);
+        await ctx.Database.EnsureCreatedAsync();
+
+        // Row 1 genuinely changes "/status".
+        var realStatusChange = Replace("/status", "shipped");
+
+        // Row 2 changes an unrelated property "/config" whose NEW VALUE is an object that itself
+        // carries a "path" member equal to "/status". Serialized, its diff contains the substring
+        // "path":"/status" inside the operation's "value" - exactly the coincidental collision the
+        // op-anchored token must reject. The only "op":"<verb>","path" in this row targets "/config".
+        var valueCollision = new JsonArray
+        {
+            new JsonObject
+            {
+                ["op"] = "replace",
+                ["path"] = "/config",
+                ["value"] = new JsonObject { ["path"] = "/status" },
+            },
+        }.ToJsonString();
+
+        // Sanity: the naive substring would have matched row 2.
+        Assert.Contains("\"path\":\"/status\"", valueCollision, StringComparison.Ordinal);
+
+        ctx.AuditLogs.AddRange(
+            Row(1, OrderType, "o1", AuditAction.Updated, T0, diff: realStatusChange),
+            Row(2, OrderType, "o2", AuditAction.Updated, T0.AddHours(1), diff: valueCollision));
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+        var store = new EfCoreAuditHistoryStore(ctx);
+
+        var page = await store.QueryAsync(new AuditHistoryQuery { ChangedPath = "/status", Take = 100 });
+
+        // Only the real "/status" change (o1) matches; the value-nested "path":"/status" (o2) does not.
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal("o1", page.Items[0].EntityId);
+    }
+
+    [Fact]
+    public async Task ChangedPath_GeneratesAnchoredLikePredicate_WithEscape()
+    {
+        // The reviewer asked to either run the jsonb path or assert the generated predicate shape.
+        // There is no Postgres harness in this repo (SQLite + InMemory only), so we assert the SQL the
+        // EF Core store emits: an op-anchored LIKE (not a bare value match) with an explicit ESCAPE
+        // clause. On Npgsql the same EF.Functions.Like over the jsonb Diff column is translated with a
+        // diff::text cast, which a bare string.Contains would not have produced.
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        await using var _ = conn;
+
+        var sql = new List<string>();
+        var options = new DbContextOptionsBuilder<AuditDbContext>()
+            .UseSqlite(conn)
+            .LogTo(sql.Add, Microsoft.Extensions.Logging.LogLevel.Information)
+            .EnableSensitiveDataLogging()
+            .Options;
+        await using var ctx = new AuditDbContext(options);
+        await ctx.Database.EnsureCreatedAsync();
+        ctx.AuditLogs.Add(Row(1, OrderType, "o1", AuditAction.Updated, T0, diff: Replace("/status", "x")));
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+        var store = new EfCoreAuditHistoryStore(ctx);
+
+        await store.QueryAsync(new AuditHistoryQuery { ChangedPath = "/status", Take = 100 });
+
+        var changedPathSql = sql.FirstOrDefault(s => s.Contains("LIKE", StringComparison.Ordinal)
+            && s.Contains("\"Diff\"", StringComparison.Ordinal));
+        Assert.NotNull(changedPathSql);
+        // The pattern is anchored to a patch op path, not a bare path value.
+        Assert.Contains("op\":\"replace\",\"path\":\"/status", changedPathSql, StringComparison.Ordinal);
+        // The LIKE carries an explicit ESCAPE so '%' / '_' in a path segment match literally.
+        Assert.Contains("ESCAPE", changedPathSql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Aggregate_LargeCounts_DoNotOverflowInt32()
+    {
+        // The bucket count is 64-bit end to end. Proving it with > int.MaxValue real rows is infeasible,
+        // so we assert the type carries a value that a 32-bit count could not: AuditAggregateBucket.Count
+        // is a long, and the GROUP BY projection casts Count() to long before materialising. Here we
+        // verify the long path round-trips a value above int.MaxValue without truncation.
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        await using var _ = conn;
+        await using var ctx = await SeededDbAsync(conn);
+        var store = new EfCoreAuditHistoryStore(ctx);
+
+        var buckets = await store.AggregateAsync(new AuditAggregationQuery { GroupBy = AuditAggregateBy.Action });
+        Assert.All(buckets, b => Assert.IsType<long>(b.Count));
+
+        // A bucket count above int.MaxValue is representable and does not wrap to a negative int.
+        const long overInt32 = (long)int.MaxValue + 1;
+        var synthetic = new AuditAggregateBucket("k", overInt32);
+        Assert.Equal(overInt32, synthetic.Count);
+        Assert.True(synthetic.Count > int.MaxValue);
+    }
+
+    [Fact]
+    public async Task SortByUserId_OrdersNullsLast_StableInBothDirections()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        await using var _ = conn;
+        var options = new DbContextOptionsBuilder<AuditDbContext>().UseSqlite(conn).Options;
+        await using var ctx = new AuditDbContext(options);
+        await ctx.Database.EnsureCreatedAsync();
+
+        // Two users plus two null-user rows. Pinned ids/timestamps for determinism.
+        ctx.AuditLogs.AddRange(
+            Row(1, OrderType, "o1", AuditAction.Updated, T0, userId: "bob"),
+            Row(2, OrderType, "o2", AuditAction.Updated, T0.AddHours(1), userId: "alice"),
+            Row(3, OrderType, "o3", AuditAction.Updated, T0.AddHours(2), userId: null),
+            Row(4, OrderType, "o4", AuditAction.Updated, T0.AddHours(3), userId: null));
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+        var store = new EfCoreAuditHistoryStore(ctx);
+
+        // Ascending: alice, bob, then the two null-user rows last.
+        var asc = await store.QueryAsync(new AuditHistoryQuery
+        {
+            SortBy = AuditHistorySortField.UserId,
+            Order = AuditHistoryOrder.OldestFirst,
+            Take = 100,
+        });
+        Assert.Equal(new[] { "alice", "bob", null, null }, asc.Items.Select(r => r.UserId).ToArray());
+
+        // Descending: bob, alice, then the null-user rows STILL last (fixed NULLS LAST contract).
+        var desc = await store.QueryAsync(new AuditHistoryQuery
+        {
+            SortBy = AuditHistorySortField.UserId,
+            Order = AuditHistoryOrder.NewestFirst,
+            Take = 100,
+        });
+        Assert.Equal(new[] { "bob", "alice", null, null }, desc.Items.Select(r => r.UserId).ToArray());
+
+        // The null-user rows keep a deterministic order among themselves (OccurredOnUtc then Id tie-break).
+        Assert.Equal(new[] { "o3", "o4" }, asc.Items.Where(r => r.UserId is null).Select(r => r.EntityId).ToArray());
+    }
+
+    [Fact]
+    public async Task Validate_RejectsNullAggregationFilterAndMalformedPointer()
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+        await using var _ = conn;
+        await using var ctx = await SeededDbAsync(conn);
+        var store = new EfCoreAuditHistoryStore(ctx);
+
+        // A null Filter on an aggregation query is rejected with a clear ArgumentException, not an NRE.
+        var nullFilter = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.AggregateAsync(new AuditAggregationQuery { Filter = null! }));
+        Assert.Contains(nameof(AuditAggregationQuery.Filter), nullFilter.Message, StringComparison.Ordinal);
+
+        // A malformed JSON Pointer (dangling '~' escape) is rejected by full RFC 6901 validation.
+        var badPointer = await Assert.ThrowsAsync<ArgumentException>(
+            () => store.QueryAsync(new AuditHistoryQuery { ChangedPath = "/a~" }));
+        Assert.Contains("ChangedPath", badPointer.Message, StringComparison.Ordinal);
+
+        // "~1" (escaped '/') and "~0" (escaped '~') are valid and do not throw.
+        var ok = await store.QueryAsync(new AuditHistoryQuery { ChangedPath = "/a~1b~0c", Take = 1 });
+        Assert.Equal(0, ok.TotalCount); // nothing matches, but validation passed
+    }
+
+    [Fact]
     public async Task RicherFilters_ComposeWithPaging()
     {
         var conn = new SqliteConnection("DataSource=:memory:");

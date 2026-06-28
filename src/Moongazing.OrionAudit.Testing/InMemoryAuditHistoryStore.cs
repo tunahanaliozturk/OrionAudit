@@ -153,9 +153,12 @@ public sealed class InMemoryAuditHistoryStore : AuditHistoryStoreBase
             AuditHistorySortField.Action => descending
                 ? source.OrderByDescending(r => r.Action)
                 : source.OrderBy(r => r.Action),
+            // Mirror EfCoreAuditHistoryStore: a nullable sort key (UserId) is ordered NULLS LAST in
+            // both directions via a leading "key is null" sort (false before true), so paging is
+            // stable and matches the EF Core store row-for-row.
             AuditHistorySortField.UserId => descending
-                ? source.OrderByDescending(r => r.UserId, StringComparer.Ordinal)
-                : source.OrderBy(r => r.UserId, StringComparer.Ordinal),
+                ? source.OrderBy(r => r.UserId is null).ThenByDescending(r => r.UserId, StringComparer.Ordinal)
+                : source.OrderBy(r => r.UserId is null).ThenBy(r => r.UserId, StringComparer.Ordinal),
             _ => descending
                 ? source.OrderByDescending(r => r.OccurredOnUtc)
                 : source.OrderBy(r => r.OccurredOnUtc),
@@ -262,10 +265,35 @@ public sealed class InMemoryAuditHistoryStore : AuditHistoryStoreBase
         {
             return false;
         }
-        if (query.ChangedPathExactToken is { } exact && query.ChangedPathPrefixToken is { } prefix
-            && !(row.Diff.Contains(exact, StringComparison.Ordinal) || row.Diff.Contains(prefix, StringComparison.Ordinal)))
+        // Mirror EfCoreAuditHistoryStore: a row matches the ChangedPath filter when its Diff contains
+        // any op-anchored exact or prefix token. The tokens already carry the "op":"<verb>", anchor, so
+        // a path inside an operation's value cannot satisfy the match.
+        if (query.ChangedPath is not null)
         {
-            return false;
+            var matchesPath = false;
+            foreach (var token in query.ChangedPathExactTokens)
+            {
+                if (row.Diff.Contains(token, StringComparison.Ordinal))
+                {
+                    matchesPath = true;
+                    break;
+                }
+            }
+            if (!matchesPath)
+            {
+                foreach (var token in query.ChangedPathPrefixTokens)
+                {
+                    if (row.Diff.Contains(token, StringComparison.Ordinal))
+                    {
+                        matchesPath = true;
+                        break;
+                    }
+                }
+            }
+            if (!matchesPath)
+            {
+                return false;
+            }
         }
         return true;
     }
