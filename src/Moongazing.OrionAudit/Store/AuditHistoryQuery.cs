@@ -11,6 +11,26 @@ public enum AuditHistoryOrder
 }
 
 /// <summary>
+/// The row dimension an <see cref="AuditHistoryQuery"/> sorts by before paging. The
+/// <see cref="AuditLog.Id"/> is always appended as a stable tie-break so paging is deterministic
+/// even when two rows share the sort key.
+/// </summary>
+public enum AuditHistorySortField
+{
+    /// <summary>Sort by <see cref="AuditLog.OccurredOnUtc"/> (chronological). The default; preserves pre-v0.11 behaviour.</summary>
+    OccurredOn = 0,
+
+    /// <summary>Sort by <see cref="AuditLog.EntityType"/>, then by <see cref="AuditLog.OccurredOnUtc"/> within a type.</summary>
+    EntityType = 1,
+
+    /// <summary>Sort by <see cref="AuditLog.Action"/>, then by <see cref="AuditLog.OccurredOnUtc"/> within an action.</summary>
+    Action = 2,
+
+    /// <summary>Sort by <see cref="AuditLog.UserId"/>, then by <see cref="AuditLog.OccurredOnUtc"/> within a user.</summary>
+    UserId = 3,
+}
+
+/// <summary>
 /// Storage-agnostic description of an audit-history read: filter dimensions plus paging and
 /// ordering. Passed to <see cref="IAuditHistoryStore.QueryAsync"/>. Every filter is optional;
 /// a default-constructed query (no filters) returns the whole history, newest first, capped
@@ -72,6 +92,55 @@ public sealed record AuditHistoryQuery
     public string? TenantId { get; init; }
 
     /// <summary>
+    /// Match a <em>set</em> of audited entity types (compared against <see cref="AuditLog.EntityType"/>):
+    /// a row matches when its <see cref="AuditLog.EntityType"/> is any value in this collection.
+    /// Null or empty leaves this dimension unfiltered. Composes with the single-value
+    /// <see cref="EntityType"/> as an additional AND constraint, so both must hold when both are set
+    /// (typically you set one or the other). Added in v0.11.0.
+    /// </summary>
+    public IReadOnlyCollection<string>? EntityTypes { get; init; }
+
+    /// <summary>
+    /// Match a <em>set</em> of <see cref="AuditAction"/> values (for example "inserts or deletes"):
+    /// a row matches when its <see cref="AuditLog.Action"/> is any value in this collection. Null or
+    /// empty leaves this dimension unfiltered. Composes with the single-value <see cref="Action"/> as
+    /// an additional AND constraint. Added in v0.11.0.
+    /// </summary>
+    public IReadOnlyCollection<AuditAction>? Actions { get; init; }
+
+    /// <summary>
+    /// Correlation / trace id to match (compared against <see cref="AuditLog.CorrelationId"/>). Null
+    /// leaves it unfiltered. Lets a caller pull every audit row written under one logical operation
+    /// (an HTTP request, a background job run). Added in v0.11.0.
+    /// </summary>
+    public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// User classification to match (compared against <see cref="AuditLog.UserType"/>: <c>"user"</c>,
+    /// <c>"system"</c>, <c>"job"</c>, ...). Null leaves it unfiltered. Added in v0.11.0.
+    /// </summary>
+    public string? UserType { get; init; }
+
+    /// <summary>
+    /// Value-change predicate: keep only rows whose change touched this JSON Patch path (compared
+    /// against the RFC 6902 operations in <see cref="AuditLog.Diff"/>). A row matches when its
+    /// <see cref="AuditLog.Diff"/> contains an operation whose <c>"path"</c> equals this value or is
+    /// nested beneath it (so <c>"/address"</c> also matches a change to <c>"/address/city"</c>). The
+    /// value must be a JSON Pointer beginning with <c>'/'</c>. Null leaves the dimension unfiltered.
+    /// Added in v0.11.0.
+    /// </summary>
+    /// <remarks>
+    /// The match is a substring/prefix test over the stored <see cref="AuditLog.Diff"/> JSON, chosen
+    /// so it can run server-side on every backend (a relational <c>LIKE</c>) without parsing JSON in
+    /// the database. It matches the exact path token <c>"path":"/p"</c> and the nested-prefix token
+    /// <c>"path":"/p/"</c>; it never matches a sibling whose name merely starts with the same text
+    /// (<c>/postalCode</c> does not match a query for <c>/post</c>) because the candidate tokens are
+    /// closed by either a quote or a slash. Whitespace-free canonical JSON is assumed, which is what
+    /// the capture path emits via <c>System.Text.Json</c>.
+    /// </remarks>
+    public string? ChangedPath { get; init; }
+
+    /// <summary>
     /// Inclusive lower bound on <see cref="AuditLog.OccurredOnUtc"/>. Null leaves the range open
     /// at the low end. Must be a UTC instant; the value is compared as-is.
     /// </summary>
@@ -94,6 +163,14 @@ public sealed record AuditHistoryQuery
 
     /// <summary>Ordering applied before paging. Defaults to <see cref="AuditHistoryOrder.NewestFirst"/>.</summary>
     public AuditHistoryOrder Order { get; init; } = AuditHistoryOrder.NewestFirst;
+
+    /// <summary>
+    /// The dimension to sort by before paging. Defaults to <see cref="AuditHistorySortField.OccurredOn"/>,
+    /// which preserves the pre-v0.11 chronological order. <see cref="Order"/> chooses the direction
+    /// (ascending / descending) applied to the chosen field; <see cref="AuditLog.OccurredOnUtc"/> and
+    /// then <see cref="AuditLog.Id"/> are always appended as stable tie-breaks. Added in v0.11.0.
+    /// </summary>
+    public AuditHistorySortField SortBy { get; init; } = AuditHistorySortField.OccurredOn;
 
     /// <summary>
     /// Validates the paging and time-range invariants, throwing <see cref="ArgumentException"/>
@@ -133,8 +210,57 @@ public sealed record AuditHistoryQuery
             throw new ArgumentException(
                 $"AuditHistoryQuery time range is inverted: ToUtc ({to:O}) is earlier than FromUtc ({from:O}).");
         }
+        // A JSON Pointer is either the empty string (whole document) or a sequence of "/"-prefixed
+        // tokens. The audit diff never targets the whole document, so a usable predicate must start
+        // with '/'; rejecting anything else turns a typo ("name" for "/name") into a clear error
+        // rather than a silently-empty result.
+        if (ChangedPath is { } path && (path.Length == 0 || path[0] != '/'))
+        {
+            throw new ArgumentException(
+                $"AuditHistoryQuery.ChangedPath must be a JSON Pointer beginning with '/' (got \"{path}\").");
+        }
     }
 
     /// <summary>The effective page size: <see cref="Take"/> when set, otherwise <see cref="DefaultPageSize"/>.</summary>
     public int EffectiveTake => Take ?? DefaultPageSize;
+
+    /// <summary>
+    /// True when <see cref="EntityTypes"/> carries at least one value, i.e. the set filter is active.
+    /// Exposed so a custom <see cref="IAuditHistoryStore"/> can branch on the set filter the same way
+    /// the in-box stores do.
+    /// </summary>
+    public bool HasEntityTypesFilter => EntityTypes is { Count: > 0 };
+
+    /// <summary>
+    /// True when <see cref="Actions"/> carries at least one value, i.e. the set filter is active.
+    /// Exposed for the same reason as <see cref="HasEntityTypesFilter"/>.
+    /// </summary>
+    public bool HasActionsFilter => Actions is { Count: > 0 };
+
+    /// <summary>
+    /// The exact-path token a <see cref="ChangedPath"/> match looks for in a row's
+    /// <see cref="AuditLog.Diff"/>: <c>"path":"/p"</c> (canonical, whitespace-free JSON). A row whose
+    /// diff contains this substring changed exactly the requested path. Null when no path filter is
+    /// set. Exposed so a custom store can reuse the exact match semantics the in-box stores apply.
+    /// </summary>
+    public string? ChangedPathExactToken
+        => ChangedPath is { } p ? $"\"path\":\"{EscapeForJsonString(p)}\"" : null;
+
+    /// <summary>
+    /// The nested-prefix token a <see cref="ChangedPath"/> match also looks for:
+    /// <c>"path":"/p/</c> (note the trailing slash, no closing quote) so a change to a descendant
+    /// (<c>/p/child</c>) matches a query for <c>/p</c>. Null when no path filter is set. Exposed for the
+    /// same reason as <see cref="ChangedPathExactToken"/>.
+    /// </summary>
+    public string? ChangedPathPrefixToken
+        => ChangedPath is { } p ? $"\"path\":\"{EscapeForJsonString(p)}/" : null;
+
+    // The diff is stored as System.Text.Json output, so a path segment containing a quote or
+    // backslash is escaped there too. Mirror the minimal escaping STJ applies to a JSON string's
+    // structural characters so the LIKE/Contains token matches the persisted bytes. Audit property
+    // paths are almost always plain identifiers, but escaping keeps the predicate correct for the
+    // rare quoted/escaped segment instead of silently missing it.
+    private static string EscapeForJsonString(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("\"", "\\\"", StringComparison.Ordinal);
 }

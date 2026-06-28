@@ -23,6 +23,13 @@ public abstract class AuditHistoryStoreBase : IAuditHistoryStore
             $"{nameof(QueryAsync)} or use a store backed by a queryable persistence layer.");
 
     /// <inheritdoc />
+    /// <remarks>The default throws <see cref="NotSupportedException"/>; override to support aggregation.</remarks>
+    public virtual Task<IReadOnlyList<AuditAggregateBucket>> AggregateAsync(AuditAggregationQuery query, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException(
+            $"{GetType().Name} does not support aggregating audit history. Override " +
+            $"{nameof(AggregateAsync)} or use a store backed by a queryable persistence layer.");
+
+    /// <inheritdoc />
     /// <remarks>The default throws <see cref="NotSupportedException"/>; override to support compaction.</remarks>
     public virtual Task<AuditCompactionResult> CompactAsync(AuditCompactionRequest request, CancellationToken cancellationToken = default)
         => throw new NotSupportedException(

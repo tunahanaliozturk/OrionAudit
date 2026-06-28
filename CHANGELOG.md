@@ -7,6 +7,38 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-06-28
+
+### Added
+
+#### Richer audit-history query filters
+
+The backend-agnostic `IAuditHistoryStore` read surface gains additional filter dimensions, all optional and composing with the existing entity / subject / action / time filters and paging. Fully additive: a default `AuditHistoryQuery` (no new fields set) returns the same rows, in the same order, as before.
+
+- **Set filters.** `AuditHistoryQuery.EntityTypes` and `AuditHistoryQuery.Actions` match a *set* of values (a row matches when its column is any value in the collection), translated to a server-side `IN (...)`. They compose with the single-value `EntityType` / `Action` as additional AND constraints. An empty (non-null) set leaves the dimension unfiltered rather than excluding everything.
+- **Correlation / classification scope.** `AuditHistoryQuery.CorrelationId` pulls every row written under one logical operation (an HTTP request, a job run); `AuditHistoryQuery.UserType` filters by the acting subject's classification (`"user"` / `"system"` / `"job"` / ...).
+- **Value-change predicate.** `AuditHistoryQuery.ChangedPath` keeps only rows whose change touched a given JSON Pointer in the row's `Diff`: it matches the exact path (`"path":"/p"`) and any nested descendant (`"path":"/p/..."`), so a query for `/address` also matches a change to `/address/city`. Both candidate tokens are closed by a quote or a slash, so a sibling whose name merely shares a textual prefix (`/postalCode` for `/post`) does not match. Implemented as a closed-token `Contains` / `LIKE` over the stored diff so it runs server-side on every relational backend without parsing JSON in the database. A path without a leading `/` is rejected by `Validate()`.
+- **Ordering options.** `AuditHistoryQuery.SortBy` (`OccurredOn` / `EntityType` / `Action` / `UserId`) chooses the primary sort dimension; `Order` still chooses the direction. `OccurredOnUtc` then `Id` are always appended as stable tie-breaks so paging stays deterministic. The default `OccurredOn` collapses to the pre-v0.11 `(OccurredOnUtc, Id)` ordering exactly.
+
+#### Read-side aggregations
+
+A grouped-count surface over audit history so a caller can summarise activity without pulling every row.
+
+- **`IAuditHistoryStore.AggregateAsync(AuditAggregationQuery)`** returns one `AuditAggregateBucket` (key + count) per distinct group. `AuditAggregationQuery` carries the same filter surface as a query (by composition: its `Filter` is an `AuditHistoryQuery`, paging / ordering ignored) plus a `GroupBy` dimension: `Action`, `EntityType`, `UserId`, `TenantId`, or `TimeBucket` (per-`Hour` / `Day` / `Month`, UTC). A null user / tenant folds into one bucket; a time bucket also surfaces the typed `BucketStartUtc`.
+- **Streamed-friendly, not buffered.** The grouping runs server-side as a relational `GROUP BY` on the EF Core store, so the database returns only the bounded set of distinct buckets (cardinality of the grouped column), never the underlying rows. Time bucketing groups by the UTC year/month/day/hour components rather than a provider-specific date function, so it translates across SQLite / SQL Server / PostgreSQL / MySQL.
+- **Capability-default.** `AuditHistoryStoreBase.AggregateAsync` throws `NotSupportedException` by default, matching the existing `QueryAsync` / `CompactAsync` pattern, so a backend overrides only what it can honour. `EfCoreAuditHistoryStore` and the in-memory `InMemoryAuditHistoryStore` implement it with identical semantics.
+
+### Tests
+
+- `AuditHistoryRicherQueryTests` (real SQLite, pinned ids + timestamps): each new filter (entity-type set, action set, correlation, user-type, changed-path exact + nested + sibling-prefix-safe) returns exactly the matching rows and composes with the existing filters and paging; `SortBy` orders by the chosen field then chronologically; an existing unfiltered query is byte-for-byte unchanged; aggregation by action / entity-type (filtered) / day-bucket returns correct grouped counts; an empty aggregation returns no buckets; a 250-row dataset pages with a 40-row page size without ever returning more than a page.
+- `InMemoryAuditHistoryRicherQueryTests`: the in-memory test double mirrors the EF Core store's filter / aggregation semantics (including null user/tenant folding and empty-set-means-unfiltered), and `Validate()` rejects a `ChangedPath` without a leading `/`.
+- `AuditHistoryStoreBaseTests`: the capability-default `AggregateAsync` throws `NotSupportedException`.
+
+### Deferred
+
+- **Separate-database audit storage (`o.UseSeparateAuditDb(...)`)** remains planned but is **not** in this release: moving the audit table to its own connection / schema / DB with an outbox-dispatched audit-side write needs a new package or provider abstraction beyond the in-package read surface. It stays on the roadmap for a later milestone.
+- **CLI diff renderer (`dotnet orionaudit diff`)** remains planned but is **not** in this release: it requires a new `dotnet tool` package. It stays on the roadmap.
+
 ## [0.10.0] - 2026-06-27
 
 ### Added

@@ -39,6 +39,21 @@ public interface IAuditHistoryStore
     Task<AuditHistoryPage> QueryAsync(AuditHistoryQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Aggregates audit history into grouped counts: applies <paramref name="query"/>'s filters, then
+    /// groups the matching rows by <see cref="AuditAggregationQuery.GroupBy"/> and returns one
+    /// <see cref="AuditAggregateBucket"/> (key + count) per distinct group. The grouping runs
+    /// server-side on a backend that can (a relational <c>GROUP BY</c>), so the full row set is never
+    /// materialised; only the bounded set of distinct buckets is returned. Implementations call
+    /// <see cref="AuditAggregationQuery.Validate"/> first.
+    /// </summary>
+    /// <param name="query">The filter plus grouping specification.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>One bucket per distinct group key, each with its row count. Empty when nothing matches.</returns>
+    /// <exception cref="NotSupportedException">The backend cannot aggregate.</exception>
+    /// <exception cref="ArgumentException">The query fails <see cref="AuditAggregationQuery.Validate"/>.</exception>
+    Task<IReadOnlyList<AuditAggregateBucket>> AggregateAsync(AuditAggregationQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Compacts the audit history of a single entity: folds rows older than the requested retained
     /// tail into one compacted snapshot row that carries the entity's reconstructed state at the
     /// compaction boundary, removes the folded rows, and leaves the snapshot plus the bounded tail.

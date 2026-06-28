@@ -30,17 +30,163 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
             return AuditHistoryPage.Empty(query.Skip, query.EffectiveTake);
         }
 
-        var ordered = query.Order == AuditHistoryOrder.OldestFirst
-            ? filtered.OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
-            : filtered.OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id);
-
-        var items = await ordered
+        var items = await ApplyOrder(filtered, query)
             .Skip(query.Skip)
             .Take(query.EffectiveTake)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
         return new AuditHistoryPage(items, total, query.Skip, query.EffectiveTake);
+    }
+
+    /// <inheritdoc />
+    public override async Task<IReadOnlyList<AuditAggregateBucket>> AggregateAsync(
+        AuditAggregationQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        query.Validate();
+
+        var filtered = ApplyFilters(context.Set<AuditLog>().AsNoTracking(), query.Filter);
+
+        // Every branch projects to (Key, Count) and runs the count as a server-side GROUP BY, so the
+        // database returns one row per distinct group, never the underlying audit rows. The result set
+        // is bounded by the cardinality of the grouped column (number of actions / entity types /
+        // users / tenants / time buckets), not by the table size.
+        switch (query.GroupBy)
+        {
+            case AuditAggregateBy.Action:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => a.Action)
+                        .Select(g => new { g.Key, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups
+                        .Select(g => new AuditAggregateBucket(g.Key.ToString(), g.Count))
+                        .ToList();
+                }
+            case AuditAggregateBy.EntityType:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => a.EntityType)
+                        .Select(g => new { g.Key, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups.Select(g => new AuditAggregateBucket(g.Key, g.Count)).ToList();
+                }
+            case AuditAggregateBy.UserId:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => a.UserId)
+                        .Select(g => new { g.Key, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups.Select(g => new AuditAggregateBucket(g.Key, g.Count)).ToList();
+                }
+            case AuditAggregateBy.TenantId:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => a.TenantId)
+                        .Select(g => new { g.Key, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups.Select(g => new AuditAggregateBucket(g.Key, g.Count)).ToList();
+                }
+            case AuditAggregateBy.TimeBucket:
+                return await AggregateByTimeBucketAsync(filtered, query.TimeBucket, cancellationToken)
+                    .ConfigureAwait(false);
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(query), query.GroupBy, "Unknown audit aggregation group.");
+        }
+    }
+
+    // Time bucketing groups by the year/month (and, below month, day/hour) components of
+    // OccurredOnUtc. Pulling the components into the GROUP BY (rather than a provider-specific date
+    // function such as date_trunc) keeps the query translatable across SQLite / SQL Server /
+    // PostgreSQL / MySQL. The grouped result is bounded by the number of distinct buckets, so this
+    // never materialises the row set; the bucket-start instant is reassembled from the components.
+    private static async Task<IReadOnlyList<AuditAggregateBucket>> AggregateByTimeBucketAsync(
+        IQueryable<AuditLog> filtered, AuditTimeBucket bucket, CancellationToken cancellationToken)
+    {
+        switch (bucket)
+        {
+            case AuditTimeBucket.Month:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => new { a.OccurredOnUtc.Year, a.OccurredOnUtc.Month })
+                        .Select(g => new { g.Key.Year, g.Key.Month, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups
+                        .Select(g => MakeTimeBucket(new DateTime(g.Year, g.Month, 1, 0, 0, 0, DateTimeKind.Utc), g.Count))
+                        .ToList();
+                }
+            case AuditTimeBucket.Hour:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => new { a.OccurredOnUtc.Year, a.OccurredOnUtc.Month, a.OccurredOnUtc.Day, a.OccurredOnUtc.Hour })
+                        .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups
+                        .Select(g => MakeTimeBucket(new DateTime(g.Year, g.Month, g.Day, g.Hour, 0, 0, DateTimeKind.Utc), g.Count))
+                        .ToList();
+                }
+            case AuditTimeBucket.Day:
+            default:
+                {
+                    var groups = await filtered
+                        .GroupBy(a => new { a.OccurredOnUtc.Year, a.OccurredOnUtc.Month, a.OccurredOnUtc.Day })
+                        .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Day, Count = (long)g.Count() })
+                        .ToListAsync(cancellationToken)
+                        .ConfigureAwait(false);
+                    return groups
+                        .Select(g => MakeTimeBucket(new DateTime(g.Year, g.Month, g.Day, 0, 0, 0, DateTimeKind.Utc), g.Count))
+                        .ToList();
+                }
+        }
+    }
+
+    private static AuditAggregateBucket MakeTimeBucket(DateTime startUtc, long count)
+        => new(startUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture), count)
+        {
+            BucketStartUtc = startUtc,
+        };
+
+    private static IOrderedQueryable<AuditLog> ApplyOrder(IQueryable<AuditLog> source, AuditHistoryQuery query)
+    {
+        var descending = query.Order == AuditHistoryOrder.NewestFirst;
+
+        // The chosen field is the primary sort; OccurredOnUtc then Id are always appended as stable
+        // tie-breaks so paging is deterministic. For the default OccurredOn field this collapses to the
+        // pre-v0.11 "(OccurredOnUtc, Id)" ordering exactly.
+        IOrderedQueryable<AuditLog> ordered = query.SortBy switch
+        {
+            AuditHistorySortField.EntityType => descending
+                ? source.OrderByDescending(a => a.EntityType)
+                : source.OrderBy(a => a.EntityType),
+            AuditHistorySortField.Action => descending
+                ? source.OrderByDescending(a => a.Action)
+                : source.OrderBy(a => a.Action),
+            AuditHistorySortField.UserId => descending
+                ? source.OrderByDescending(a => a.UserId)
+                : source.OrderBy(a => a.UserId),
+            _ => descending
+                ? source.OrderByDescending(a => a.OccurredOnUtc)
+                : source.OrderBy(a => a.OccurredOnUtc),
+        };
+
+        if (query.SortBy != AuditHistorySortField.OccurredOn)
+        {
+            ordered = descending
+                ? ordered.ThenByDescending(a => a.OccurredOnUtc)
+                : ordered.ThenBy(a => a.OccurredOnUtc);
+        }
+
+        return descending
+            ? ordered.ThenByDescending(a => a.Id)
+            : ordered.ThenBy(a => a.Id);
     }
 
     /// <inheritdoc />
@@ -122,6 +268,34 @@ public sealed class EfCoreAuditHistoryStore : AuditHistoryStoreBase
         if (query.ToUtc is { } toUtc)
         {
             source = source.Where(a => a.OccurredOnUtc <= toUtc);
+        }
+        // v0.11.0 richer filters. Set membership translates to a server-side IN (...); the lists are
+        // materialised first so EF emits a parameterised IN rather than re-evaluating the property.
+        if (query.HasEntityTypesFilter)
+        {
+            var entityTypes = query.EntityTypes!.ToList();
+            source = source.Where(a => entityTypes.Contains(a.EntityType));
+        }
+        if (query.HasActionsFilter)
+        {
+            var actions = query.Actions!.ToList();
+            source = source.Where(a => actions.Contains(a.Action));
+        }
+        if (query.CorrelationId is { } correlationId)
+        {
+            source = source.Where(a => a.CorrelationId == correlationId);
+        }
+        if (query.UserType is { } userType)
+        {
+            source = source.Where(a => a.UserType == userType);
+        }
+        // Value-change predicate: keep rows whose Diff JSON references the requested path either
+        // exactly ("path":"/p") or as the parent of a nested change ("path":"/p/..."). Both tokens are
+        // closed (by a quote or a slash), so a sibling whose name merely starts with the same text does
+        // not match. EF translates Contains to a relational LIKE '%token%', evaluated server-side.
+        if (query.ChangedPathExactToken is { } exact && query.ChangedPathPrefixToken is { } prefix)
+        {
+            source = source.Where(a => a.Diff.Contains(exact) || a.Diff.Contains(prefix));
         }
         return source;
     }
