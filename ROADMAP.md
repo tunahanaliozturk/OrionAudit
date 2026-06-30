@@ -4,15 +4,17 @@ This document lists what's shipped, what's actively planned, and what we're deli
 building. It's a planning artifact, not a contract — dates slip, priorities reshuffle. If
 something here matters to you, open a GitHub issue so we can weigh it against everything else.
 
-**Current version: 0.11.0** (shipped 2026-06-28). Queryable audit-history read API and snapshot
+**Current version: 0.11.1** (shipped 2026-07-01). Queryable audit-history read API and snapshot
 compaction landed in 0.8.0; 0.8.1 removed a redundant deep-equals pass from the JSON Patch diff
 hot path; 0.9.0 added opt-in tamper-evident hash-chaining (a keyed-MAC per-row chain with a
 per-stream anchor, plus an `IAuditIntegrityVerifier`); 0.10.0 added a background compaction
 hosted service and NDJSON audit-history export/streaming; 0.11.0 added richer query filters
 (set / correlation / user-type / value-change-path filters and `SortBy` ordering) plus
-read-side aggregations on `IAuditHistoryStore`. Next up is cold-store archival of the audit log
-itself (deferred from 0.10.0), separate-database audit storage and the CLI diff renderer
-(both deferred from 0.11.0) on the way to the 1.0.0 API freeze.
+read-side aggregations on `IAuditHistoryStore`; 0.11.1 converged the fault-safe observer
+invocation onto the shared `Orion.Abstractions` `SafeObserverInvoker` (a no-API/no-behavior-change
+pilot; the instrumentation re-base was evaluated and deferred). Next up is cold-store archival of
+the audit log itself (deferred from 0.10.0), separate-database audit storage and the CLI diff
+renderer (both deferred from 0.11.0) on the way to the 1.0.0 API freeze.
 
 ## Status legend
 
@@ -404,6 +406,28 @@ retargeted to a later milestone (still planned).
   `AuditLog.Id` (or stdin JSON) and pretty-prints the patch with red/green inline rendering for CI
   log inspection and ops scripting. Deferred out of 0.11.0 because it requires a new `dotnet tool`
   package.
+
+---
+
+## v0.11.1 - Orion.Abstractions convergence (pilot) *(shipped 2026-07-01)*
+
+Theme: *one shared copy of the family primitives instead of bespoke ones.*
+
+A convergence pilot: take an internal-use dependency on the shared `Orion.Abstractions` family
+package and re-use its primitives, validating the convergence pattern with **zero public-API change
+and zero behavior change**. No instrument / span name moved; the full test suite passes unchanged.
+
+- **Observer-invocation convergence onto `SafeObserverInvoker`.** *(shipped in 0.11.1)* The
+  interceptor's fault-safe `IAuditCaptureObserver.OnCaptured(...)` call now runs through
+  `SafeObserverInvoker.Resolve` from `Orion.Abstractions` rather than a private try/catch - the exact
+  shared primitive the OrionAudit v0.7.26 fix (resolve inside the swallow guard) was generalised into.
+  Same fault-swallowing, same null / `NullAuditCaptureObserver` no-op handling; the public
+  `IAuditCaptureObserver` interface is untouched.
+- **Instrumentation re-base onto `OrionInstrumentation`.** *(evaluated — deferred)* Re-basing the
+  `static` `OrionAuditTelemetry` onto the `abstract` `OrionInstrumentation` would force a derived
+  singleton and add an unused static-tag surface for no preservation upside, so it was deferred. The
+  Meter / ActivitySource names (`OrionAudit`), every instrument name, and the class's public surface
+  are unchanged; a new naming-guard test freezes them so a future re-base must preserve them exactly.
 
 ---
 

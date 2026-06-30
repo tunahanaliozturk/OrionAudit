@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Moongazing.Orion.Abstractions.Observers;
 using Moongazing.OrionAudit.Configuration;
 using Moongazing.OrionAudit.Publishing;
 
@@ -32,27 +33,23 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     // the scoped provider (same pattern as IAuditEventPublisher). null and the Null
     // implementation are both treated as 'no observer'; observer faults are swallowed so
     // an observability outage cannot abort the consumer's transaction.
+    //
+    // v0.11.1 convergence: the fault-safe invocation is now SafeObserverInvoker.Resolve from
+    // Orion.Abstractions - the shared primitive the v0.7.26 fix (resolve INSIDE the swallow
+    // guard, so a registered observer whose constructor / DI dependency throws cannot abort
+    // SaveChangesAsync) was generalised into. The NullAuditCaptureObserver short-circuit is
+    // mapped into the resolve factory (return null for 'no observer'), so the behavior is
+    // identical: null observer and NullAuditCaptureObserver are both no-ops, and every other
+    // fault is swallowed.
     private void NotifyCaptureObserver(int auditedEntityCount, bool isAsyncCapture)
     {
-        try
-        {
-            // v0.7.26 fix (codex P2): resolve INSIDE the swallow guard. A registered
-            // observer whose constructor / DI dependency throws would otherwise abort
-            // SaveChangesAsync at GetService time, before the try - violating the
-            // 'observer faults are swallowed' contract.
-            var observer = serviceProvider.GetService<IAuditCaptureObserver>();
-            if (observer is null or NullAuditCaptureObserver)
+        SafeObserverInvoker.Resolve(
+            resolve: () =>
             {
-                return;
-            }
-            observer.OnCaptured(auditedEntityCount, isAsyncCapture);
-        }
-#pragma warning disable CA1031
-        catch
-#pragma warning restore CA1031
-        {
-            // observer is observability, not load-bearing
-        }
+                var observer = serviceProvider.GetService<IAuditCaptureObserver>();
+                return observer is NullAuditCaptureObserver ? null : observer;
+            },
+            action: observer => observer.OnCaptured(auditedEntityCount, isAsyncCapture));
     }
 
     /// <inheritdoc />
