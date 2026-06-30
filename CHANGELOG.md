@@ -7,6 +7,25 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-07-01
+
+### Changed
+
+#### Convergence onto Orion.Abstractions (pilot)
+
+OrionAudit now takes an internal-use dependency on the shared `Orion.Abstractions` family package (0.3.0) and re-uses its primitives instead of a private copy. This is a convergence pilot: **no public API changes and no behavior changes** - the same fault-swallowing, the same emitted metrics and spans with the same names and tags, the same audit semantics. The full test suite passes unchanged.
+
+- **Observer invocation.** The interceptor's fault-safe invocation of `IAuditCaptureObserver.OnCaptured(...)` now runs through `SafeObserverInvoker.Resolve` from `Orion.Abstractions` rather than a bespoke try/catch. This is the exact shared primitive that the v0.7.26 fix (resolve the observer *inside* the swallow guard, so a registered observer whose constructor or DI dependency throws cannot abort `SaveChangesAsync`) was generalised into. Behavior is identical: `null` and `NullAuditCaptureObserver` are both treated as 'no observer', an observer fault is swallowed so an observability outage cannot break the consumer's transaction, and the `IAuditCaptureObserver` public interface is unchanged.
+
+### Deferred
+
+- **Instrumentation re-base.** Re-basing `OrionAuditTelemetry` onto `OrionInstrumentation` was evaluated and **deferred**. `OrionAuditTelemetry` is a `static` class whose `ActivitySource` / `Meter` / instruments are static field initializers, while `OrionInstrumentation` is an `abstract` instance base; re-basing would force the static class to hold a derived singleton and would add an unused `SetStaticTags` / per-measurement tag surface (OrionAudit emits no static tags today) for the marginal benefit of two `new` calls, with no preservation upside. The Meter name (`OrionAudit`), the ActivitySource name (`OrionAudit`), every instrument name, and the public surface of `OrionAuditTelemetry` are unchanged; the observer convergence alone is the pilot result. A new `OrionAuditTelemetryNamingTests` guard freezes the source / meter / instrument names so any future re-base must preserve them byte-for-byte.
+
+### Tests
+
+- `AuditCaptureObserverFaultSafetyTests` (real interceptor, in-memory provider): a throwing `IAuditCaptureObserver` does not abort the capture or the consumer's `SaveChangesAsync` (the entity is saved and the audit row is written); an observer whose DI resolution throws also does not abort the save; a well-behaved observer still receives the audited-entity count and the inline / async-capture flag; `NullAuditCaptureObserver` and an absent observer are both silent no-ops.
+- `OrionAuditTelemetryNamingTests`: the ActivitySource and Meter names stay `OrionAudit`, and the full set of instruments published under the `OrionAudit` meter matches the frozen expected list - a regression guard locking the observability contract that the deferred instrumentation re-base must preserve.
+
 ## [0.11.0] - 2026-06-28
 
 ### Added
