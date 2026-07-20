@@ -10,6 +10,13 @@
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+    <!--
+      Security pin: GHSA-2m69-gcr7-jv3q (High) in the bundled SQLite native library.
+      Microsoft.EntityFrameworkCore.Sqlite resolves SQLitePCLRaw 2.1.10 transitively; this
+      lifts the whole bundle to the patched 2.1.12. Drop this line once the EF Core reference
+      resolves 2.1.12 on its own.
+    -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

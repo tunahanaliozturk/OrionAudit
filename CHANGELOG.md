@@ -7,6 +7,14 @@ All notable changes to OrionAudit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Pinned `SQLitePCLRaw.bundle_e_sqlite3` to 2.1.12** to clear [GHSA-2m69-gcr7-jv3q](https://github.com/advisories/GHSA-2m69-gcr7-jv3q) (High), a vulnerability in the bundled SQLite native library. `Microsoft.EntityFrameworkCore.Sqlite` 9.0.0 resolved `SQLitePCLRaw.lib.e_sqlite3` 2.1.10 transitively via `Microsoft.Data.Sqlite` -> `SQLitePCLRaw.bundle_e_sqlite3`; pinning the bundle lifts `core`, `lib.e_sqlite3`, and `provider.e_sqlite3` together to the patched 2.1.12.
+
+  **No shipped package is affected, and no released version of OrionAudit needs to be upgraded.** The vulnerable native library reached only test and sample projects - `Moongazing.OrionAudit.Tests`, `Moongazing.OrionAudit.IntegrationTests`, `Moongazing.OrionAudit.Viewer.Tests`, and `Moongazing.OrionAudit.Sample.Console` - none of which are packable or published. No `src/` package referenced it, directly or transitively, so nothing consumers download from NuGet ever carried the vulnerable binary. The pin is a build-hygiene fix that keeps the repository's vulnerability scan clean; it can be dropped once the EF Core reference resolves 2.1.12 on its own.
+
 ## [0.11.1] - 2026-07-01
 
 ### Changed
