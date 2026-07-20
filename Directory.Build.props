@@ -7,11 +7,24 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!--
+      NU1900 (transient: advisory feed unreachable) stays suppressed; CS1591 is missing-XML-doc.
+      NU1901-1904 (package vulnerability advisories) are deliberately NOT suppressed so a new
+      advisory surfaces in every restore/build. NuGetAuditMode=all audits the whole transitive
+      graph, not just direct references (the default). They are downgraded to warnings via
+      WarningsNotAsErrors so a newly-disclosed upstream CVE surfaces loudly without turning the
+      whole family's CI red on an external event with no code change - remove that line to make
+      advisories hard build errors instead. These live in the unconditional group so test
+      projects (IsPackable=false) audit the full graph too; NoWarn (CS1591;NU1900) stays with
+      the packable group because CS1591 only fires when GenerateDocumentationFile is set.
+    -->
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>CS1591;NU1900;NU1901;NU1902;NU1903;NU1904</NoWarn>
+    <NoWarn>CS1591;NU1900</NoWarn>
     <Authors>Tunahan Ali Ozturk</Authors>
     <Company>Tunahan Ali Ozturk</Company>
     <RepositoryUrl>https://github.com/tunahanaliozturk/OrionAudit</RepositoryUrl>
