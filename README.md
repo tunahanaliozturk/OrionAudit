@@ -19,8 +19,8 @@
 
 ---
 
-> **v0.9.0 is here — tamper-evident hash-chaining.** Opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable — and unforgeable without the MAC key, which lives outside the audit database. A per-stream anchor makes concurrent same-stream writes safe and truncation visible. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive: rows written before you enabled it verify as an unchained prefix, and capture, diffs, compaction, and the read APIs are unchanged. On top of v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
-> [See the v0.9.0 changelog](CHANGELOG.md#090---2026-06-22) and [what's next](ROADMAP.md).
+> **Current release: v0.11.3.** Recent milestones: v0.11.0 richer history filters + aggregations, v0.10.0 background compaction + history export, and v0.9.0 tamper-evident hash-chaining — opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable and unforgeable without the MAC key, which lives outside the audit database. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive. Earlier: v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> [See the changelog](CHANGELOG.md) and [what's next](ROADMAP.md).
 
 ---
 
@@ -136,6 +136,7 @@ same transaction.
 | ------------------------ | ---------------------------------------------- | -------------------------------------------------- |
 | `OrionAudit`             | `dotnet add package OrionAudit`                | Core library — interceptor, diff, reconstruction   |
 | `OrionAudit.AspNetCore`  | `dotnet add package OrionAudit.AspNetCore`     | `HttpContextAuditUserResolver` + DI helpers        |
+| `OrionAudit.MySql`       | `dotnet add package OrionAudit.MySql`          | MySQL / MariaDB provider (`ApplyOrionAuditMySqlConfigurations`, JSON/LONGTEXT columns) |
 | `OrionAudit.Viewer`      | `dotnet add package OrionAudit.Viewer`         | Embedded read-only audit-trail UI (`MapOrionAuditViewer`) |
 | `OrionAudit.Testing`     | `dotnet add package OrionAudit.Testing`        | `AuditCapture` + fluent assertions, framework-free |
 
@@ -635,7 +636,7 @@ you can scan the output instead of reading source.
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027): v0.8.0 queryable history + compaction, v0.9.0 tamper-evident hash chain, then audit-log lifecycle + export, richer queries + separate store, AOT polish, and the API freeze.
+- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027). Shipped since v0.9.0: v0.10.0 background compaction + history export, v0.11.0 richer history filters + aggregations. Still ahead: a separate audit store, AOT polish, and the API freeze.
 - [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)
