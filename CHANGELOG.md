@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-07-28
+
+### Fixed
+
+- **`OrionAudit.MySql` now ships its package icon and README.** The sub-package was missing the
+  `PackageIcon` / `PackageReadmeFile` metadata (and had no `docs/` folder), so it displayed the
+  blank NuGet placeholder while every other OrionAudit package carried the family logo. Added the
+  logo, a package README, and the pack wiring to match `OrionAudit.AspNetCore`.
+- **Re-delivers the sub-package icon fix that the `v0.11.2` tag never published.** `v0.11.2` was
+  tagged and released on GitHub but `<Version>` was left at `0.11.1`, so `dotnet nuget push
+  --skip-duplicate` treated every package as an already-published duplicate and shipped nothing.
+  NuGet's latest stayed `0.11.1`. Bumping to `0.11.3` publishes a genuinely new version so the
+  icon/README changes actually reach consumers.
+
+### Changed
+
+- **Converged onto the frozen `Orion.Abstractions` 1.0 spine.** Lifted the internal
+  `Orion.Abstractions` reference from the pre-freeze `0.3.0` to `1.0.0`. It remains a dependency
+  only — no OrionAudit public type exposes an `Orion.Abstractions` type — so this is transparent to
+  consumers, and it stops the shipped package from pinning siblings to an unfrozen pre-release of
+  the spine.
+
 ### Security
 
 - **Pinned `SQLitePCLRaw.bundle_e_sqlite3` to 2.1.12** to clear [GHSA-2m69-gcr7-jv3q](https://github.com/advisories/GHSA-2m69-gcr7-jv3q) (High), a vulnerability in the bundled SQLite native library. `Microsoft.EntityFrameworkCore.Sqlite` 9.0.0 resolved `SQLitePCLRaw.lib.e_sqlite3` 2.1.10 transitively via `Microsoft.Data.Sqlite` -> `SQLitePCLRaw.bundle_e_sqlite3`; pinning the bundle lifts `core`, `lib.e_sqlite3`, and `provider.e_sqlite3` together to the patched 2.1.12.

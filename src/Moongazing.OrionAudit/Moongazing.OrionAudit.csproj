@@ -13,7 +13,7 @@
       fault-safe IAuditCaptureObserver invocation (replacing the bespoke try/catch). Internal-use
       dependency only - no OrionAudit public type exposes an Orion.Abstractions type.
     -->
-    <PackageReference Include="Orion.Abstractions" Version="0.3.0" />
+    <PackageReference Include="Orion.Abstractions" Version="1.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
