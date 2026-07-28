@@ -636,7 +636,7 @@ you can scan the output instead of reading source.
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027). Shipped since v0.9.0: v0.10.0 background compaction + history export, v0.11.0 richer history filters + aggregations. Still ahead: richer queries + separate store, AOT polish, and the API freeze.
+- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027). Shipped since v0.9.0: v0.10.0 background compaction + history export, v0.11.0 richer history filters + aggregations. Still ahead: a separate audit store, AOT polish, and the API freeze.
 - [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)
