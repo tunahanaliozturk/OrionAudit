@@ -3,6 +3,8 @@
     <PackageId>OrionAudit.MySql</PackageId>
     <Description>MySQL / MariaDB provider integration for OrionAudit. Adds a ModelBuilder extension that applies the OrionAudit entity configurations with MySQL-aware column types (JSON or LONGTEXT for the diff/snapshot payloads).</Description>
     <PackageTags>audit;audit-trail;efcore;mysql;mariadb;json;pomelo</PackageTags>
+    <PackageReadmeFile>docs/README.md</PackageReadmeFile>
+    <PackageIcon>docs/logo.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,5 +13,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
+    <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
   </ItemGroup>
 </Project>
