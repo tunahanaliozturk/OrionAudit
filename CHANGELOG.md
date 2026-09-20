@@ -261,7 +261,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ArgumentException` with an opaque message and dropped every file the run had already produced.
   Nested modules (which took only their namespace) and `Module` vs `Module<T>` collided the same
   way. The hint now comes from the type's full metadata name — namespace, every enclosing type,
-  generic arity — through an injective escape, in a new `HintNames` helper that mirrors OrionGuard's.
+  generic arity — through an injective escape, in a new `HintNames` helper. Every `_` in the stem
+  starts a self-delimiting escape: `__` is a literal underscore, `_n` nesting, `_g` generic arity,
+  and `_u` plus four hex digits is any other character *by value*. Encoding the value is what makes
+  it injective — a C# identifier may legitimately contain a combining mark or connector
+  punctuation, so a single shared marker for every non-alphanumeric character maps two valid,
+  distinct modules back onto one stem.
 - **An `[Auditable]` type the generator cannot register is now reported, not dropped in silence.**
   A type whose accessibility chain was not public/internal, and an abstract one, were filtered out
   of the pipeline with nothing said: the consumer believed the type was audited and could only find

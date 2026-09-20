@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.CodeAnalysis;
 
@@ -13,9 +14,19 @@ internal static class HintNames
     /// dropping every file it had already produced. A stem built by replacing '.' with '_' collided
     /// as soon as one name contained an underscore or a nesting level was left out: namespace
     /// <c>A.B</c> + type <c>C_D</c> and namespace <c>A.B.C</c> + type <c>D</c> both became
-    /// <c>A_B_C_D</c>. Dots are kept; every other character that is not a letter or digit gets an
-    /// escape of its own, so two different metadata names can never produce the same stem. Mirrors
-    /// <c>Moongazing.OrionGuard.Generators.HintNames</c> so the family stays consistent.
+    /// <c>A_B_C_D</c>.
+    /// <para>
+    /// The escape is injective, so two different metadata names cannot produce the same stem. Every
+    /// <c>_</c> in the output starts an escape and each one is self-delimiting: <c>__</c> is a
+    /// literal underscore, <c>_n</c> nesting, <c>_g</c> generic arity, and <c>_u</c> followed by
+    /// exactly four hex digits is any other character, by value. Encoding the value matters — a C#
+    /// identifier may legitimately contain a combining mark or connector punctuation, and one
+    /// shared marker for all of them maps two valid, distinct types onto one stem.
+    /// </para>
+    /// <para>
+    /// Derived from <c>Moongazing.OrionGuard.Generators.HintNames</c>. That copy still uses a shared
+    /// marker for the fallback and has this collision; fixing it there is a separate change.
+    /// </para>
     /// </summary>
     public static string ForType(INamedTypeSymbol type)
     {
@@ -48,7 +59,18 @@ internal static class HintNames
                     sb.Append("_g");   // generic arity
                     break;
                 default:
-                    sb.Append(char.IsLetterOrDigit(c) ? c.ToString() : "_x");
+                    if (char.IsLetterOrDigit(c))
+                    {
+                        sb.Append(c);
+                    }
+                    else
+                    {
+                        // The character's own value, not a shared marker. A C# identifier may
+                        // legitimately contain a combining mark or connector punctuation, and one
+                        // marker for all of them collides two valid modules back together.
+                        sb.Append("_u").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+                    }
+
                     break;
             }
         }

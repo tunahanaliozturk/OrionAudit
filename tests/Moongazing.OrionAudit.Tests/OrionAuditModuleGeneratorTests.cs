@@ -305,6 +305,36 @@ public class OrionAuditModuleGeneratorTests
     }
 
     [Theory]
+    // A combining mark is a legal C# identifier-part character and is not a letter or a digit, so
+    // a fallback that maps every such character to one shared marker collides on these two.
+    // (Formatting characters such as ZWNJ/ZWJ are not a case: C# strips them, so identifiers that
+    // differ only there are the same identifier and cannot both be declared.)
+    [InlineData("À", "Á")]   // A + combining grave vs A + combining acute (Mn)
+    [InlineData("C‿", "C⁀")]   // C + undertie vs C + character tie (Pc)
+    public void ModulesDifferingOnlyByANonAlphanumericChar_NeverShareAHintName(string first, string second)
+    {
+        var source = $$"""
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            [OrionAuditModule]
+            public partial class {{first}} { }
+
+            [OrionAuditModule]
+            public partial class {{second}} { }
+            """;
+
+        var run = RunAndAssertConsumerCompiles(source);
+        var result = Assert.Single(run.Results);
+
+        Assert.Equal(2, result.GeneratedSources.Length);
+        Assert.Equal(
+            2,
+            result.GeneratedSources.Select(s => s.HintName).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Theory]
     // The constraint type is only in scope through a using directive of the consumer's file...
     [InlineData("using Contracts;", "IMarker")]
     // ...or only through an alias, which does not exist anywhere else in the compilation.
