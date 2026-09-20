@@ -59,13 +59,28 @@ public static class AuditQueryExtensions
         {
             return query;
         }
-        var appServiceProvider = context.GetService<IDbContextOptions>()
-            .FindExtension<CoreOptionsExtension>()?
-            .ApplicationServiceProvider;
+        // Same trap as capture, on the read side: ApplicationServiceProvider is whatever
+        // UseOrionAudit(sp) was handed, which under AddDbContextPool / AddDbContextFactory is the
+        // ROOT provider - so a scoped IAuditTenantResolver pulled out of it answers with the first
+        // request's tenant and this filter would show one tenant another tenant's history. The
+        // ambient scope wins here for the same reason it wins in the interceptor.
+        var appServiceProvider = AuditScope.CurrentServices
+            ?? context.GetService<IDbContextOptions>()
+                .FindExtension<CoreOptionsExtension>()?
+                .ApplicationServiceProvider;
         if (appServiceProvider is null)
         {
+            // No provider to ask - a context built outside DI. There is no resolver to answer
+            // stalely either, so there is nothing to scope to and nothing to refuse.
             return query;
         }
+        // Before trusting that provider to name a tenant, the same check capture makes before
+        // trusting it to name an actor. Without it a pooled registration with scope validation off
+        // filtered by a root-cached tenant and returned ANOTHER tenant's history - the same defect
+        // as the mis-attributed write, on the path where the consequence is a cross-tenant read.
+        // It sits here, in the one place every tenant-scoped read funnels through, rather than at
+        // AuditFor/AuditLog: anything routed through this helper later inherits the refusal.
+        PooledAttributionGuard.Verify(context, appServiceProvider);
         var resolver = appServiceProvider.GetService<IAuditTenantResolver>();
         if (resolver is null)
         {

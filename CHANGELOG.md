@@ -33,6 +33,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, restored deliberately — use it only if every authenticated user really is entitled to
   the audit trail), or `o.AllowAnonymous()` (unchanged; local development only). Registrations
   that already named a policy or called `AllowAnonymous()` are unaffected.
+
+### Fixed
+
+- **Pooled and factory-registered contexts no longer attribute every audit row to the first
+  request's user.** `UseOrionAudit(sp)` captures whatever provider EF Core hands the options lambda.
+  With `AddDbContext<T>((sp, o) => ...)` that lambda runs once per scope, so `sp` *is* the request
+  scope and attribution was always correct. With `AddDbContextPool` — and with `AddDbContextFactory`,
+  whose `lifetime` argument defaults to `Singleton` — EF Core registers `DbContextOptions` as a
+  singleton, so the lambda runs once from the **root** provider and the interceptor held that root
+  provider forever: a scoped `IAuditUserResolver` / `IAuditTenantResolver` pulled out of it was the
+  first request's instance on every later save. Three requests as alice / bob / carol all recorded
+  `UserId=alice`, with the diffs correctly distinct — and the same wiring under `ValidateScopes`
+  threw `InvalidOperationException` instead, so it failed loudly in Development and misattributed
+  silently in Production. Tenant stamping was wrong the same way, on the read side too: the
+  `AuditFor<T>()` tenant filter resolves through the same captured provider, so one tenant could be
+  shown another tenant's history — with scope validation off, a caller whose own tenant was `t-2`
+  got back `t-1`'s rows and none of its own.
+  Capture now prefers an **ambient request scope** over the captured provider, on both the write and
+  read paths: `AuditScope.PushServices(sp)` flows the real scope on `AsyncLocal` (the same primitive
+  the correlation-id scope already used), which fixes pooling, both factory registrations, and
+  background/console runners that own their scope. A pooled context is the one wiring where the
+  request scope is provably unreachable — the lease carries no provider and the context's own
+  `ApplicationServiceProvider` is the root one we already have — so when a resolver is registered and
+  no scope was pushed, the first audited save now throws `OrionAuditConfigurationException` naming
+  the three ways out, instead of writing a trail that looks healthy and names the wrong person.
+  **The read path makes the same refusal from the same code**: the check lives in one internal
+  `PooledAttributionGuard` that both the interceptor and the tenant filter call, so a pooled
+  registration cannot mean one thing to a write and another to a read — which is exactly how the
+  read side kept the hole after the write side closed it. The guard sits inside the single helper
+  every tenant-scoped read funnels through, so anything routed through it later inherits the
+  refusal. `crossTenant: true` is an explicit opt-out of tenant scoping and is unaffected, as is a
+  single-tenant app with no resolver registered.
+  `AddDbContext` is unchanged and unaffected. Non-pooled `AddDbContextFactory` cannot be detected the
+  same way (Microsoft DI hands out the same scope type for the root container and every child scope,
+  and `IsRootScope` is internal), so it is covered by `AuditScope.PushServices`, the documentation,
+  and `ValidateScopes`.
+- **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
+  races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
+  100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while
+  `dotnet test` ran nothing; with the suites actually running it fails under load. It now drives
+  the interceptor's existing `TimeProvider` seam, so it is deterministic and no longer sleeps.
+  Test-only; the snapshot policy itself was correct and is unchanged.
+- **Synchronous `SaveChanges()` is audited again.** `AuditSaveChangesInterceptor` implemented only
+  `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
+  audit rows — silently, with no error raised. The capture pipeline is now a single private
+  `CaptureAsync` shared by both entry points, with `SavingChanges` added as a thin sync wrapper, so
+  the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
+  chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
+  rather than duplicated; with neither wired the pipeline completes synchronously and the sync
+  override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
+  duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
+  otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
+  ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
+- **Capture works under `UseLazyLoadingProxies()`.** Capture resolved the audited entity's CLR type
+  with `entry.Entity.GetType()`, which under lazy-loading (or change-tracking) proxies is the Castle
+  subclass — `OrderProxy`, not `Order` — and is not the key anything is registered under. Every
+  lookup missed: `IsAudited` returned false so entities loaded from the database produced no audit
+  rows at all, and where a row was produced its field rules resolved to nothing, so
+  `[RedactedAudit]` properties were persisted **in plaintext**. All three lookups now go through a
+  single `ResolveClrType` helper backed by `entry.Metadata.ClrType`, which is the declared type
+  whether or not proxies are in play.
+- **OrionAudit's own entity types are no longer `sealed`.** EF Core's proxy plugin rejects *every*
+  sealed entity type in the model, so mapping `AuditLog`, `SnapshotCursor`,
+  `AuditCaptureQueueEntry`, or `AuditChainAnchor` made `UseLazyLoadingProxies()` throw at model
+  build. Unsealing them is source- and binary-compatible for consumers.
+- **`CorrelationId` records the caller's trace, not OrionAudit's own span.** The ambient
+  `Activity.Current` was read *after* the interceptor had already started its `OrionAudit.Capture`
+  span, so every row was stamped with OrionAudit's internal span id and could not be joined back to
+  the request that produced it. The read now happens before any OrionAudit span is started. Nothing
+  changes when no tracing listener is attached (`StartActivity` returns null and there was no span
+  to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
+  failed intermittently — whenever a listener happened to be live in parallel.
+### Security
+
 - **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
   concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
   write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
