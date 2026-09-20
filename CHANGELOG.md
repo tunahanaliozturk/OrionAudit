@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **BREAKING — `MapOrionAuditViewer` no longer defaults to "any authenticated user".** A
+  registration that stated no access decision fell through to a bare `RequireAuthorization()`, so
+  every logged-in account — every customer, every low-privilege internal user — could read the
+  complete change history of every audited entity, other users' actions included, and see values
+  that the redaction feature exists to keep out of reach. The README steered consumers to a named
+  policy, but the safe configuration was the opt-in one: skip that paragraph and you shipped your
+  audit log to your whole user base with nothing saying so. The viewer now refuses to register
+  until the decision is explicit, and throws `InvalidOperationException` at startup naming the
+  calls that satisfy it.
+
+  **You will hit this as a startup failure on the first run after upgrading.** The one-line fix,
+  at the `MapOrionAuditViewer` call site:
+
+  ```csharp
+  app.MapOrionAuditViewer<AppDbContext>("/audit", o => o.RequireAuthorization("AuditViewers"));
+  ```
+
+  Any of these also satisfies it: `o.RequireAuthorization(p => p.RequireRole("Auditor"))` (new
+  inline-policy overload), `o.RequireAuthorization(p => p.RequireAuthenticatedUser())` (the former
+  default, restored deliberately — use it only if every authenticated user really is entitled to
+  the audit trail), or `o.AllowAnonymous()` (unchanged; local development only). Registrations
+  that already named a policy or called `AllowAnonymous()` are unaffected.
+
 ### Fixed
 
 - **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer

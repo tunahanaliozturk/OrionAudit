@@ -377,8 +377,19 @@ app.MapOrionAuditViewer<AppDbContext>("/audit", o => o.RequireAuthorization("Aud
 
 That single registration mounts a JSON API (`GET /audit/api/log`, `/audit/api/{type}/{key}`,
 `/audit/api/meta`) plus a built-in vanilla-JS single-page UI served from `/audit`. No Blazor
-dependency, no build step — drops into any ASP.NET Core host. Authorization is required by
-default; an explicit `AllowAnonymous()` opts out (dev use only).
+dependency, no build step — drops into any ASP.NET Core host.
+
+**The access decision is mandatory.** The viewer exposes every recorded change of every audited
+entity — other users' actions included, and values that redaction exists to protect — so it will
+not mount on an implicit "any authenticated user" rule. `MapOrionAuditViewer` throws
+`InvalidOperationException` at startup unless the registration states one of:
+
+| Call                                                     | Who gets in                                         |
+| -------------------------------------------------------- | --------------------------------------------------- |
+| `o.RequireAuthorization("AuditViewers")`                   | a policy you registered with `AddAuthorization`      |
+| `o.RequireAuthorization(p => p.RequireRole("Auditor"))`    | an inline policy                                     |
+| `o.RequireAuthorization(p => p.RequireAuthenticatedUser())` | any authenticated user — stated deliberately         |
+| `o.AllowAnonymous()`                                       | everyone; local development only                     |
 
 Tenant filtering is honoured automatically: the API reads through `db.AuditLog()`, which
 applies the registered `IAuditTenantResolver`.

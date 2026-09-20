@@ -9,5 +9,7 @@ build step, drops into any ASP.NET Core host.
 app.MapOrionAuditViewer<AppDbContext>("/audit", o => o.RequireAuthorization("AuditViewers"));
 ```
 
-The viewer is read-only and authorization-required by default. See the OrionAudit
-repository README for the full guide.
+The viewer is read-only, and the access decision is mandatory: `MapOrionAuditViewer` throws at
+startup unless the registration calls `RequireAuthorization(...)` (a named or inline policy) or
+`AllowAnonymous()` (local development only). See the OrionAudit repository README for the full
+guide.
