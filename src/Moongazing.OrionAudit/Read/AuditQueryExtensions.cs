@@ -70,8 +70,17 @@ public static class AuditQueryExtensions
                 .ApplicationServiceProvider;
         if (appServiceProvider is null)
         {
+            // No provider to ask - a context built outside DI. There is no resolver to answer
+            // stalely either, so there is nothing to scope to and nothing to refuse.
             return query;
         }
+        // Before trusting that provider to name a tenant, the same check capture makes before
+        // trusting it to name an actor. Without it a pooled registration with scope validation off
+        // filtered by a root-cached tenant and returned ANOTHER tenant's history - the same defect
+        // as the mis-attributed write, on the path where the consequence is a cross-tenant read.
+        // It sits here, in the one place every tenant-scoped read funnels through, rather than at
+        // AuditFor/AuditLog: anything routed through this helper later inherits the refusal.
+        PooledAttributionGuard.Verify(context, appServiceProvider);
         var resolver = appServiceProvider.GetService<IAuditTenantResolver>();
         if (resolver is null)
         {

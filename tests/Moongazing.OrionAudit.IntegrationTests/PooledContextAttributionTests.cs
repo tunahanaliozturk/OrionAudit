@@ -270,6 +270,122 @@ public class PooledContextAttributionTests : IAsyncLifetime
         AssertOneRowPerActor(await readCtx.AuditLogs.ToListAsync());
     }
 
+    // Writes two tenants' rows correctly (each request pushes its scope), so the only thing left to
+    // get wrong is the read.
+    private static async Task SeedTwoTenantsAsync(ServiceProvider provider)
+    {
+        foreach (var (user, tenant) in new[] { ("alice", "t-1"), ("bob", "t-2") })
+        {
+            await using var scope = provider.CreateAsyncScope();
+            using (AuditScope.PushServices(scope.ServiceProvider))
+            {
+                var principal = scope.ServiceProvider.GetRequiredService<CurrentPrincipal>();
+                principal.UserId = user;
+                principal.TenantId = tenant;
+
+                var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+                ctx.Notes.Add(new Note { Text = $"note by {user}" });
+                await ctx.SaveChangesAsync();
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PooledContext_ReadingWithoutAmbientRequestScope_RefusesInsteadOfFilteringByAStaleTenant(bool validateScopes)
+    {
+        var services = BaseServices(withResolvers: true);
+        services.AddDbContextPool<TestContext>((sp, o) =>
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        await using var provider = Build(services, validateScopes);
+        await CreateSchemaAsync(provider);
+        await SeedTwoTenantsAsync(provider);
+
+        // A read that forgot to push the scope. The tenant filter would resolve IAuditTenantResolver
+        // from the ROOT provider — the same hole the write path refuses — so it refuses too, with
+        // the same message, rather than scope the query by whatever tenant the root-cached resolver
+        // happens to hold.
+        await using var scope = provider.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+
+        var ex = Assert.Throws<OrionAuditConfigurationException>(() => ctx.AuditLog());
+        Assert.Contains("AddDbContextPool", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("AuditScope.PushServices", ex.Message, StringComparison.Ordinal);
+        Assert.Throws<OrionAuditConfigurationException>(() => ctx.AuditFor<Note>());
+
+        // crossTenant is an explicit opt-out of tenant scoping, so there is no stale tenant to
+        // refuse over and the operator-style read still works.
+        Assert.Equal(2, await ctx.AuditLog(crossTenant: true).CountAsync());
+    }
+
+    [Fact]
+    public async Task PooledContext_ReadingWithScopeValidationOff_RefusesInsteadOfReturningAnotherTenantsRows()
+    {
+        var services = BaseServices(withResolvers: true);
+        services.AddDbContextPool<TestContext>((sp, o) =>
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        await using var provider = Build(services, validateScopes: false);
+        await CreateSchemaAsync(provider);
+        await SeedTwoTenantsAsync(provider);
+
+        // The root provider caches one CurrentPrincipal for the life of the process, and with scope
+        // validation off nothing objects to the tenant resolver being built from it. Prime it the
+        // way the first caller that reached the root provider would.
+        provider.GetRequiredService<CurrentPrincipal>().TenantId = "t-1";
+
+        await using var scope = provider.CreateAsyncScope();
+        scope.ServiceProvider.GetRequiredService<CurrentPrincipal>().TenantId = "t-2";
+        var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+
+        // Before the fix this handed a t-2 caller t-1's row: a cross-tenant read, silently, in
+        // exactly the configuration Production runs.
+        Assert.Throws<OrionAuditConfigurationException>(() => ctx.AuditLog());
+    }
+
+    [Fact]
+    public async Task PooledContext_ReadingWithAmbientRequestScope_ScopesToTheCallersOwnTenant()
+    {
+        var services = BaseServices(withResolvers: true);
+        services.AddDbContextPool<TestContext>((sp, o) =>
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        await using var provider = Build(services);
+        await CreateSchemaAsync(provider);
+        await SeedTwoTenantsAsync(provider);
+
+        await using var scope = provider.CreateAsyncScope();
+        using (AuditScope.PushServices(scope.ServiceProvider))
+        {
+            scope.ServiceProvider.GetRequiredService<CurrentPrincipal>().TenantId = "t-2";
+            var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+            var row = Assert.Single(await ctx.AuditLog().ToListAsync());
+            Assert.Equal("t-2", row.TenantId);
+        }
+    }
+
+    [Fact]
+    public async Task PooledContext_ReadingWithNoResolverRegistered_StaysUnfiltered()
+    {
+        // A single-tenant application: nothing is registered to name a tenant, nothing was stamped
+        // with one, and the read must stay unfiltered rather than be refused.
+        var services = BaseServices(withResolvers: false);
+        services.AddDbContextPool<TestContext>((sp, o) =>
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        await using var provider = Build(services);
+        await CreateSchemaAsync(provider);
+
+        await using (var write = provider.CreateAsyncScope())
+        {
+            var ctx = write.ServiceProvider.GetRequiredService<TestContext>();
+            ctx.Notes.Add(new Note { Text = "single tenant" });
+            await ctx.SaveChangesAsync();
+        }
+
+        await using var scope = provider.CreateAsyncScope();
+        var readCtx = scope.ServiceProvider.GetRequiredService<TestContext>();
+        Assert.Single(await readCtx.AuditLog().ToListAsync());
+    }
+
     [Fact]
     public async Task PlainAddDbContext_StillAttributesEachScopeToItsOwnActor()
     {

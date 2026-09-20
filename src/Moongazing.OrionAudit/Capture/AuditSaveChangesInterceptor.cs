@@ -21,10 +21,6 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 {
     private readonly IServiceProvider serviceProvider;
 
-    // Set once the pooled-attribution guard below has cleared this interceptor's DbContext type.
-    // Benign race: the worst a concurrent double-check costs is one extra FindExtension lookup.
-    private volatile bool pooledAttributionChecked;
-
     /// <param name="serviceProvider">
     /// The service provider captured at options-build time by the
     /// <c>(sp, o) =&gt; o.AddInterceptors(new AuditSaveChangesInterceptor(sp))</c> wiring. It is the
@@ -61,84 +57,6 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             },
             action: observer => observer.OnCaptured(auditedEntityCount, isAsyncCapture));
     }
-
-    // Refuses the one wiring that can only ever produce a wrong trail: a POOLED DbContext whose
-    // attribution comes from a registered resolver, with no ambient scope pushed.
-    //
-    // Why a guard and not a fix. With AddDbContextPool / AddPooledDbContextFactory, EF Core
-    // registers DbContextOptions as a SINGLETON, so the (sp, o) lambda - and with it
-    // UseOrionAudit(sp) - runs exactly once, from the root provider. A pooled DbContext is leased
-    // into a scope without EF handing that scope to anything the interceptor can see: the lease
-    // carries no provider, and the context's own CoreOptionsExtension.ApplicationServiceProvider is
-    // the same root one we already captured. So at save time there is literally no way to reach the
-    // request scope unless the caller made it ambient. Silence here is the worst outcome available -
-    // the trail looks healthy and every row names the first request's user - so we refuse instead.
-    //
-    // MaxPoolSize is the positive, public signal EF Core sets for exactly these two registrations
-    // (AddPoolingOptions -> CoreOptionsExtension.WithMaxPoolSize); it is null for AddDbContext. The
-    // root provider itself is NOT detectable: Microsoft DI hands the same ServiceProviderEngineScope
-    // type to root and child scopes alike, and IsRootScope is internal - which is precisely why
-    // ValidateScopes exists, and why AddDbContextFactory's non-pooled default cannot be caught here
-    // (see the README and the UseOrionAudit doc: it needs AuditScope.PushServices too).
-    private void GuardPooledAttribution(DbContext ctx)
-    {
-        if (pooledAttributionChecked)
-        {
-            return;
-        }
-
-        var pooled = ctx.GetService<IDbContextOptions>()
-            .FindExtension<CoreOptionsExtension>()?.MaxPoolSize is not null;
-        if (pooled && HasAttributionResolver(out var inner))
-        {
-            throw inner is null
-                ? new OrionAuditConfigurationException(PooledAttributionMessage)
-                : new OrionAuditConfigurationException(PooledAttributionMessage, inner);
-        }
-
-        pooledAttributionChecked = true;
-    }
-
-    // Is an actor / tenant resolver registered at all? Asked through IServiceProviderIsService so
-    // the common answer costs no instantiation and, on a root provider under ValidateScopes, does
-    // not throw before we can report anything. The resolve-and-catch fallback is for containers
-    // that do not supply it: a scope-validation failure there is itself proof that a scoped
-    // resolver is registered, so it becomes the inner exception of our message rather than the
-    // opaque one the consumer would otherwise see.
-    private bool HasAttributionResolver(out Exception? inner)
-    {
-        inner = null;
-        var isService = serviceProvider.GetService<IServiceProviderIsService>();
-        if (isService is not null)
-        {
-            return isService.IsService(typeof(IAuditUserResolver))
-                || isService.IsService(typeof(IAuditTenantResolver));
-        }
-
-        try
-        {
-            return serviceProvider.GetService<IAuditUserResolver>() is not null
-                || serviceProvider.GetService<IAuditTenantResolver>() is not null;
-        }
-        catch (InvalidOperationException ex)
-        {
-            inner = ex;
-            return true;
-        }
-    }
-
-    private const string PooledAttributionMessage =
-        "OrionAudit: this DbContext is registered with AddDbContextPool / AddPooledDbContextFactory, " +
-        "so its DbContextOptions - and the IServiceProvider captured by UseOrionAudit(sp) - are built " +
-        "once from the ROOT provider. A registered IAuditUserResolver / IAuditTenantResolver resolved " +
-        "from it returns the first request's instance on every later save, which would stamp every " +
-        "audit row with the first request's user and tenant. Pick one: " +
-        "(1) register the context with services.AddDbContext<TContext>((sp, o) => o.Use...().UseOrionAudit(sp)), " +
-        "whose lambda runs per scope; " +
-        "(2) keep pooling and make the request scope ambient - in ASP.NET Core, " +
-        "app.Use(async (http, next) => { using (AuditScope.PushServices(http.RequestServices)) await next(); }), " +
-        "or push the scope you created around a background unit of work; " +
-        "(3) keep pooling and register no IAuditUserResolver / IAuditTenantResolver, leaving rows unattributed.";
 
     /// <inheritdoc />
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
@@ -241,11 +159,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             return;
         }
 
-        // Nothing to fall back on: refuse rather than write a plausible-looking wrong trail.
-        if (AuditScope.CurrentServices is null)
-        {
-            GuardPooledAttribution(ctx);
-        }
+        // Refuse rather than write a plausible-looking wrong trail. Same call the read-side tenant
+        // filter makes, so the two paths cannot disagree about what a pooled registration means.
+        PooledAttributionGuard.Verify(ctx, serviceProvider);
 
         // Read the caller's ambient trace BEFORE starting OrionAudit's own span. StartActivity
         // reassigns Activity.Current to the OrionAudit.Capture span, so reading it afterwards

@@ -48,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   threw `InvalidOperationException` instead, so it failed loudly in Development and misattributed
   silently in Production. Tenant stamping was wrong the same way, on the read side too: the
   `AuditFor<T>()` tenant filter resolves through the same captured provider, so one tenant could be
-  shown another tenant's history.
+  shown another tenant's history — with scope validation off, a caller whose own tenant was `t-2`
+  got back `t-1`'s rows and none of its own.
   Capture now prefers an **ambient request scope** over the captured provider, on both the write and
   read paths: `AuditScope.PushServices(sp)` flows the real scope on `AsyncLocal` (the same primitive
   the correlation-id scope already used), which fixes pooling, both factory registrations, and
@@ -57,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ApplicationServiceProvider` is the root one we already have — so when a resolver is registered and
   no scope was pushed, the first audited save now throws `OrionAuditConfigurationException` naming
   the three ways out, instead of writing a trail that looks healthy and names the wrong person.
+  **The read path makes the same refusal from the same code**: the check lives in one internal
+  `PooledAttributionGuard` that both the interceptor and the tenant filter call, so a pooled
+  registration cannot mean one thing to a write and another to a read — which is exactly how the
+  read side kept the hole after the write side closed it. The guard sits inside the single helper
+  every tenant-scoped read funnels through, so anything routed through it later inherits the
+  refusal. `crossTenant: true` is an explicit opt-out of tenant scoping and is unaffected, as is a
+  single-tenant app with no resolver registered.
   `AddDbContext` is unchanged and unaffected. Non-pooled `AddDbContextFactory` cannot be detected the
   same way (Microsoft DI hands out the same scope type for the root container and every child scope,
   and `IsRootScope` is internal), so it is covered by `AuditScope.PushServices`, the documentation,
