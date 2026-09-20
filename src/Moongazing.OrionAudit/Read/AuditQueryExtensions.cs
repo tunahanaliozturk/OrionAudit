@@ -69,12 +69,32 @@ public static class AuditQueryExtensions
         var resolver = appServiceProvider.GetService<IAuditTenantResolver>();
         if (resolver is null)
         {
+            // No resolver registered at all: the application is not multi-tenant, nothing was ever
+            // stamped with a tenant, and there is no tenant to scope to. Unfiltered is correct here.
             return query;
         }
         var tenantId = resolver.Resolve(appServiceProvider);
         if (tenantId is null)
         {
-            return query;
+            // A resolver IS registered but could not name a tenant for this call - a missing claim,
+            // a background thread with no ambient context, a header the gateway dropped. This used
+            // to fall through unfiltered, which handed the caller EVERY tenant's audit rows: the
+            // read failed open precisely when the caller's identity was unknown. Deny instead, by
+            // scoping to the no-tenant stream.
+            //
+            // Empty result rather than a throw: the library's exceptions (OrionAuditConfigurationException,
+            // OrionAuditChainKeyException, the argument guards on the query DSL) all fire at
+            // configuration or programming boundaries, never on ambient per-request state, and these
+            // extensions sit on request paths (the viewer, operator dashboards) where turning an
+            // unresolved tenant into a 500 trades a leak for an outage.
+            //
+            // The shape of the deny mirrors the write path: AuditTenant.Canonical persists an
+            // unresolved tenant as "", and the integrity verifier already matches the no-tenant
+            // stream as (null OR ""). Scoping the read to exactly that set is the read-side mirror
+            // of what was written - the empty set in any tenant-stamped deployment, and still the
+            // full history for a genuinely single-tenant one (a resolver that returns null by
+            // design, as IAuditTenantResolver documents). No tenant-stamped row can escape either way.
+            return query.Where(a => a.TenantId == null || a.TenantId == "");
         }
         return query.Where(a => a.TenantId == tenantId);
     }

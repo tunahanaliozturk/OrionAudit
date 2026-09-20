@@ -90,6 +90,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already did. A host that registered the viewer is unaffected; the page simply arrives filled in
   rather than filling itself in from a follow-up `fetch`.
 
+- **Fixed a fail-open tenant filter on the audit read path.** `AuditQueryExtensions.AuditFor<T>()` and
+  `AuditLog()` apply a tenant filter when an `IAuditTenantResolver` is registered. When that resolver
+  returned null - a dropped header, a claim the gateway did not forward, a background thread with no
+  ambient context - the filter fell through **unfiltered** and handed the caller every tenant's audit
+  rows. The read widened to all tenants at exactly the moment the caller's identity was unknown, and
+  it carried into everything built on those extensions, including the viewer's `/api/log` and
+  `/api/{entityType}/{key}`. An unresolved tenant now denies: the read is scoped to the no-tenant
+  stream (`TenantId` null or `""`), which is the read-side mirror of the canonical value the write
+  path persists. In any tenant-stamped deployment that is the empty set; a genuinely single-tenant
+  deployment, whose resolver returns null by design, still reads its own history unchanged. A
+  deliberate empty result rather than a throw - these extensions run on request paths, and the
+  library reserves exceptions for configuration and programming boundaries. `crossTenant: true` is
+  still the explicit, auditable way to read across tenants, and an application with no resolver
+  registered at all is unaffected.
+
 ## [0.11.3] - 2026-07-28
 
 ### Fixed
