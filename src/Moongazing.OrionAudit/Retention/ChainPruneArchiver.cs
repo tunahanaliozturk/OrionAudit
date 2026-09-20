@@ -89,10 +89,13 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
             // two in opposite orders.
             var anchors = await LoadAnchorsAsync(dbContext, chained, cancellationToken).ConfigureAwait(false);
 
-            var removed = await inner.ArchiveAsync(dbContext, rows, policy, cancellationToken).ConfigureAwait(false);
+            // Hold back anything that would leave a hole rather than shorten a head.
+            var prunable = TrimToContiguousHeads(rows, chained, anchors);
+
+            var removed = await inner.ArchiveAsync(dbContext, prunable.Rows, policy, cancellationToken).ConfigureAwait(false);
             if (removed > 0 && anchors.Count > 0)
             {
-                await RecordPrunesAsync(dbContext, chained, anchors, cancellationToken).ConfigureAwait(false);
+                await RecordPrunesAsync(dbContext, prunable.Chained, anchors, cancellationToken).ConfigureAwait(false);
                 await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -117,6 +120,83 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
                 await transaction.DisposeAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// Narrows a batch to the rows that can leave without holing a chain: per stream, the longest run
+    /// that starts at the stream's current head and follows its links unbroken. Everything after the
+    /// first gap stays for a later sweep.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The sweep selects by age, which is what a retention policy means, and age is not chain order:
+    /// <see cref="AuditLog.OccurredOnUtc"/> is stamped near the start of capture while a stream's
+    /// chain order is settled later, by which writer wins the anchor lock, so two concurrent writers
+    /// on one stream can invert. The cutoff can then fall between an inverted pair, or a batch bounded
+    /// by <c>MaxRowsPerSweep</c> can end between them, and the sweep removes the chain-later row while
+    /// keeping the chain-earlier one. That is a deletion from the middle, which re-anchoring cannot
+    /// repair - the anchor records one watermark, not a set of holes - so verification reports a break
+    /// on a trail retention itself pruned. Rare, and that is exactly what makes it worth removing: a
+    /// tamper report that fires occasionally and wrongly is the kind operators learn to wave through.
+    /// </para>
+    /// <para>
+    /// The test is the chain itself rather than a column that stands in for it - each row's
+    /// <see cref="AuditLog.PreviousHash"/> against the one before it, starting from the head the
+    /// anchor points at. So it needs no query and no sequence, holds for streams written before
+    /// <see cref="AuditLog.ChainSequence"/> existed, and a fork or a gap simply stops the run instead
+    /// of being reasoned about.
+    /// </para>
+    /// <para>
+    /// Holding rows back is always safe: retention already leaves rows behind whenever a batch hits
+    /// its bound, and this is self-healing. A row held back because the row before it in the chain was
+    /// too new is swept as soon as that one ages out as well, and the two go together as a contiguous
+    /// head. Nothing is deleted that the policy did not ask for - which is why this trims the batch
+    /// rather than extending it over the blocking row, since that row is by definition still inside
+    /// the retention window.
+    /// </para>
+    /// </remarks>
+    private static (IReadOnlyList<AuditLog> Rows, List<AuditLog> Chained) TrimToContiguousHeads(
+        IReadOnlyList<AuditLog> rows,
+        List<AuditLog> chained,
+        Dictionary<StreamKey, AuditChainAnchor> anchors)
+    {
+        var heldBack = new HashSet<Guid>();
+
+        foreach (var group in chained.GroupBy(StreamOf))
+        {
+            if (!anchors.TryGetValue(group.Key, out var anchor))
+            {
+                // No anchor: the stream was never chained, so there is no truncation guard to keep in
+                // step and nothing to protect. Matches how RecordPrunesAsync skips it.
+                continue;
+            }
+
+            // PrunedThroughHash is what the current head links back to - null while the stream has
+            // never been pruned, which is what a genesis row carries.
+            var expected = anchor.PrunedThroughHash;
+            var contiguous = true;
+            foreach (var row in AuditChainOrder.ForWalk(group.ToList()))
+            {
+                if (contiguous && string.Equals(row.PreviousHash, expected, StringComparison.Ordinal))
+                {
+                    expected = row.EntryHash;
+                    continue;
+                }
+                // The first row that does not continue the run ends it, and everything from there on
+                // stays: removing any of it would take rows out of the middle of the chain.
+                contiguous = false;
+                heldBack.Add(row.Id);
+            }
+        }
+
+        if (heldBack.Count == 0)
+        {
+            return (rows, chained);
+        }
+
+        return (
+            rows.Where(r => !heldBack.Contains(r.Id)).ToList(),
+            chained.Where(r => !heldBack.Contains(r.Id)).ToList());
     }
 
     private static async Task<Dictionary<StreamKey, AuditChainAnchor>> LoadAnchorsAsync(
