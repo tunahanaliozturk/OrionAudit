@@ -83,4 +83,24 @@ public class AuditChainAnchor
     /// surviving genesis that links anywhere else is still a broken link.
     /// </remarks>
     public string? PrunedThroughHash { get; internal set; }
+
+    /// <summary>
+    /// Projects this persisted anchor into the verification input
+    /// <see cref="AuditChainVerifier.VerifyStream"/> reads, dropping the columns it never consults
+    /// (<see cref="TenantId"/>, which the stream is already scoped by, and <see cref="KeyId"/>, which
+    /// is recorded for rotation visibility only).
+    /// </summary>
+    /// <remarks>
+    /// The conversion runs one way by design. Reading a stored anchor to check a chain against it is
+    /// the supported direction; going back - building the library's own record of a chain from values
+    /// a caller supplied - is what the internal setters exist to prevent.
+    /// </remarks>
+    /// <returns>This anchor's state as verification input.</returns>
+    /// <exception cref="ArgumentException">This anchor's stored values cannot describe a real stream
+    /// (blank identity or tail hash, or half a prune checkpoint).</exception>
+    /// <exception cref="ArgumentOutOfRangeException">This anchor's stored counts cannot describe a
+    /// real stream. Surfacing that loudly is deliberate: a corrupt anchor that verified quietly would
+    /// be indistinguishable from an intact chain.</exception>
+    public AuditChainVerificationAnchor ToVerificationAnchor()
+        => new(EntityType, EntityId, LatestEntryHash, RowCount, PrunedRowCount, PrunedThroughHash);
 }

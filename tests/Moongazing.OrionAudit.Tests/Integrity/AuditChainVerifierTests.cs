@@ -29,7 +29,7 @@ public class AuditChainVerifierTests
         };
 
     // No-custom-column resolver + the fixed test key; no anchor unless a test supplies one.
-    private static AuditChainVerifier.StreamVerificationContext Ctx(AuditChainAnchor? anchor = null)
+    private static AuditChainVerifier.StreamVerificationContext Ctx(AuditChainVerificationAnchor? anchor = null)
         => new(
             keyId => keyId == TestChainKeys.ActiveKeyId ? TestChainKeys.Key : null,
             _ => Array.Empty<KeyValuePair<string, string?>>(),
@@ -54,16 +54,8 @@ public class AuditChainVerifierTests
         return rows;
     }
 
-    private static AuditChainAnchor AnchorFor(List<AuditLog> rows)
-        => new()
-        {
-            EntityType = EntityType,
-            EntityId = EntityId,
-            TenantId = string.Empty,
-            LatestEntryHash = rows[^1].EntryHash!,
-            RowCount = rows.Count,
-            KeyId = TestChainKeys.ActiveKeyId,
-        };
+    private static AuditChainVerificationAnchor AnchorFor(List<AuditLog> rows)
+        => new(EntityType, EntityId, rows[^1].EntryHash!, rows.Count);
 
     [Fact]
     public void Verify_CleanChain_IsValid()
@@ -312,5 +304,123 @@ public class AuditChainVerifierTests
         Assert.NotEqual(k1, k2);
         Assert.Equal("t1", k1.TenantId);
         Assert.Equal("t2", k2.TenantId);
+    }
+
+    // ---- Out-of-tree backend contract -------------------------------------------------------
+    // The chain is keyed so it can be verified WITHOUT trusting the process that wrote it, which
+    // means a store OrionAudit does not own has to be able to supply the stream head. These tests
+    // use only public API to do it - no AuditChainAnchor entity, no EF - because the head of a
+    // Mongo/Dynamo/flat-file backend does not live in one. Before AuditChainVerificationAnchor
+    // existed this could not be written at all: the only anchor type was the EF entity, whose
+    // setters are internal, so an out-of-tree caller's only option was to pass null and lose tail
+    // detection silently.
+
+    [Fact]
+    public void Verify_TailDeleted_AnchorRebuiltFromForeignStore_FailsWithTruncated()
+    {
+        var rows = CleanStream();
+
+        // What such a backend actually persists for the stream head: plain values, written when the
+        // rows were appended. Captured here BEFORE the tail is removed and used afterwards without
+        // touching the row list, because that independence is the entire point of an anchor - a head
+        // derived from the surviving rows would agree with them no matter what was deleted.
+        var storedTailHash = rows[^1].EntryHash!;
+        var storedRowCount = rows.Count;
+
+        rows.RemoveAt(rows.Count - 1); // the tail row is deleted from the backend's row storage
+
+        var anchor = new AuditChainVerificationAnchor(
+            EntityType, EntityId, storedTailHash, storedRowCount);
+
+        var result = AuditChainVerifier.VerifyStream(rows, Ctx(anchor));
+
+        Assert.False(result.IsValid);
+        Assert.Equal(AuditChainBreakReason.Truncated, result.Reason);
+    }
+
+    [Fact]
+    public void Verify_TailDeleted_WithoutAnchor_PassesSilently_WhichIsWhyTheAnchorIsNeeded()
+    {
+        // The counterfactual that makes the test above mean something: the surviving prefix links
+        // intact, so with no head to check against, deleting the tail is invisible. This is what an
+        // out-of-tree backend silently got when it had no way to build an anchor.
+        var rows = CleanStream();
+        rows.RemoveAt(rows.Count - 1);
+
+        var result = AuditChainVerifier.VerifyStream(rows, Ctx());
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public void Verify_PrunedStream_AnchorRebuiltFromForeignStore_IsValid()
+    {
+        // The other half of the contract: a head that records a legitimate retention prune must still
+        // verify, or backends would have to choose between detecting truncation and supporting
+        // retention. The walk starts at the surviving genesis, which links to the prune watermark.
+        var rows = CleanStream();
+        var storedTailHash = rows[^1].EntryHash!;
+        var storedRowCount = rows.Count;
+        var prunedThroughHash = rows[0].EntryHash!;
+
+        rows.RemoveAt(0); // retention removed the oldest row from the head
+
+        var anchor = new AuditChainVerificationAnchor(
+            EntityType, EntityId, storedTailHash, storedRowCount,
+            prunedRowCount: 1, prunedThroughHash: prunedThroughHash);
+
+        var result = AuditChainVerifier.VerifyStream(rows, Ctx(anchor));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Theory]
+    // A row count is not optional: omitting it (zero) would verify, report success, and have skipped
+    // truncation detection entirely - the failure this type exists to make unrepresentable.
+    [InlineData(0L, 0L, null)]
+    [InlineData(-1L, 0L, null)]
+    // Pruned rows cannot exceed the lifetime total.
+    [InlineData(3L, 4L, "aa")]
+    // Half a prune checkpoint turns an intact stream into a reported break, so it is refused.
+    [InlineData(3L, 1L, null)]
+    [InlineData(3L, 0L, "aa")]
+    public void Anchor_RejectsStateThatCannotDescribeARealStream(
+        long rowCount, long prunedRowCount, string? prunedThroughHash)
+        => Assert.ThrowsAny<ArgumentException>(
+            () => new AuditChainVerificationAnchor(
+                EntityType, EntityId, "deadbeef", rowCount, prunedRowCount, prunedThroughHash));
+
+    [Fact]
+    public void Anchor_RejectsBlankIdentityOrTailHash()
+    {
+        Assert.Throws<ArgumentException>(() => new AuditChainVerificationAnchor(" ", EntityId, "h", 1));
+        Assert.Throws<ArgumentException>(() => new AuditChainVerificationAnchor(EntityType, " ", "h", 1));
+        Assert.Throws<ArgumentException>(() => new AuditChainVerificationAnchor(EntityType, EntityId, " ", 1));
+    }
+
+    [Fact]
+    public void ToVerificationAnchor_CarriesEveryFieldTheVerifierReads()
+    {
+        // The EF-backed bridge: a caller holding the mapped row converts instead of re-typing it.
+        var entity = new AuditChainAnchor
+        {
+            EntityType = EntityType,
+            EntityId = EntityId,
+            TenantId = string.Empty,
+            LatestEntryHash = "deadbeef",
+            RowCount = 7,
+            KeyId = TestChainKeys.ActiveKeyId,
+            PrunedRowCount = 2,
+            PrunedThroughHash = "cafebabe",
+        };
+
+        var anchor = entity.ToVerificationAnchor();
+
+        Assert.Equal(EntityType, anchor.EntityType);
+        Assert.Equal(EntityId, anchor.EntityId);
+        Assert.Equal("deadbeef", anchor.LatestEntryHash);
+        Assert.Equal(7, anchor.RowCount);
+        Assert.Equal(2, anchor.PrunedRowCount);
+        Assert.Equal("cafebabe", anchor.PrunedThroughHash);
     }
 }

@@ -38,7 +38,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AuditImportBuilder` exists to import them — so narrowing `AuditLog` would break a supported path
   rather than close a hole.
 
+  Of the three, only `AuditChainAnchor` appeared in a public signature a consumer had to *supply*
+  (`AuditChainVerifier.StreamVerificationContext`); it is given a replacement construction path
+  below. Nothing public requires constructing an `AuditCaptureQueueEntry` or a `SnapshotCursor` —
+  each is named only by its own `IEntityTypeConfiguration`, which takes an EF model builder, never
+  an instance.
+
+- **`AuditChainVerifier.StreamVerificationContext.Anchor` is an `AuditChainVerificationAnchor`,
+  not an `AuditChainAnchor`.** The verifier now takes the stream head's *values* instead of the
+  EF-mapped entity. EF-backed callers convert with the new
+  `AuditChainAnchor.ToVerificationAnchor()`; callers already passing `null` are unaffected.
+
+  A keyed chain exists so it can be verified without trusting the process that wrote it, which
+  means an out-of-tree `IAuditHistoryStore` — Mongo, Dynamo, an append-only file — has to be able
+  to hand the verifier its stream head. Taken together with the internal setters above, the only
+  anchor type was an EF entity such a backend could no longer populate, so its only remaining
+  option was to pass `null`. That compiles, verification still runs, and it still reports success —
+  having silently skipped tail- and whole-stream-deletion detection entirely. A check that looks
+  like it ran and did not is the precise failure the anchor exists to prevent, so the fix restores
+  the capability rather than the entity: verification input and persistence are now separate types,
+  and the separation is enforced by the compiler instead of by a naming convention. An
+  `AuditChainVerificationAnchor` has no EF mapping, so constructing one can inform a verdict but can
+  never be saved as the library's own record of a chain it did not write.
+
 ### Added
+
+- **`AuditChainVerificationAnchor`** — the stream head `AuditChainVerifier.VerifyStream` checks a
+  walk against: expected tail hash, lifetime hashed-row count, and the retention prune checkpoint.
+  It carries only what the verifier actually reads; `TenantId` (the stream is already scoped by it)
+  and `KeyId` (recorded for rotation visibility) are deliberately absent, because a constructor
+  demanding fields the verifier never consults is its own trap.
+
+  Every field the truncation check depends on is a required constructor argument, and the
+  constructor refuses state that cannot describe a real stream: a non-positive row count (an anchor
+  only exists once a stream has been chained, and accepting zero would quietly disarm the check for
+  an emptied stream), a pruned count exceeding the lifetime total, or half a prune checkpoint — a
+  count without a watermark makes the oldest survivor look like a genesis, a watermark without a
+  count makes an intact stream look short, and either way an untouched stream gets reported as
+  broken. It is a plain immutable class rather than a record, so there is no `with` expression and
+  no parameterless constructor to route around the validation.
+
+- **`AuditChainAnchor.ToVerificationAnchor()`** — projects the persisted anchor into that
+  verification input. One-way by design: reading a stored anchor to check a chain is the supported
+  direction; building the library's record of a chain from caller-supplied values is what the
+  internal setters prevent.
 
 - `Microsoft.CodeAnalysis.PublicApiAnalyzers` on all five packable projects (`OrionAudit`,
   `OrionAudit.AspNetCore`, `OrionAudit.MySql`, `OrionAudit.Viewer`, `OrionAudit.Testing`), each with
