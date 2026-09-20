@@ -428,6 +428,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed flush is safe either way. README and the `AuditImportBuilder` / `AuditImportOptions` docs
   now say this instead of promising blanket re-run safety.
 
+#### Dependency refresh
+
+- **EF Core 9.0.0 → 10.0.12 on `net10.0`, 9.0.20 on `net8.0` / `net9.0`.** EF Core 10 ships a
+  `net10.0` asset only, so `OrionAudit` and `OrionAudit.MySql` now split
+  `Microsoft.EntityFrameworkCore` / `.Relational` per target framework rather than dropping the
+  older targets. **Consumers will notice a raised floor:** a `net10.0` consumer can no longer
+  resolve OrionAudit against EF Core 9, and `net8.0` / `net9.0` consumers move from EF Core 9.0.0
+  to 9.0.20. No public API or behaviour changed, and EF Core 10 required no source change on our
+  side. Same shape and same comment as the sibling `OrionGuard.EntityFrameworkCore`.
+- **`Microsoft.EntityFrameworkCore.Proxies` 9.0.0 → 10.0.12** in the integration tests, in lockstep
+  with the EF Core version that project resolves. Proxies plugs into EF Core through internal
+  extension points rather than its public API, so a 9.0.x Proxies on an EF Core 10 runtime is the
+  mismatch that does *not* announce itself: restore succeeds (its `net8.0` asset is
+  TFM-compatible with `net10.0`, and EF Core resolves to 10.0.12 by max-wins with no downgrade to
+  report) and the failure surfaces later, at materialization. Test-only.
+- **`Microsoft.Extensions.DependencyInjection.Abstractions`, `.Hosting.Abstractions` and
+  `.Logging.Abstractions` 9.0.0 → 10.0.12, unconditionally.** Unlike EF Core, these still ship
+  `net8.0` / `net9.0` / `netstandard2.0` assets at 10.0.12, so one reference covers every target.
+  **This is also a raised floor on all three targets** — and it is not optional: EF Core 10.0.12
+  pulls `Microsoft.Extensions.Caching.Memory` 10.0.12, which lifts the transitive minimum on these
+  packages above a direct 9.0.0 reference and fails restore with `NU1605`.
+- **`Orion.Abstractions` 1.0.0 → 1.2.0.** Additive only, on the frozen 1.x spine: 1.1.0 extended
+  the separate `Orion.Abstractions.Testing` package, 1.2.0 added `OrionDeadline`. The one
+  primitive OrionAudit uses (`SafeObserverInvoker.Resolve`) is unchanged, and 1.2.0 declares the
+  same dependency minimums as 1.0.0, so the transitive graph is unchanged.
+- **Test and benchmark tooling** (nothing here reaches a shipped package): `xunit.v3` 3.2.2 →
+  4.0.1, `coverlet.collector` 6.0.2 → 10.0.1, `Microsoft.AspNetCore.TestHost` 10.0.0 → 10.0.12,
+  `BenchmarkDotNet` 0.14.0 → 0.15.8.
+- **The `global.json` MTP opt-in is now load-bearing, not just an improvement.** `xunit.v3` 4.0
+  drops Microsoft Testing Platform v1 and ships v2. Under v1, `dotnet test` on the .NET 10 SDK
+  printed nothing and exited 0; under v2 the same command hard-errors unless the Microsoft Testing
+  Platform runner is selected. The `global.json` that selects it landed separately, so nothing
+  changes here — but without it this bump would break the build rather than merely under-report.
+- **`SQLitePCLRaw.bundle_e_sqlite3` stays pinned at 2.1.12** (not 3.0.5). 3.0.x is a restructured
+  major — no `lib/` folder, and a new `SQLitePCLRaw.config.e_sqlite3` + `SQLite` native package
+  pair — that `Microsoft.Data.Sqlite` does not reference, so forcing it would override what EF
+  Core is built and tested against. The pin's original job is now done by EF Core itself
+  (`Microsoft.EntityFrameworkCore.Sqlite` 10.0.12 depends on 2.1.12 directly), so it is kept as
+  an explicit floor and its comment updated to say so. Test and sample projects only, as before.
+- **`Microsoft.CodeAnalysis.CSharp` stays at 4.10.0**, in the generator project and in the
+  generator tests that drive it, and the generator csproj now says why. A source generator's
+  compile-time Roslyn version is the minimum Roslyn that can load it: building against 5.9 would
+  require SDK 10.0.400+ from every consumer, while a generator built against 4.10 loads fine on
+  newer Roslyn. This is a consumer-support floor, not a stale reference.
+
 ### Performance
 
 - **The periodic snapshot policy no longer blocks a thread-pool thread on every audited save.**
