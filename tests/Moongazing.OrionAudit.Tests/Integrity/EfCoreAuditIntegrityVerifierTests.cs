@@ -619,4 +619,69 @@ public class EfCoreAuditIntegrityVerifierTests
         Assert.True(t1.IsValid);
         Assert.Equal(3, t1.VerifiedRowCount);
     }
+
+    [Fact]
+    public async Task Verify_LegacyPrefixThenSequencedRows_WalksAcrossTheBoundary()
+    {
+        // The upgrade case for AuditLog.ChainSequence: a stream whose older rows predate the column
+        // (NULL sequence) and whose newer rows carry one. The walk order has to be total and stable
+        // across that seam, and the pre-upgrade prefix must verify exactly as it always did.
+        var (ctx, conn) = await NewDbAsync();
+        await using var _ = conn;
+        await using var __ = ctx;
+
+        // Rows as an upgraded database holds them: correctly stamped, no sequence. (The sequence is
+        // not bound into the MAC, so clearing it leaves every hash valid - which is the whole reason
+        // existing chains keep verifying.)
+        await SeedCleanStreamAsync(ctx, "o1", startSeq: 1, count: 2);
+        await ctx.Set<AuditLog>()
+            .Where(a => a.EntityId == "o1")
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.ChainSequence, (long?)null));
+        ctx.ChangeTracker.Clear();
+
+        var legacyOnly = await Verifier(ctx).VerifyChainAsync(
+            AuditChainVerificationRequest.ForEntity(OrderType, "o1"));
+        Assert.True(legacyOnly.IsValid);
+        Assert.Equal(2, legacyOnly.VerifiedRowCount);
+
+        // Two rows appended after the upgrade, in two separate saves so the chain order is save
+        // order - and deliberately adversarial: both share the LAST legacy row's timestamp, and the
+        // SECOND one's Id sorts BEFORE the first's. (OccurredOnUtc, Id) therefore orders them
+        // backwards; only the sequence gets it right.
+        await AppendSequencedRowAsync(ctx, "o1", id: SeqId(9), at: T0.AddMinutes(2));
+        await AppendSequencedRowAsync(ctx, "o1", id: SeqId(5), at: T0.AddMinutes(2));
+
+        var walked = await ctx.AuditLogs.AsNoTracking()
+            .Where(a => a.EntityId == "o1")
+            .OrderBy(a => a.ChainSequence == null ? 0 : 1)
+            .ThenBy(a => a.ChainSequence).ThenBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
+            .Select(a => a.ChainSequence)
+            .ToListAsync();
+        Assert.Equal(new long?[] { null, null, 2L, 3L }, walked);
+
+        var result = await Verifier(ctx).VerifyChainAsync(
+            AuditChainVerificationRequest.ForEntity(OrderType, "o1"));
+        Assert.True(result.IsValid);
+        Assert.Equal(4, result.VerifiedRowCount);
+    }
+
+    // One row appended through the production writer, in its own save, with an explicit id and
+    // timestamp so a test can make (OccurredOnUtc, Id) disagree with the real chain order.
+    private static async Task AppendSequencedRowAsync(AuditDbContext ctx, string entityId, Guid id, DateTime at)
+    {
+        var row = new AuditLog
+        {
+            Id = id,
+            EntityType = OrderType,
+            EntityId = entityId,
+            Action = AuditAction.Updated,
+            OccurredOnUtc = at,
+            Diff = $"[{{\"op\":\"replace\",\"path\":\"/v\",\"value\":\"{id:N}\"}}]",
+        };
+        ctx.AuditLogs.Add(row);
+        await EfCoreAuditHashChainWriter.StampAsync(
+            ctx, new[] { row }, AuditHashChainScope.PerEntityStream, TestChainKeys.Provider, NoCustomColumns, default);
+        await ctx.SaveChangesAsync();
+        ctx.ChangeTracker.Clear();
+    }
 }

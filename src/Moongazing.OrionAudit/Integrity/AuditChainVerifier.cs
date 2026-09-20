@@ -20,8 +20,10 @@ public static class AuditChainVerifier
 
     /// <summary>
     /// Verifies one stream's chain. <paramref name="orderedRows"/> MUST be the stream's rows in
-    /// canonical chain order: ascending (<see cref="AuditLog.OccurredOnUtc"/>, <see cref="AuditLog.Id"/>),
-    /// which is the same order the stamper chained them in. When
+    /// canonical chain order - ascending <see cref="AuditLog.ChainSequence"/>, with any legacy
+    /// unsequenced prefix first in ascending (<see cref="AuditLog.OccurredOnUtc"/>,
+    /// <see cref="AuditLog.Id"/>); see <see cref="AuditChainOrder"/>, which is what the EF Core
+    /// verifier applies. That is the order the stamper chained them in. When
     /// <paramref name="context"/>.<see cref="StreamVerificationContext.Anchor"/> is supplied, the walked
     /// tail hash and hashed-row count are checked against it so deleting the tail row(s) - or the whole
     /// stream - is detected even though the surviving prefix links intact.

@@ -7,8 +7,9 @@ using Moongazing.OrionAudit.Integrity;
 namespace Moongazing.OrionAudit.IntegrationTests;
 
 /// <summary>
-/// Regression coverage for the write-path defect that made <c>UseHashChain</c> report tampering on
-/// intact chains: the anchor lock was taken outside the write transaction, so it serialized nothing.
+/// Regression coverage for the two write-path defects that made <c>UseHashChain</c> report tampering
+/// on intact chains: the anchor lock that was taken outside the write transaction, and the walk order
+/// that was only a proxy for the chain's real (insertion) order.
 /// </summary>
 public class HashChainWritePathTests
 {
@@ -33,6 +34,69 @@ public class HashChainWritePathTests
             modelBuilder.Entity<Ledger>().HasKey(l => l.Id);
             modelBuilder.ApplyOrionAuditConfigurations();
         }
+    }
+
+    // A clock that never moves, so every save in a trial stamps the SAME OccurredOnUtc. This is not
+    // an exotic setup: one timestamp is computed per SaveChanges and stamped on every row of that
+    // save, and MySQL DATETIME(6) / PostgreSQL timestamp truncate further, so equal timestamps
+    // across two saves of one entity are routine in production.
+    private sealed class FrozenClock(DateTimeOffset at) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => at;
+    }
+
+    /// <summary>
+    /// Defect 2. Two saves on ONE entity under a frozen clock produce two audit rows sharing a
+    /// timestamp. Their chain order is save order; the verifier's walk order was
+    /// <c>(OccurredOnUtc, Id)</c>, so the tie was broken by a random Guid - unrelated to the order
+    /// the rows were chained in. Roughly half of all intact streams therefore verified as
+    /// <c>BrokenLink</c>. Forty independent trials make that coin flip a certainty (a clean run had
+    /// probability 2^-40), so this fails reliably before the explicit chain sequence and passes
+    /// after it.
+    /// </summary>
+    [Fact]
+    public async Task SameStreamSavesSharingOneTimestamp_VerifyOnEveryTrial()
+    {
+        const int Trials = 40;
+
+        var (provider, conn) = await BuildAsync(
+            clock: new FrozenClock(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        await using var _ = provider;
+        await using var __ = conn;
+
+        var ledgerIds = new List<Guid>(Trials);
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+            for (var trial = 0; trial < Trials; trial++)
+            {
+                var ledger = new Ledger { Balance = 0 };
+                ctx.Ledgers.Add(ledger);
+                await ctx.SaveChangesAsync();       // row 1: the stream's genesis
+                ledger.Balance = trial + 1;
+                await ctx.SaveChangesAsync();       // row 2: chained onto row 1, same timestamp
+                ledgerIds.Add(ledger.Id);
+            }
+        }
+
+        var broken = new List<string>();
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var verifier = scope.ServiceProvider.GetRequiredService<IAuditIntegrityVerifier>();
+            foreach (var id in ledgerIds)
+            {
+                var result = await verifier.VerifyChainAsync(AuditChainVerificationRequest.ForEntity(
+                    typeof(Ledger).AssemblyQualifiedName!, id.ToString()));
+                if (!result.IsValid)
+                {
+                    broken.Add($"{id:N}={result.Reason}");
+                }
+            }
+        }
+
+        Assert.True(
+            broken.Count == 0,
+            $"{broken.Count} of {Trials} intact streams reported tampering: {string.Join(", ", broken)}");
     }
 
     /// <summary>
@@ -160,4 +224,30 @@ public class HashChainWritePathTests
             && (inner.SqliteErrorCode == 5 || inner.SqliteErrorCode == 6)
             || ex is DbUpdateException;
 
+    private static async Task<(ServiceProvider provider, SqliteConnection conn)> BuildAsync(TimeProvider? clock = null)
+    {
+        var conn = new SqliteConnection("DataSource=:memory:");
+        await conn.OpenAsync();
+
+        var services = new ServiceCollection();
+        // AddOrionAudit registers TimeProvider.System with TryAddSingleton, so a clock registered
+        // first wins and the interceptor stamps OccurredOnUtc from it.
+        if (clock is not null)
+        {
+            services.AddSingleton(clock);
+        }
+        services.AddOrionAudit<TestContext>(o =>
+        {
+            o.Audit<Ledger>();
+            o.UseHashChain(h => h.UseKey(1, KeyId1Base64));
+        });
+        services.AddSingleton(conn);
+        services.AddDbContext<TestContext>((sp, o) =>
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        var provider = services.BuildServiceProvider();
+
+        await using var scope = provider.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<TestContext>().Database.EnsureCreatedAsync();
+        return (provider, conn);
+    }
 }

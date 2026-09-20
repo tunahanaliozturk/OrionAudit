@@ -60,13 +60,19 @@ public static class AuditHashChainStamper
     /// <param name="key">The HMAC key material that MACs each row.</param>
     /// <param name="customColumnsFor">Resolves the (name, canonical-value) pairs of registered custom
     /// columns for a given row, so they are bound into the MAC. Return an empty list when none.</param>
+    /// <param name="existingRowCounts">Per-stream count of rows already in the chain (the stream's
+    /// <see cref="AuditChainAnchor.RowCount"/>), used to continue <see cref="AuditLog.ChainSequence"/>
+    /// where the persisted stream left off. When <see langword="null"/> no sequence is assigned and
+    /// the rows stay on the legacy <c>(OccurredOnUtc, Id)</c> walk order, so a caller that cannot
+    /// supply the stream's length is not silently given colliding sequence numbers.</param>
     public static void Stamp(
         IReadOnlyList<AuditLog> newRows,
         IReadOnlyDictionary<ChainKey, string?> existingHeadHashes,
         AuditHashChainScope scope,
         int keyId,
         ReadOnlyMemory<byte> key,
-        Func<AuditLog, IReadOnlyList<KeyValuePair<string, string?>>> customColumnsFor)
+        Func<AuditLog, IReadOnlyList<KeyValuePair<string, string?>>> customColumnsFor,
+        IReadOnlyDictionary<ChainKey, long>? existingRowCounts = null)
     {
         ArgumentNullException.ThrowIfNull(newRows);
         ArgumentNullException.ThrowIfNull(existingHeadHashes);
@@ -80,11 +86,16 @@ public static class AuditHashChainStamper
         // Per-stream running head, seeded from what is already persisted. As each new row is
         // stamped it becomes its stream's new head for the next row in the same batch.
         var runningHead = new Dictionary<ChainKey, string?>();
+        // Per-stream running sequence, seeded from the stream's persisted length. Assigning it here
+        // (rather than in the caller) is what makes stamping order and walk order the same order:
+        // whatever tie-break this loop applies within the batch is recorded on the rows themselves.
+        var runningSequence = existingRowCounts is null ? null : new Dictionary<ChainKey, long>();
 
-        // Stamp in the exact order a verifier later reads rows: (OccurredOnUtc, Id). Stamping out of
-        // that order would chain rows in one sequence and verify them in another, breaking a chain
-        // that is actually intact. OrderBy is a stable sort, but the explicit ThenBy(Id) removes any
-        // reliance on input order for rows sharing a timestamp (the common single-save case).
+        // Deterministic in-batch order. (OccurredOnUtc, Id) is arbitrary for rows of one stream that
+        // share a timestamp - which every multi-row save produces - but it does not need to match
+        // anything external any more: the order chosen here IS the chain order, because it is written
+        // to ChainSequence and read back by the verifier. OrderBy is a stable sort, but the explicit
+        // ThenBy(Id) removes any reliance on input order.
         var ordered = newRows
             .OrderBy(r => r.OccurredOnUtc)
             .ThenBy(r => r.Id)
@@ -96,6 +107,16 @@ public static class AuditHashChainStamper
             if (!runningHead.TryGetValue(chainKey, out var previous))
             {
                 previous = existingHeadHashes.TryGetValue(chainKey, out var head) ? head : null;
+            }
+
+            if (runningSequence is not null)
+            {
+                if (!runningSequence.TryGetValue(chainKey, out var sequence))
+                {
+                    sequence = existingRowCounts!.TryGetValue(chainKey, out var start) ? start : 0;
+                }
+                row.ChainSequence = sequence;
+                runningSequence[chainKey] = sequence + 1;
             }
 
             var customColumns = customColumnsFor(row);

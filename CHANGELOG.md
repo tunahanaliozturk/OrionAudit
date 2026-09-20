@@ -110,6 +110,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the EF in-memory provider) raises on begin; that is caught and the work runs unwrapped, the same
   degradation `CopyToTableAuditArchiver` and `ChainPruneArchiver` already use. Consumers who never
   enable hash-chaining are untouched: no chain, no transaction, no schema change.
+- **The chain is verified in the order it was written, not in an order that merely correlates with
+  it.** A chain's real order is *insertion* order - each save chains its rows onto the anchor's
+  current head - but the verifier walked `(OccurredOnUtc, Id)`. One timestamp is computed per
+  `SaveChanges` and stamped on every row of that save, and MySQL `DATETIME(6)` / PostgreSQL
+  `timestamp` truncate further, so two saves on one entity landing on the same stored timestamp is
+  routine rather than exotic; the tie then fell to a random `Guid`, which bears no relation to the
+  order the rows were chained in. Measured on SQLite: two saves on one entity under a frozen clock,
+  40 trials, **23 spurious `BrokenLink` results on a completely intact chain** - a coin flip.
+
+  `AuditLog` now carries `ChainSequence`, a per-stream sequence the writer assigns by continuing the
+  anchor's `RowCount` under the anchor lock - which is why this and the lock fix are one change and
+  not two - and the verifier, `ChainPruneArchiver` and every retention selection order by it. It is
+  deliberately **not** bound into the row's MAC, so no existing chain's hashes change. Nothing is
+  made lenient either: a mutated row still fails as `ContentMismatch`, a hand-deleted tail still
+  fails as `Truncated`, and a deletion no retention sweep recorded still breaks the walk.
+
+  **Consumer-visible changes:** the `OrionAudit_Log` table gains a nullable `ChainSequence`
+  (`bigint`) column, so a consumer using migrations needs a migration for it -
+  `dotnet ef migrations add AddOrionAuditChainSequence`, emitted by `AuditLogEntityTypeConfiguration`
+  like every other audit column. **No backfill is needed and none should be attempted.** Rows written
+  before the column keep `NULL` and are walked in their original `(OccurredOnUtc, Id)` order, ahead of
+  every sequenced row of the same stream, so a chain written before this upgrade verifies exactly as
+  it did and the rows appended after it continue that chain across the boundary. The null group is
+  selected with an explicit sort key rather than relying on `ORDER BY` null placement, which differs
+  between SQL Server/SQLite and PostgreSQL. `AuditHashChainStamper.Stamp` gained an optional trailing
+  parameter carrying each stream's persisted row count; omitting it leaves `ChainSequence` unassigned,
+  so an existing call site compiles and behaves as before.
 - **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
   races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
   100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while

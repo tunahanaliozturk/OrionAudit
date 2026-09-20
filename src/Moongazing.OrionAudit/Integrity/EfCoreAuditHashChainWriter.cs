@@ -81,9 +81,17 @@ internal static class EfCoreAuditHashChainWriter
         var anchors = await LockAndLoadAnchorsAsync(context, keys, cancellationToken).ConfigureAwait(false);
 
         var heads = new Dictionary<AuditHashChainStamper.ChainKey, string?>(keys.Count);
+        // Where each stream's ChainSequence resumes. RowCount is the stream's LIFETIME hashed-row
+        // total - retention records its deletions in PrunedRowCount and never decrements it - so
+        // continuing from it keeps sequence numbers unique and monotonic even across a pruned head.
+        // Reading it here is only sound because the anchor is locked inside this transaction; that is
+        // why the sequence and the lock fix are one change, not two.
+        var rowCounts = new Dictionary<AuditHashChainStamper.ChainKey, long>(keys.Count);
         foreach (var chainKey in keys)
         {
-            heads[chainKey] = anchors.TryGetValue(chainKey, out var anchor) ? anchor.LatestEntryHash : null;
+            var hasAnchor = anchors.TryGetValue(chainKey, out var anchor);
+            heads[chainKey] = hasAnchor ? anchor!.LatestEntryHash : null;
+            rowCounts[chainKey] = hasAnchor ? anchor!.RowCount : 0;
         }
 
         // Resolve each row's registered custom-column values from the tracked entity's shadow
@@ -91,7 +99,7 @@ internal static class EfCoreAuditHashChainWriter
         IReadOnlyList<KeyValuePair<string, string?>> CustomColumnsFor(AuditLog row)
             => ReadCustomColumns(context, row, customColumns);
 
-        AuditHashChainStamper.Stamp(newRows, heads, scope, keyId, key, CustomColumnsFor);
+        AuditHashChainStamper.Stamp(newRows, heads, scope, keyId, key, CustomColumnsFor, rowCounts);
 
         // Advance each stream's anchor to the batch's new tail (latest hash + added count + key id).
         var summaries = AuditHashChainStamper.SummarizeBatch(newRows, scope);

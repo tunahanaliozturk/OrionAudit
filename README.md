@@ -174,8 +174,9 @@ tail/whole-stream deletion detectable (the anchor remembers the true tail hash a
 key id is stored per row, so you can rotate keys later without invalidating rows written under an
 older (still-registered) key.
 
-`UseHashChain()` adds three nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`) to the audit
-table plus the `OrionAudit_Chain_Anchor` table, so add a migration after enabling it:
+`UseHashChain()` adds four nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`,
+`ChainSequence`) to the audit table plus the `OrionAudit_Chain_Anchor` table, so add a migration
+after enabling it:
 
 ```bash
 dotnet ef migrations add AddOrionAuditHashChain

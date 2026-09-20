@@ -73,6 +73,11 @@ public sealed class AuditLogEntityTypeConfiguration : IEntityTypeConfiguration<A
         builder.Property(x => x.EntryHash).HasMaxLength(64).IsFixedLength();
         builder.Property(x => x.PreviousHash).HasMaxLength(64).IsFixedLength();
         builder.Property(x => x.HashKeyId);
+        // The chain's real (insertion) order. Nullable for the same two reasons as the hash columns:
+        // it is the off-state for consumers who never enable hash-chaining, and the marker for rows
+        // written before the column existed - those keep verifying in their original
+        // (OccurredOnUtc, Id) order. See AuditLog.ChainSequence.
+        builder.Property(x => x.ChainSequence);
 
         var diffProperty = builder.Property(x => x.Diff).IsRequired();
         var snapshotProperty = builder.Property(x => x.Snapshot);
