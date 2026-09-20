@@ -12,13 +12,16 @@
          so they can assert on the emitted source, its diagnostics, and that it compiles. Pinned to
          the version the generator itself builds against so the driver and the generator agree. -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <!--
       Security pin: GHSA-2m69-gcr7-jv3q (High) in the bundled SQLite native library.
-      Microsoft.EntityFrameworkCore.Sqlite resolves SQLitePCLRaw 2.1.10 transitively; this
-      lifts the whole bundle to the patched 2.1.12. Drop this line once the EF Core reference
-      resolves 2.1.12 on its own.
+      As of EF Core 10.0.12, Microsoft.EntityFrameworkCore.Sqlite depends on the patched 2.1.12
+      itself, so this no longer lifts anything - it is kept as an explicit floor so the advisory
+      stays documented at the reference and a future EF Core patch cannot quietly drop back.
+      It deliberately does NOT move to 3.0.x: that is a restructured major (no lib/ folder, a new
+      SQLitePCLRaw.config.e_sqlite3 + SQLite native package pair) that Microsoft.Data.Sqlite does
+      not reference, so forcing it would override what EF Core is built and tested against.
     -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>

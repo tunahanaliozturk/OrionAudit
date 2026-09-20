@@ -7,8 +7,12 @@
     <PackageIcon>docs/logo.png</PackageIcon>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.0" />
+  <!-- EF Core 10 only supports net10.0, so net8.0/net9.0 stay on the latest EF Core 9 patch. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' != 'net10.0'">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.20" />
   </ItemGroup>
 
   <ItemGroup>
