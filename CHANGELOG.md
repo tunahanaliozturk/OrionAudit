@@ -24,7 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
   chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
   rather than duplicated; with neither wired the pipeline completes synchronously and the sync
-  override never blocks.
+  override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
+  duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
+  otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
+  ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
 - **Capture works under `UseLazyLoadingProxies()`.** Capture resolved the audited entity's CLR type
   with `entry.Entity.GetType()`, which under lazy-loading (or change-tracking) proxies is the Castle
   subclass — `OrderProxy`, not `Order` — and is not the key anything is registered under. Every

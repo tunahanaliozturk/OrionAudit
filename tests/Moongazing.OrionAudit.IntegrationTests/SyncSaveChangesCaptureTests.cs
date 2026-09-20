@@ -181,4 +181,63 @@ public class SyncSaveChangesCaptureTests
         Assert.True(result.IsValid);
         Assert.Equal(1, result.VerifiedRowCount);
     }
+
+    /// <summary>
+    /// A single-threaded context, like WPF's, WinForms' or legacy ASP.NET's: work posted to it runs
+    /// only when the owning thread pumps the queue. Nothing here ever pumps, so anything posted is
+    /// a deadlock made visible.
+    /// </summary>
+    private sealed class NeverPumpedSynchronizationContext : SynchronizationContext
+    {
+        public int Posted;
+
+        public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref Posted);
+
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+    }
+
+    [Fact]
+    public void SaveChanges_Sync_DoesNotDeadlockOnAPublisherThatCapturesTheCallersContext()
+    {
+        // RecordingPublisher awaits Task.Yield() without ConfigureAwait(false) - consumer code is
+        // entitled to. Task.Yield posts the continuation to whatever SynchronizationContext is
+        // current at the await, so if the sync override blocks on the caller's context thread, the
+        // publisher's continuation is queued behind the very thread waiting for it and the save
+        // never returns. Clearing the ambient context for the duration of the capture is what
+        // makes that unreachable.
+        var context = new NeverPumpedSynchronizationContext();
+        Exception? failure = null;
+
+        // On a thread of its own so a regression fails the run on the join timeout instead of
+        // hanging the whole suite.
+        var caller = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            try
+            {
+                var (provider, connection) = BuildAsync(withPublisher: true).GetAwaiter().GetResult();
+                using (provider)
+                using (connection)
+                using (var scope = provider.CreateScope())
+                {
+                    var ctx = scope.ServiceProvider.GetRequiredService<SyncDb>();
+                    ctx.Notes.Add(new Note { Body = "posted-back" });
+                    ctx.SaveChanges();
+                }
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        })
+        { IsBackground = true };
+
+        caller.Start();
+
+        Assert.True(
+            caller.Join(TimeSpan.FromSeconds(30)),
+            "SaveChanges() deadlocked: the publisher's continuation was posted back to the blocked caller thread.");
+        Assert.Null(failure);
+        Assert.Equal(0, Volatile.Read(ref context.Posted));
+    }
 }

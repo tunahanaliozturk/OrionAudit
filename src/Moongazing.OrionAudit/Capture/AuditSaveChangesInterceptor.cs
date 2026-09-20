@@ -73,11 +73,24 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     /// chain's anchor lock/read (<c>EfCoreAuditHashChainWriter.StampAsync</c>) and the consumer's
     /// <see cref="IAuditEventPublisher.PublishAsync"/>. Both are opt-in, so with neither wired the
     /// task below completes synchronously and <c>GetResult</c> never blocks. When one is wired we
-    /// block here rather than duplicating either leg. That is safe because every <c>await</c> on
-    /// this path uses <c>ConfigureAwait(false)</c>, so no continuation is posted back to an ambient
-    /// <see cref="SynchronizationContext"/> and the classic sync-over-async deadlock cannot form;
-    /// the cost is one blocked thread for the duration of the publish, which is the price the caller
-    /// already accepted by choosing the blocking <c>SaveChanges()</c> overload.
+    /// block here rather than duplicating either leg.
+    /// </para>
+    /// <para>
+    /// The ambient <see cref="SynchronizationContext"/> is cleared for the duration of the call.
+    /// Our own <c>await</c>s all use <c>ConfigureAwait(false)</c>, but the publisher is consumer
+    /// code and may not: an <c>await</c> inside it captures whatever context is current, and on a
+    /// single-threaded one (WPF, WinForms, legacy ASP.NET) it would post its continuation back to
+    /// the very thread blocked on <c>GetResult</c> below — a deadlocked save. With no current
+    /// context there is nothing for it to capture, so the continuation runs on the thread pool and
+    /// the blocked thread is released. Clearing costs nothing when the task completes
+    /// synchronously, unlike offloading the whole pipeline to <see cref="Task.Run(Action)"/>,
+    /// which would pay a thread hop on every synchronous save to defend the same case.
+    /// </para>
+    /// <para>
+    /// The residual case this does not cover is a caller executing on a custom
+    /// <see cref="TaskScheduler"/> with a degree of parallelism of one, since an <c>await</c>
+    /// captures that too. Blocking a scheduler like that on any async work deadlocks it whoever
+    /// owns the code, so that caller wants <c>SaveChangesAsync</c>.
     /// </para>
     /// </remarks>
     public override InterceptionResult<int> SavingChanges(
@@ -85,7 +98,18 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         InterceptionResult<int> result)
     {
         ArgumentNullException.ThrowIfNull(eventData);
-        CaptureAsync(eventData, CancellationToken.None).GetAwaiter().GetResult();
+
+        var ambient = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
+        try
+        {
+            CaptureAsync(eventData, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(ambient);
+        }
+
         return base.SavingChanges(eventData, result);
     }
 
