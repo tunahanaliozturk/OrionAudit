@@ -59,9 +59,15 @@ public static class AuditQueryExtensions
         {
             return query;
         }
-        var appServiceProvider = context.GetService<IDbContextOptions>()
-            .FindExtension<CoreOptionsExtension>()?
-            .ApplicationServiceProvider;
+        // Same trap as capture, on the read side: ApplicationServiceProvider is whatever
+        // UseOrionAudit(sp) was handed, which under AddDbContextPool / AddDbContextFactory is the
+        // ROOT provider - so a scoped IAuditTenantResolver pulled out of it answers with the first
+        // request's tenant and this filter would show one tenant another tenant's history. The
+        // ambient scope wins here for the same reason it wins in the interceptor.
+        var appServiceProvider = AuditScope.CurrentServices
+            ?? context.GetService<IDbContextOptions>()
+                .FindExtension<CoreOptionsExtension>()?
+                .ApplicationServiceProvider;
         if (appServiceProvider is null)
         {
             return query;

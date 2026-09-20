@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Moongazing.Orion.Abstractions.Observers;
 using Moongazing.OrionAudit.Configuration;
@@ -20,9 +21,18 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 {
     private readonly IServiceProvider serviceProvider;
 
+    // Set once the pooled-attribution guard below has cleared this interceptor's DbContext type.
+    // Benign race: the worst a concurrent double-check costs is one extra FindExtension lookup.
+    private volatile bool pooledAttributionChecked;
+
     /// <param name="serviceProvider">
-    /// The scoped service provider captured at DbContext construction by the
-    /// <c>(sp, o) =&gt; o.AddInterceptors(new AuditSaveChangesInterceptor(sp))</c> wiring.
+    /// The service provider captured at options-build time by the
+    /// <c>(sp, o) =&gt; o.AddInterceptors(new AuditSaveChangesInterceptor(sp))</c> wiring. It is the
+    /// request scope only with <c>AddDbContext&lt;T&gt;((sp, o) =&gt; ...)</c>, whose lambda runs per
+    /// scope; with <c>AddDbContextPool</c> / <c>AddDbContextFactory</c> the options are built once
+    /// from the <strong>root</strong> provider. Capture therefore prefers
+    /// <see cref="AuditScope.CurrentServices"/> — the ambient request scope — over this one, and
+    /// refuses the pooled wirings where neither can attribute correctly.
     /// </param>
     public AuditSaveChangesInterceptor(IServiceProvider serviceProvider)
     {
@@ -41,16 +51,94 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     // mapped into the resolve factory (return null for 'no observer'), so the behavior is
     // identical: null observer and NullAuditCaptureObserver are both no-ops, and every other
     // fault is swallowed.
-    private void NotifyCaptureObserver(int auditedEntityCount, bool isAsyncCapture)
+    private static void NotifyCaptureObserver(IServiceProvider services, int auditedEntityCount, bool isAsyncCapture)
     {
         SafeObserverInvoker.Resolve(
             resolve: () =>
             {
-                var observer = serviceProvider.GetService<IAuditCaptureObserver>();
+                var observer = services.GetService<IAuditCaptureObserver>();
                 return observer is NullAuditCaptureObserver ? null : observer;
             },
             action: observer => observer.OnCaptured(auditedEntityCount, isAsyncCapture));
     }
+
+    // Refuses the one wiring that can only ever produce a wrong trail: a POOLED DbContext whose
+    // attribution comes from a registered resolver, with no ambient scope pushed.
+    //
+    // Why a guard and not a fix. With AddDbContextPool / AddPooledDbContextFactory, EF Core
+    // registers DbContextOptions as a SINGLETON, so the (sp, o) lambda - and with it
+    // UseOrionAudit(sp) - runs exactly once, from the root provider. A pooled DbContext is leased
+    // into a scope without EF handing that scope to anything the interceptor can see: the lease
+    // carries no provider, and the context's own CoreOptionsExtension.ApplicationServiceProvider is
+    // the same root one we already captured. So at save time there is literally no way to reach the
+    // request scope unless the caller made it ambient. Silence here is the worst outcome available -
+    // the trail looks healthy and every row names the first request's user - so we refuse instead.
+    //
+    // MaxPoolSize is the positive, public signal EF Core sets for exactly these two registrations
+    // (AddPoolingOptions -> CoreOptionsExtension.WithMaxPoolSize); it is null for AddDbContext. The
+    // root provider itself is NOT detectable: Microsoft DI hands the same ServiceProviderEngineScope
+    // type to root and child scopes alike, and IsRootScope is internal - which is precisely why
+    // ValidateScopes exists, and why AddDbContextFactory's non-pooled default cannot be caught here
+    // (see the README and the UseOrionAudit doc: it needs AuditScope.PushServices too).
+    private void GuardPooledAttribution(DbContext ctx)
+    {
+        if (pooledAttributionChecked)
+        {
+            return;
+        }
+
+        var pooled = ctx.GetService<IDbContextOptions>()
+            .FindExtension<CoreOptionsExtension>()?.MaxPoolSize is not null;
+        if (pooled && HasAttributionResolver(out var inner))
+        {
+            throw inner is null
+                ? new OrionAuditConfigurationException(PooledAttributionMessage)
+                : new OrionAuditConfigurationException(PooledAttributionMessage, inner);
+        }
+
+        pooledAttributionChecked = true;
+    }
+
+    // Is an actor / tenant resolver registered at all? Asked through IServiceProviderIsService so
+    // the common answer costs no instantiation and, on a root provider under ValidateScopes, does
+    // not throw before we can report anything. The resolve-and-catch fallback is for containers
+    // that do not supply it: a scope-validation failure there is itself proof that a scoped
+    // resolver is registered, so it becomes the inner exception of our message rather than the
+    // opaque one the consumer would otherwise see.
+    private bool HasAttributionResolver(out Exception? inner)
+    {
+        inner = null;
+        var isService = serviceProvider.GetService<IServiceProviderIsService>();
+        if (isService is not null)
+        {
+            return isService.IsService(typeof(IAuditUserResolver))
+                || isService.IsService(typeof(IAuditTenantResolver));
+        }
+
+        try
+        {
+            return serviceProvider.GetService<IAuditUserResolver>() is not null
+                || serviceProvider.GetService<IAuditTenantResolver>() is not null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            inner = ex;
+            return true;
+        }
+    }
+
+    private const string PooledAttributionMessage =
+        "OrionAudit: this DbContext is registered with AddDbContextPool / AddPooledDbContextFactory, " +
+        "so its DbContextOptions - and the IServiceProvider captured by UseOrionAudit(sp) - are built " +
+        "once from the ROOT provider. A registered IAuditUserResolver / IAuditTenantResolver resolved " +
+        "from it returns the first request's instance on every later save, which would stamp every " +
+        "audit row with the first request's user and tenant. Pick one: " +
+        "(1) register the context with services.AddDbContext<TContext>((sp, o) => o.Use...().UseOrionAudit(sp)), " +
+        "whose lambda runs per scope; " +
+        "(2) keep pooling and make the request scope ambient - in ASP.NET Core, " +
+        "app.Use(async (http, next) => { using (AuditScope.PushServices(http.RequestServices)) await next(); }), " +
+        "or push the scope you created around a background unit of work; " +
+        "(3) keep pooling and register no IAuditUserResolver / IAuditTenantResolver, leaving rows unattributed.";
 
     /// <inheritdoc />
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
@@ -120,9 +208,21 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     private async Task CaptureAsync(DbContextEventData eventData, CancellationToken cancellationToken)
     {
         var ctx = eventData.Context!;
-        var configuration = serviceProvider.GetRequiredService<IAuditConfiguration>();
-        var clock = serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
-        var asyncCapture = serviceProvider.GetService<AsyncCaptureOptions>();
+
+        // Which provider capture resolves from. The one captured by UseOrionAudit(sp) is the
+        // request scope ONLY with AddDbContext's (sp, o) overload, whose lambda runs per scope.
+        // AddDbContextPool and AddDbContextFactory register DbContextOptions as a SINGLETON, so
+        // that lambda runs once, from the root provider, and the captured provider stays the root
+        // for the life of the process - a scoped IAuditUserResolver / IAuditTenantResolver pulled
+        // out of it is the first request's instance on every later save, and every row would be
+        // stamped with the first request's user and tenant. The ambient scope wins whenever one
+        // has been pushed; everything singleton (IAuditConfiguration, TimeProvider, the options
+        // gates) resolves identically from either, so there is one resolution root here, not two.
+        var services = AuditScope.CurrentServices ?? serviceProvider;
+
+        var configuration = services.GetRequiredService<IAuditConfiguration>();
+        var clock = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var asyncCapture = services.GetService<AsyncCaptureOptions>();
 
         // State check is a struct compare; IsAudited is a FrozenDictionary lookup. Both are cheap,
         // but state-first lets us skip the dictionary lookup for entities that aren't being saved.
@@ -141,6 +241,12 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             return;
         }
 
+        // Nothing to fall back on: refuse rather than write a plausible-looking wrong trail.
+        if (AuditScope.CurrentServices is null)
+        {
+            GuardPooledAttribution(ctx);
+        }
+
         // Read the caller's ambient trace BEFORE starting OrionAudit's own span. StartActivity
         // reassigns Activity.Current to the OrionAudit.Capture span, so reading it afterwards
         // stamped every row with OrionAudit's internal span id instead of the caller's trace,
@@ -152,8 +258,8 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         activity?.SetTag("orionaudit.entry_count", auditedEntries.Count);
 
         var stopwatch = Stopwatch.StartNew();
-        var user = serviceProvider.GetService<IAuditUserResolver>()?.Resolve(serviceProvider);
-        var tenantId = serviceProvider.GetService<IAuditTenantResolver>()?.Resolve(serviceProvider);
+        var user = services.GetService<IAuditUserResolver>()?.Resolve(services);
+        var tenantId = services.GetService<IAuditTenantResolver>()?.Resolve(services);
         var occurredOn = clock.GetUtcNow().UtcDateTime;
 
         if (tenantId is not null)
@@ -165,11 +271,11 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             activity?.SetTag("orionaudit.user_type", user.Type);
         }
 
-        var snapshotPolicy = serviceProvider.GetService<SnapshotPolicy>() ?? SnapshotPolicy.Never;
-        var jsonContext = serviceProvider.GetService<JsonSerializerContext>();
+        var snapshotPolicy = services.GetService<SnapshotPolicy>() ?? SnapshotPolicy.Never;
+        var jsonContext = services.GetService<JsonSerializerContext>();
         // Presence of AuditHashChainOptions is the opt-in switch for tamper-evidence (same gate
         // pattern as AsyncCaptureOptions). null ⇒ chaining off ⇒ hash columns stay null.
-        var hashChain = serviceProvider.GetService<Integrity.AuditHashChainOptions>();
+        var hashChain = services.GetService<Integrity.AuditHashChainOptions>();
 
         // Async-capture mode: write a lightweight queue row per audited entity instead of an
         // AuditLog row. The diff and final AuditLog row are produced later by the dispatcher.
@@ -187,7 +293,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             OrionAuditTelemetry.CaptureEntriesPerSave.Record(auditedEntries.Count);
             OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
             // v0.7.26: notify the optional capture observer (async-capture path).
-            NotifyCaptureObserver(auditedEntries.Count, isAsyncCapture: true);
+            NotifyCaptureObserver(services, auditedEntries.Count, isAsyncCapture: true);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return;
         }
@@ -198,7 +304,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var failedCount = 0;
         // Built per-row so we can hand the events to IAuditEventPublisher after the loop. Only
         // sized when a publisher is actually wired (NullAuditEventPublisher skips the allocation).
-        var publisher = serviceProvider.GetService<IAuditEventPublisher>();
+        var publisher = services.GetService<IAuditEventPublisher>();
         var publishEvents = publisher is null or NullAuditEventPublisher
             ? null
             : new List<AuditLogEvent>(auditedEntries.Count);
@@ -250,7 +356,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         // create a gap.
         if (hashChain is not null && hashableRows is { Count: > 0 })
         {
-            var keyProvider = serviceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
+            var keyProvider = services.GetRequiredService<Integrity.IAuditChainKeyProvider>();
             await Integrity.EfCoreAuditHashChainWriter
                 .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
                     configuration.CustomColumns, cancellationToken)
@@ -269,7 +375,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         OrionAuditTelemetry.CaptureDuration.Record(stopwatch.Elapsed.TotalMilliseconds);
         // v0.7.26: notify the optional capture observer (inline path). Total audited
         // count (written + failed) so observers see the full capture surface.
-        NotifyCaptureObserver(writtenCount + failedCount, isAsyncCapture: false);
+        NotifyCaptureObserver(services, writtenCount + failedCount, isAsyncCapture: false);
 
         // Publish BEFORE SaveChanges so a publisher exception aborts the consumer transaction.
         // A NullAuditEventPublisher has nothing to publish and was filtered out above.
