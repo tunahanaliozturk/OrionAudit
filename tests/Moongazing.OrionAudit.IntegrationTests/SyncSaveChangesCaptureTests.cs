@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moongazing.OrionAudit;
+using Moongazing.OrionAudit.Integrity;
 using Moongazing.OrionAudit.Publishing;
 
 namespace Moongazing.OrionAudit.IntegrationTests;
@@ -46,7 +47,12 @@ public class SyncSaveChangesCaptureTests
         }
     }
 
-    private static async Task<(ServiceProvider Sp, SqliteConnection Conn)> BuildAsync(bool withPublisher)
+    // Fixed 32-byte key (base64), matching HashChainCaptureTests.
+    private const string ChainKeyBase64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+
+    private static async Task<(ServiceProvider Sp, SqliteConnection Conn)> BuildAsync(
+        bool withPublisher = false,
+        bool withHashChain = false)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
@@ -58,6 +64,10 @@ public class SyncSaveChangesCaptureTests
             if (withPublisher)
             {
                 o.UseEventPublisher<RecordingPublisher>();
+            }
+            if (withHashChain)
+            {
+                o.UseHashChain(h => h.UseKey(1, ChainKeyBase64));
             }
         });
         services.AddSingleton(connection);
@@ -74,7 +84,7 @@ public class SyncSaveChangesCaptureTests
     [Fact]
     public async Task SaveChanges_Sync_InsertUpdateDelete_ProducesThreeAuditRows()
     {
-        var (provider, connection) = await BuildAsync(withPublisher: false);
+        var (provider, connection) = await BuildAsync();
         await using var _p = provider;
         await using var _c = connection;
 
@@ -106,7 +116,7 @@ public class SyncSaveChangesCaptureTests
     [Fact]
     public async Task SaveChanges_Sync_StampsCorrelationFromAuditScope()
     {
-        var (provider, connection) = await BuildAsync(withPublisher: false);
+        var (provider, connection) = await BuildAsync();
         await using var _p = provider;
         await using var _c = connection;
 
@@ -142,5 +152,33 @@ public class SyncSaveChangesCaptureTests
         var call = Assert.Single(publisher.Calls);
         Assert.Single(call);
         Assert.Equal(nameof(AuditAction.Inserted), call[0].Action);
+    }
+
+    [Fact]
+    public async Task SaveChanges_Sync_DrainsTheAsyncHashChainTail()
+    {
+        // The hash chain's anchor lock/read is the one leg of the pipeline that genuinely
+        // suspends on database I/O. This is the sync override blocking on real async work.
+        var (provider, connection) = await BuildAsync(withHashChain: true);
+        await using var _p = provider;
+        await using var _c = connection;
+
+        using (var scope = provider.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<SyncDb>();
+            ctx.Notes.Add(new Note { Body = "chained" });
+            ctx.SaveChanges();
+        }
+
+        await using var read = provider.CreateAsyncScope();
+        var ctx2 = read.ServiceProvider.GetRequiredService<SyncDb>();
+        var entry = Assert.Single(await ctx2.AuditLogs.ToListAsync());
+        Assert.False(string.IsNullOrEmpty(entry.EntryHash));
+
+        var verifier = read.ServiceProvider.GetRequiredService<IAuditIntegrityVerifier>();
+        var result = await verifier.VerifyChainAsync(
+            AuditChainVerificationRequest.ForEntity(entry.EntityType, entry.EntityId));
+        Assert.True(result.IsValid);
+        Assert.Equal(1, result.VerifiedRowCount);
     }
 }
