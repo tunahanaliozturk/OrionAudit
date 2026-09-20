@@ -9,7 +9,7 @@ namespace Moongazing.OrionAudit.Integrity;
 /// columns live in the caller (which owns the <c>DbContext</c> and the key); this engine only does the
 /// deterministic in-memory MAC chaining.
 /// </summary>
-public static class AuditHashChainStamper
+internal static class AuditHashChainStamper
 {
     /// <summary>
     /// Identifies a single chain within the configured <see cref="AuditHashChainScope"/>. For

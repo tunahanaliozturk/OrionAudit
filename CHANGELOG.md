@@ -133,6 +133,26 @@ the analyzer — not a reviewer's memory — is what holds the line from here.
   `System.Diagnostics.Metrics.Meter` and mirror the instrument names; that keeps your samples
   attributable to your component instead of silently merging into OrionAudit's.
 
+- **BREAKING — `AuditHashChainStamper`, and with it the nested `AuditHashChainStamper.ChainKey`, is
+  now `internal`** (−21 entries: the class, the `ChainKey` record struct with all its
+  compiler-generated members, and `KeyFor` / `Stamp` / `DistinctKeys` / `SummarizeBatch`). This is
+  the *write* half of the tamper-evident hash chain. Its only caller is the internal
+  `EfCoreAuditHashChainWriter`, which runs it inside the same transaction that takes each stream's
+  anchor lock, reads the stream's current head, stamps the batch, and advances the anchor. Calling
+  `Stamp` from outside that transaction is not an extension point — it is how you get rows carrying
+  MACs the library did not issue, anchors that disagree with the rows they anchor, and a chain that
+  fails its own verification. `ChainKey` is the dictionary key that walk shares with the anchor
+  lock ordering; it has no meaning outside it.
+  **What to do instead:** nothing, if you were reading the chain — the *verification* half is
+  deliberately untouched and stays public, because verifying a chain without trusting the library
+  is the whole point of keying it. `Integrity.AuditEntryHasher.ComputeEntryHash` recomputes any
+  row's MAC from its content, its predecessor's hash and your key;
+  `Integrity.AuditChainVerifier.VerifyStream` walks a stream in chain order and checks it against
+  its `AuditChainAnchor`; and `IAuditIntegrityVerifier` does both against an EF Core store. If you
+  were *writing* chained rows, use the supported write paths — the save-changes interceptor, the
+  async dispatcher, or `AuditImportBuilder` for bulk import — all of which stamp through the same
+  internal writer and keep the anchors consistent.
+
 ### Added
 
 - **`AuditChainVerificationAnchor`** — the stream head `AuditChainVerifier.VerifyStream` checks a
