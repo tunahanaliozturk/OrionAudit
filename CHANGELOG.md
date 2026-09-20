@@ -155,6 +155,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which streams lost rows, which a bare `ExecuteDelete` never reveals. The batch is already bounded by
   `MaxRowsPerSweep`, and consumers without hash-chaining keep the fast path unchanged. Dry-run still
   deletes nothing and writes no checkpoint.
+- **`ChannelAuditEventPublisher.DisposeAsync` no longer disposes a `CancellationTokenSource` the
+  reader still holds.** The final `shutdownCts.Dispose()` ran unconditionally, including on the
+  path where the post-cancel `readerTask.WaitAsync(drainTimeout)` timed out and the timeout was
+  swallowed. A reader still sitting inside `ReadAllAsync(shutdownCts.Token)` then hit
+  `ObjectDisposedException` on its next read; `ReadLoopAsync` catches only
+  `OperationCanceledException`, so it resurfaced as an unobserved task exception during host
+  shutdown. The source is now disposed only once the reader has actually finished — immediately
+  when it completed within the drain budget, otherwise from a continuation on the reader task.
 
 ### Performance
 
