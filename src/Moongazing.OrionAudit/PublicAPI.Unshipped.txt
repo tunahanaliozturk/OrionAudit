@@ -1,4 +1,4 @@
-﻿#nullable enable
+﻿﻿#nullable enable
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Action.set -> void
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.AfterJson.set -> void
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Attempts.set -> void
@@ -61,3 +61,17 @@ Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Str
 Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>() -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
 Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>! configure) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
 static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext? context = null, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
+#nullable enable
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordCaptureEntrySize(int bytes) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordCompactionError(string! exceptionType) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchBatchSize(int count) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchClaimDuration(double milliseconds) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchError(string! exceptionType) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchFlushDuration(double milliseconds) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchIdlePoll() -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchLagViolation() -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordEventsPerPublish(int count) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordPublishDuration(double milliseconds) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordReconstructEventsReplayed(int rows) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordRetentionError(string! exceptionType) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordRetriesBeforeSuccess(int retries) -> void

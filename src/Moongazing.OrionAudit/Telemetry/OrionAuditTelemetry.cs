@@ -42,7 +42,7 @@ public static class OrionAuditTelemetry
         description: "Audit diff rows replayed past the latest snapshot during a reconstruction.");
 
     /// <summary>Record one reconstruction's replayed-row count. Negatives clamp to 0.</summary>
-    public static void RecordReconstructEventsReplayed(int rows)
+    internal static void RecordReconstructEventsReplayed(int rows)
         => ReconstructEventsReplayed.Record(System.Math.Max(0, rows));
 
     internal static readonly Counter<long> SnapshotsWritten = Meter.CreateCounter<long>(
@@ -101,11 +101,10 @@ public static class OrionAuditTelemetry
         description: "Unexpected exceptions swallowed by the retention sweep loop.");
 
     /// <summary>
-    /// Record a swallowed exception from the retention sweep loop. Public so consumer-
-    /// owned retention drivers can opt in to the same metric shape.
+    /// Record a swallowed exception from the retention sweep loop.
     /// </summary>
     /// <param name="exceptionType">Short type name (e.g. <c>TimeoutException</c>).</param>
-    public static void RecordRetentionError(string exceptionType)
+    internal static void RecordRetentionError(string exceptionType)
         => RetentionErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
 
     /// <summary>
@@ -122,7 +121,7 @@ public static class OrionAuditTelemetry
         description: "Per-row dispatch failures swallowed by the dispatcher (transient + terminal).");
 
     /// <summary>Record a per-row dispatch failure tagged with the exception type.</summary>
-    public static void RecordDispatchError(string exceptionType)
+    internal static void RecordDispatchError(string exceptionType)
         => DispatchErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
 
     /// <summary>
@@ -148,8 +147,8 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.poll.idle", unit: "{polls}",
         description: "Dispatcher cycles that claimed an empty batch.");
 
-    /// <summary>Record one idle poll (empty-claim cycle). Public for consumer-owned dispatchers.</summary>
-    public static void RecordDispatchIdlePoll() => DispatchIdlePolls.Add(1);
+    /// <summary>Record one idle poll (empty-claim cycle).</summary>
+    internal static void RecordDispatchIdlePoll() => DispatchIdlePolls.Add(1);
 
     /// <summary>
     /// v0.7.19 dispatch lag SLO violation counter. Increments each time a per-row
@@ -162,12 +161,12 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.lag.violations", unit: "{rows}",
         description: "Per-row dispatch lag exceeded the consumer-configured SLO threshold.");
 
-    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
-    public static void RecordDispatchLagViolation()
+    /// <summary>Record one row whose dispatch lag exceeded the configured SLO threshold.</summary>
+    internal static void RecordDispatchLagViolation()
         => DispatchLagViolations.Add(1);
 
-    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
-    public static void RecordDispatchBatchSize(int count)
+    /// <summary>Record a non-empty dispatcher claim size. Zero and negative counts are skipped.</summary>
+    internal static void RecordDispatchBatchSize(int count)
     {
         if (count <= 0)
         {
@@ -186,8 +185,8 @@ public static class OrionAuditTelemetry
         "orionaudit.capture.entry_size_bytes", unit: "By",
         description: "Capture queue entry payload size in bytes (BeforeJson + AfterJson).");
 
-    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
-    public static void RecordCaptureEntrySize(int bytes)
+    /// <summary>Record a capture queue entry payload size in bytes. Zero and negative sizes are skipped.</summary>
+    internal static void RecordCaptureEntrySize(int bytes)
     {
         if (bytes <= 0)
         {
@@ -208,8 +207,8 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.events_per_publish", unit: "{events}",
         description: "Events sent per IAuditEventPublisher.PublishAsync call.");
 
-    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
-    public static void RecordEventsPerPublish(int count)
+    /// <summary>Record the event count of one PublishAsync call. Zero and negative counts are skipped.</summary>
+    internal static void RecordEventsPerPublish(int count)
     {
         if (count <= 0)
         {
@@ -229,8 +228,8 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.publish.duration_ms", unit: "ms",
         description: "IAuditEventPublisher.PublishAsync wall-clock per dispatcher cycle.");
 
-    /// <summary>Public so consumer-owned dispatchers can opt in to the same metric shape.</summary>
-    public static void RecordPublishDuration(double milliseconds)
+    /// <summary>Record one PublishAsync wall-clock sample. Negatives clamp to 0.</summary>
+    internal static void RecordPublishDuration(double milliseconds)
         => PublishDuration.Record(System.Math.Max(0d, milliseconds));
 
     /// <summary>
@@ -250,9 +249,8 @@ public static class OrionAuditTelemetry
 
     /// <summary>
     /// Record the prior-attempt count of a successfully dispatched row. Negatives clamp to 0.
-    /// Public so consumer-owned dispatchers can opt in to the same metric shape.
     /// </summary>
-    public static void RecordRetriesBeforeSuccess(int retries)
+    internal static void RecordRetriesBeforeSuccess(int retries)
         => DispatchRetriesBeforeSuccess.Record(System.Math.Max(0, retries));
 
     internal static readonly Counter<long> DispatchRowsProcessed = Meter.CreateCounter<long>(
@@ -275,8 +273,8 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.flush_duration_ms", unit: "ms",
         description: "SaveChangesAsync wall-clock at dispatch time (AuditLog insert + queue delete + commit).");
 
-    /// <summary>Public so consumer-owned dispatchers can opt in.</summary>
-    public static void RecordDispatchFlushDuration(double milliseconds)
+    /// <summary>Record one dispatch-time SaveChangesAsync wall-clock sample. Negatives clamp to 0.</summary>
+    internal static void RecordDispatchFlushDuration(double milliseconds)
         => DispatchFlushDuration.Record(System.Math.Max(0d, milliseconds));
 
     /// <summary>
@@ -292,8 +290,8 @@ public static class OrionAuditTelemetry
         "orionaudit.dispatch.claim_duration_ms", unit: "ms",
         description: "Claim round-trip wall-clock per dispatcher cycle (UPDATE + SELECT).");
 
-    /// <summary>Public so consumer-owned dispatchers can opt in.</summary>
-    public static void RecordDispatchClaimDuration(double milliseconds)
+    /// <summary>Record one claim round-trip wall-clock sample. Negatives clamp to 0.</summary>
+    internal static void RecordDispatchClaimDuration(double milliseconds)
         => DispatchClaimDuration.Record(System.Math.Max(0d, milliseconds));
 
     private static long dispatchQueueDepth;
@@ -358,7 +356,7 @@ public static class OrionAuditTelemetry
 
     /// <summary>Record a swallowed exception from the compaction sweep loop, tagged with its type.</summary>
     /// <param name="exceptionType">Short type name (e.g. <c>TimeoutException</c>).</param>
-    public static void RecordCompactionError(string exceptionType)
+    internal static void RecordCompactionError(string exceptionType)
         => CompactionErrors.Add(1, new KeyValuePair<string, object?>("exception_type", exceptionType));
 
     internal static readonly Histogram<double> CompactionSweepDuration = Meter.CreateHistogram<double>(
