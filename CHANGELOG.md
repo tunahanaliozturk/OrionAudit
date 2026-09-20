@@ -33,6 +33,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, restored deliberately — use it only if every authenticated user really is entitled to
   the audit trail), or `o.AllowAnonymous()` (unchanged; local development only). Registrations
   that already named a policy or called `AllowAnonymous()` are unaffected.
+- **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
+  concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
+  write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
+  as script in the session of whoever later reviewed the audit log, which is an administrator by
+  definition. The entry list is now rendered server-side in `OrionAuditViewerStaticFiles` and every
+  audit value passes through `HtmlEncoder.Default` on the way out; the one remaining script in the
+  page only writes `textContent`, which the browser never parses as markup. Every interpolation site
+  is an HTML text node - no audit value reaches an attribute, a `<script>` block, or a JSON island -
+  so the HTML encoder is the correct encoder at each of them. The JSON API (`/api/log`,
+  `/api/{entityType}/{key}`, `/api/meta`) is unchanged and still returns raw values.
+
+  **Consumer-visible change:** the viewer's root page now resolves `TDbContext` and
+  `IAuditConfiguration` per request, exactly as the JSON API endpoints in the same route group
+  already did. A host that registered the viewer is unaffected; the page simply arrives filled in
+  rather than filling itself in from a follow-up `fetch`.
+
+- **Fixed a fail-open tenant filter on the audit read path.** `AuditQueryExtensions.AuditFor<T>()` and
+  `AuditLog()` apply a tenant filter when an `IAuditTenantResolver` is registered. When that resolver
+  returned null - a dropped header, a claim the gateway did not forward, a background thread with no
+  ambient context - the filter fell through **unfiltered** and handed the caller every tenant's audit
+  rows. The read widened to all tenants at exactly the moment the caller's identity was unknown, and
+  it carried into everything built on those extensions, including the viewer's `/api/log` and
+  `/api/{entityType}/{key}`. An unresolved tenant now denies: the read is scoped to the no-tenant
+  stream (`TenantId` null or `""`), which is the read-side mirror of the canonical value the write
+  path persists. In any tenant-stamped deployment that is the empty set; a genuinely single-tenant
+  deployment, whose resolver returns null by design, still reads its own history unchanged. A
+  deliberate empty result rather than a throw - these extensions run on request paths, and the
+  library reserves exceptions for configuration and programming boundaries. `crossTenant: true` is
+  still the explicit, auditable way to read across tenants, and an application with no resolver
+  registered at all is unaffected.
 
 ### Fixed
 
@@ -72,41 +102,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes when no tracing listener is attached (`StartActivity` returns null and there was no span
   to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
   failed intermittently — whenever a listener happened to be live in parallel.
-### Security
-
-- **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
-  concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
-  write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
-  as script in the session of whoever later reviewed the audit log, which is an administrator by
-  definition. The entry list is now rendered server-side in `OrionAuditViewerStaticFiles` and every
-  audit value passes through `HtmlEncoder.Default` on the way out; the one remaining script in the
-  page only writes `textContent`, which the browser never parses as markup. Every interpolation site
-  is an HTML text node - no audit value reaches an attribute, a `<script>` block, or a JSON island -
-  so the HTML encoder is the correct encoder at each of them. The JSON API (`/api/log`,
-  `/api/{entityType}/{key}`, `/api/meta`) is unchanged and still returns raw values.
-
-  **Consumer-visible change:** the viewer's root page now resolves `TDbContext` and
-  `IAuditConfiguration` per request, exactly as the JSON API endpoints in the same route group
-  already did. A host that registered the viewer is unaffected; the page simply arrives filled in
-  rather than filling itself in from a follow-up `fetch`.
-
-- **Fixed a fail-open tenant filter on the audit read path.** `AuditQueryExtensions.AuditFor<T>()` and
-  `AuditLog()` apply a tenant filter when an `IAuditTenantResolver` is registered. When that resolver
-  returned null - a dropped header, a claim the gateway did not forward, a background thread with no
-  ambient context - the filter fell through **unfiltered** and handed the caller every tenant's audit
-  rows. The read widened to all tenants at exactly the moment the caller's identity was unknown, and
-  it carried into everything built on those extensions, including the viewer's `/api/log` and
-  `/api/{entityType}/{key}`. An unresolved tenant now denies: the read is scoped to the no-tenant
-  stream (`TenantId` null or `""`), which is the read-side mirror of the canonical value the write
-  path persists. In any tenant-stamped deployment that is the empty set; a genuinely single-tenant
-  deployment, whose resolver returns null by design, still reads its own history unchanged. A
-  deliberate empty result rather than a throw - these extensions run on request paths, and the
-  library reserves exceptions for configuration and programming boundaries. `crossTenant: true` is
-  still the explicit, auditable way to read across tenants, and an application with no resolver
-  registered at all is unaffected.
-
-### Fixed
-
 - **Retention no longer makes hash-chain verification report tampering that never happened.** The
   retention sweep deletes the OLDEST rows of a stream, which the tamper-evident chain could not tell
   apart from an attacker deleting them: the surviving prefix no longer started at the genesis (its
@@ -175,6 +170,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records that actually reached the database leave the buffer, so a retry re-processes exactly the
   records that did not. A failed flush also detaches its batch so the retry cannot insert those
   rows twice.
+- **A nested `[OrionAuditModule]` type no longer emits at the wrong nesting level.** The generator
+  ignored `ContainingType`, so `[OrionAuditModule] partial class Registry` nested inside
+  `class Startup` produced a *top-level* `partial class Registry` in the namespace: the consumer's
+  `Startup.Registry.RegisterAuditedTypes(builder)` did not exist (CS0117) and an unrelated
+  `Registry` type was quietly declared next to it. The whole containing chain is now re-declared
+  around the emitted members, with each link's own accessibility. A module whose chain is not
+  `partial` all the way out is reported as **OA0001** at the module's declaration instead of
+  emitting a second declaration that cannot merge.
+- **A generic `[OrionAuditModule]` type no longer loses its type parameters.** `partial class
+  Module<T>` emitted `partial class Module` — an unrelated arity-0 type rather than a part of
+  `Module<T>`, so `Module<T>.RegisterAuditedTypes` did not exist. The type parameter list and any
+  constraint clauses are now emitted as declared, for the module and for every generic type it is
+  nested in. Constraints are resolved from the type parameter symbols and written `global::`-
+  qualified, with the declared nullable annotation: the generated file carries none of the
+  consumer's `using` directives, so a constraint such as `where T : IMarker` — or one written
+  through a `using` alias — would not resolve there if it were copied verbatim from the
+  declaration (CS0246, then CS0265 against the part that does resolve it).
+- **A `record` module or `[Auditable]` record is no longer skipped in silence.** The syntax
+  predicate was `node is ClassDeclarationSyntax`; a record is a `RecordDeclarationSyntax`, so the
+  declaration was dropped entirely and the consumer's only signal was a missing method at the call
+  site with nothing pointing at the cause. The predicate now matches `TypeDeclarationSyntax` and
+  the emitted part repeats the declaration's own keyword (`class`, `record`, `record class`, ...)
+  rather than hard-coding `class`.
+- **Two modules can no longer collide on a generated file's hint name and fail the build.** The
+  hint was `{namespace with '.'→'_'}_{Name}`, so namespace `A.B` + class `C_D` and namespace
+  `A.B.C` + class `D` both produced `A_B_C_D.OrionAuditModule.g.cs`; `AddSource` then threw
+  `ArgumentException` with an opaque message and dropped every file the run had already produced.
+  Nested modules (which took only their namespace) and `Module` vs `Module<T>` collided the same
+  way. The hint now comes from the type's full metadata name — namespace, every enclosing type,
+  generic arity — through an injective escape, in a new `HintNames` helper. Every `_` in the stem
+  starts a self-delimiting escape: `__` is a literal underscore, `_n` nesting, `_g` generic arity,
+  and `_u` plus four hex digits is any other character *by value*. Encoding the value is what makes
+  it injective — a C# identifier may legitimately contain a combining mark or connector
+  punctuation, so a single shared marker for every non-alphanumeric character maps two valid,
+  distinct modules back onto one stem.
+- **An `[Auditable]` type the generator cannot register is now reported, not dropped in silence.**
+  A type whose accessibility chain was not public/internal, and an abstract one, were filtered out
+  of the pipeline with nothing said: the consumer believed the type was audited and could only find
+  out when no audit row was ever written for it. Both now report at the type's own declaration —
+  **OA0003** for the accessibility chain (naming the container that fails) and **OA0002** for
+  abstract. Neither fires when the compilation declares no `[OrionAuditModule]` at all, since
+  nothing is generated then and the consumer is still on the reflective path.
+
+  Reachability answers every `Accessibility` member deliberately. `public`, `internal` and
+  `protected internal` are reachable — `protected internal` is protected *or* internal, and the
+  internal half alone lets any type in the compilation name it. `private protected` (protected
+  *and* internal), `protected` and `private` are not: same assembly is not enough, the caller must
+  also derive from the container, and a generated module never does.
+
+  The three diagnostics are `Usage` warnings and follow OrionGuard's `OG00xx` numbering. A fixture
+  that is deliberately unregisterable (private nested, abstract) suppresses them at the
+  declaration with `#pragma warning disable`.
 
 ### Changed
 

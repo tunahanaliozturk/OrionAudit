@@ -146,8 +146,9 @@ public class SoftDeleteTests
         Assert.Contains("not a public boolean", ex.Message);
     }
 
-    // Private nested so the v0.3 source generator skips it — it's only ever used via the
-    // reflective Audit<T>() path in the test below.
+    // Private nested so the source generator skips it — it's only ever used via the reflective
+    // Audit<T>() path in the test below. OA0003 is the generator reporting exactly that.
+#pragma warning disable OA0003 // [Auditable] type is not reachable from the generated module
     [Auditable]
     [SoftDelete(nameof(StateName))]
     private sealed class BadlyTagged
@@ -155,4 +156,5 @@ public class SoftDeleteTests
         public int Id { get; set; }
         public string StateName { get; set; } = "";
     }
+#pragma warning restore OA0003
 }

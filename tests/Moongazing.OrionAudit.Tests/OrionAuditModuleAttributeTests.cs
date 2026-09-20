@@ -3,7 +3,9 @@ using Moongazing.OrionAudit;
 
 namespace Moongazing.OrionAudit.Tests;
 
-public class OrionAuditModuleAttributeTests
+// partial: TaggedModule is nested here, and the generator re-declares the whole containing chain
+// around the module it emits into. Without it the generator reports OA0001.
+public partial class OrionAuditModuleAttributeTests
 {
     [OrionAuditModule]
     public partial class TaggedModule { }

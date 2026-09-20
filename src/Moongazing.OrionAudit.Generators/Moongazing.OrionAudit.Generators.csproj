@@ -13,4 +13,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- RS2008: every diagnostic this component reports has to be declared in a release-tracking
+         file. Same layout as Moongazing.OrionGuard.Generators. -->
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
 </Project>

@@ -16,11 +16,15 @@ public class AuditableTypeDiscoveryTests
         public int Id { get; set; }
     }
 
+    // Abstract on purpose: the test below pins that reflective discovery skips it too, so OA0002
+    // is the generator agreeing with the assertion.
+#pragma warning disable OA0002 // [Auditable] type is abstract and is not registered
     [Auditable]
     public abstract class MarkedAbstract
     {
         public int Id { get; set; }
     }
+#pragma warning restore OA0002
 
     [Fact]
     public void Discover_FindsTypesWithAuditableAttribute()
