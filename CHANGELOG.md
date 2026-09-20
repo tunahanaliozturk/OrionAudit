@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request's user.** `UseOrionAudit(sp)` captures whatever provider EF Core hands the options lambda.
   With `AddDbContext<T>((sp, o) => ...)` that lambda runs once per scope, so `sp` *is* the request
   scope and attribution was always correct. With `AddDbContextPool` — and with `AddDbContextFactory`,
-  whose `optionsLifetime` defaults to `Singleton` — EF Core registers `DbContextOptions` as a
+  whose `lifetime` argument defaults to `Singleton` — EF Core registers `DbContextOptions` as a
   singleton, so the lambda runs once from the **root** provider and the interceptor held that root
   provider forever: a scoped `IAuditUserResolver` / `IAuditTenantResolver` pulled out of it was the
   first request's instance on every later save. Three requests as alice / bob / carol all recorded

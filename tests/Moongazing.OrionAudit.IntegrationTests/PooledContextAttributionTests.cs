@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -236,7 +237,7 @@ public class PooledContextAttributionTests : IAsyncLifetime
     public async Task DbContextFactory_WithAmbientRequestScope_AttributesEachRequestToItsOwnActor()
     {
         var services = BaseServices(withResolvers: true);
-        // Same root-provider capture as pooling: optionsLifetime defaults to Singleton.
+        // Same root-provider capture as pooling: the lifetime argument defaults to Singleton.
         services.AddDbContextFactory<TestContext>((sp, o) =>
             o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
         await using var provider = Build(services);
@@ -384,6 +385,62 @@ public class PooledContextAttributionTests : IAsyncLifetime
         await using var scope = provider.CreateAsyncScope();
         var readCtx = scope.ServiceProvider.GetRequiredService<TestContext>();
         Assert.Single(await readCtx.AuditLog().ToListAsync());
+    }
+
+    [Fact]
+    public async Task DbContextFactory_WithScopedLifetime_AttributesWithoutAnAmbientScope()
+    {
+        // The other workaround the docs offer for AddDbContextFactory. The argument is named
+        // `lifetime` — `optionsLifetime` is AddDbContext's — and naming it wrong is a compile error,
+        // so this line is the documentation's regression test. Scoped options put the per-scope
+        // provider back in the lambda, so attribution works with nothing pushed.
+        var services = BaseServices(withResolvers: true);
+        services.AddDbContextFactory<TestContext>(
+            (sp, o) => o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp),
+            lifetime: ServiceLifetime.Scoped);
+        await using var provider = Build(services);
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<TestContext>>();
+            await using var ctx = await factory.CreateDbContextAsync();
+            await ctx.Database.EnsureCreatedAsync();
+        }
+
+        foreach (var (user, tenant) in new[] { ("alice", "t-1"), ("bob", "t-2"), ("carol", "t-3") })
+        {
+            await using var scope = provider.CreateAsyncScope();
+            var principal = scope.ServiceProvider.GetRequiredService<CurrentPrincipal>();
+            principal.UserId = user;
+            principal.TenantId = tenant;
+
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<TestContext>>();
+            await using var ctx = await factory.CreateDbContextAsync();
+            ctx.Notes.Add(new Note { Text = $"note by {user}" });
+            await ctx.SaveChangesAsync();
+        }
+
+        await using var read = provider.CreateAsyncScope();
+        var readFactory = read.ServiceProvider.GetRequiredService<IDbContextFactory<TestContext>>();
+        await using var readCtx = await readFactory.CreateDbContextAsync();
+        AssertOneRowPerActor(await readCtx.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public void DocumentedFactoryLifetimeArgument_IsStillNamedLifetime()
+    {
+        // Pins the name the README and the UseOrionAudit remarks tell consumers to type, against the
+        // EF Core actually referenced — verified identical in 9.0.0 and 10.0.12, so the pending bump
+        // does not invalidate the docs. If a future EF renames it, this fails instead of the
+        // consumer's build.
+        var lifetimeParameters = typeof(EntityFrameworkServiceCollectionExtensions)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Where(m => m.Name == "AddDbContextFactory")
+            .Select(m => m.GetParameters().Single(p => p.ParameterType == typeof(ServiceLifetime)).Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal("lifetime", Assert.Single(lifetimeParameters));
     }
 
     [Fact]

@@ -41,10 +41,13 @@ public static class DbContextOptionsBuilderExtensions
     /// <item>
     /// <description>
     /// <c>services.AddDbContextFactory&lt;T&gt;(...)</c> — the same root-provider capture, because
-    /// <c>optionsLifetime</c> defaults to <see cref="Microsoft.Extensions.DependencyInjection.ServiceLifetime.Singleton"/>;
+    /// its <c>lifetime</c> argument defaults to <see cref="Microsoft.Extensions.DependencyInjection.ServiceLifetime.Singleton"/>;
     /// a factory-made context is also not tied to any scope in the first place. Use
     /// <see cref="AuditScope.PushServices"/>, or pass
-    /// <c>optionsLifetime: ServiceLifetime.Scoped</c> to get the per-scope behaviour above. Unlike
+    /// <c>lifetime: ServiceLifetime.Scoped</c> to get the per-scope behaviour above (the argument is
+    /// named <c>lifetime</c> on <c>AddDbContextFactory</c> in every EF Core version this package
+    /// supports — <c>contextLifetime</c> / <c>optionsLifetime</c> belong to <c>AddDbContext</c>).
+    /// Unlike
     /// pooling this one cannot be detected at runtime (Microsoft DI does not let a library tell its
     /// root provider apart from a scope), so it is on the caller — run with <c>ValidateScopes</c>
     /// enabled and a scoped resolver will fail loudly.

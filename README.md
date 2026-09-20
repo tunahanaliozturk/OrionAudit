@@ -557,7 +557,7 @@ can see the request:
 | ------------ | --------------------------- | ------------ | ----------- |
 | `AddDbContext<T>((sp, o) => …)` | scoped | the request scope | nothing — attribution just works |
 | `AddDbContextPool<T>` / `AddPooledDbContextFactory<T>` | **singleton** | the **root** provider | push the request scope (below) |
-| `AddDbContextFactory<T>` | **singleton** by default | the **root** provider | push the request scope, or pass `optionsLifetime: ServiceLifetime.Scoped` |
+| `AddDbContextFactory<T>` | **singleton** by default | the **root** provider | push the request scope, or pass `lifetime: ServiceLifetime.Scoped` |
 | `AddDbContext<T>(o => …)` (no `sp`) | — | — | not supported; there is no provider to hand in |
 
 With the singleton rows, the lambda runs **once**, so a scoped `IAuditUserResolver` /
