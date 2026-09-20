@@ -36,25 +36,25 @@
 public class AuditChainAnchor
 {
     /// <summary>Assembly-qualified entity type of the stream (matches <see cref="AuditLog.EntityType"/>).</summary>
-    public string EntityType { get; set; } = default!;
+    public string EntityType { get; internal set; } = default!;
 
     /// <summary>Entity primary key of the stream (matches <see cref="AuditLog.EntityId"/>).</summary>
-    public string EntityId { get; set; } = default!;
+    public string EntityId { get; internal set; } = default!;
 
     /// <summary>
     /// Tenant of the stream. <see cref="string.Empty"/> for a null/single-tenant row, so the column is
     /// never null (it is part of the primary key).
     /// </summary>
-    public string TenantId { get; set; } = string.Empty;
+    public string TenantId { get; internal set; } = string.Empty;
 
     /// <summary>The <see cref="AuditLog.EntryHash"/> of the most recent hashed row in this stream.</summary>
-    public string LatestEntryHash { get; set; } = default!;
+    public string LatestEntryHash { get; internal set; } = default!;
 
     /// <summary>The number of hashed rows in this stream. Compared against the walked count to detect truncation.</summary>
-    public long RowCount { get; set; }
+    public long RowCount { get; internal set; }
 
     /// <summary>The <see cref="AuditLog.HashKeyId"/> of the most recent row, recorded for rotation visibility.</summary>
-    public int KeyId { get; set; }
+    public int KeyId { get; internal set; }
 
     /// <summary>
     /// How many of this stream's hashed rows were legitimately removed from the HEAD of the chain by
@@ -70,7 +70,7 @@ public class AuditChainAnchor
     /// <see cref="RowCount"/> itself stays the stream's lifetime hashed-row total, so a genuine
     /// deletion that nothing recorded still fails the check.
     /// </remarks>
-    public long PrunedRowCount { get; set; }
+    public long PrunedRowCount { get; internal set; }
 
     /// <summary>
     /// The <see cref="AuditLog.EntryHash"/> of the newest pruned row - equivalently, the
@@ -82,5 +82,5 @@ public class AuditChainAnchor
     /// to exactly this hash instead of to nothing, so the pruned prefix reads as intentional while a
     /// surviving genesis that links anywhere else is still a broken link.
     /// </remarks>
-    public string? PrunedThroughHash { get; set; }
+    public string? PrunedThroughHash { get; internal set; }
 }

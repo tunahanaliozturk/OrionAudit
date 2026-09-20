@@ -14,59 +14,59 @@
 public class AuditCaptureQueueEntry
 {
     /// <summary>Auto-increment surrogate key; also the dispatch order key.</summary>
-    public long Id { get; set; }
+    public long Id { get; internal set; }
 
     /// <summary>Assembly-qualified name of the audited entity type.</summary>
-    public string EntityType { get; set; } = default!;
+    public string EntityType { get; internal set; } = default!;
 
     /// <summary>
     /// Optional base type for TPH / polymorphic capture, carried through the async-capture
     /// queue so the dispatcher can stamp it on the final <see cref="AuditLog.EntityBaseType"/>.
     /// Null when the audited type has no declared base type.
     /// </summary>
-    public string? EntityBaseType { get; set; }
+    public string? EntityBaseType { get; internal set; }
 
     /// <summary>Serialized primary key of the audited entity (canonical <see cref="AuditKey"/> form).</summary>
-    public string EntityId { get; set; } = default!;
+    public string EntityId { get; internal set; } = default!;
 
     /// <summary>What kind of change this row records.</summary>
-    public AuditAction Action { get; set; }
+    public AuditAction Action { get; internal set; }
 
     /// <summary>Rule-applied before-state snapshot JSON (hash/redact/exclude already applied).</summary>
-    public string BeforeJson { get; set; } = default!;
+    public string BeforeJson { get; internal set; } = default!;
 
     /// <summary>Rule-applied after-state snapshot JSON (hash/redact/exclude already applied).</summary>
-    public string AfterJson { get; set; } = default!;
+    public string AfterJson { get; internal set; } = default!;
 
     /// <summary>Optional user id captured at write time.</summary>
-    public string? UserId { get; set; }
+    public string? UserId { get; internal set; }
 
     /// <summary>Optional human-readable user display name.</summary>
-    public string? UserDisplay { get; set; }
+    public string? UserDisplay { get; internal set; }
 
     /// <summary>Optional user classification.</summary>
-    public string? UserType { get; set; }
+    public string? UserType { get; internal set; }
 
     /// <summary>Optional tenant id captured at write time.</summary>
-    public string? TenantId { get; set; }
+    public string? TenantId { get; internal set; }
 
     /// <summary>Optional correlation id captured at write time.</summary>
-    public string? CorrelationId { get; set; }
+    public string? CorrelationId { get; internal set; }
 
     /// <summary>UTC timestamp of the originating change; copied verbatim onto the final <see cref="AuditLog"/>.</summary>
-    public DateTime OccurredOnUtc { get; set; }
+    public DateTime OccurredOnUtc { get; internal set; }
 
     /// <summary>Dispatch attempts so far; drives dead-lettering.</summary>
-    public int Attempts { get; set; }
+    public int Attempts { get; internal set; }
 
     /// <summary>Null until dead-lettered, then the failure detail. A non-null value excludes the row from dispatch.</summary>
-    public string? Error { get; set; }
+    public string? Error { get; internal set; }
 
     /// <summary>Per-dispatcher claim token; null when unclaimed.</summary>
-    public string? ClaimToken { get; set; }
+    public string? ClaimToken { get; internal set; }
 
     /// <summary>UTC time the current claim was taken; used with the claim lease to reclaim abandoned rows.</summary>
-    public DateTime? ClaimedUtc { get; set; }
+    public DateTime? ClaimedUtc { get; internal set; }
 
     /// <summary>
     /// JSON object mapping custom-column name → captured value. Populated by the interceptor's
@@ -74,5 +74,5 @@ public class AuditCaptureQueueEntry
     /// dispatcher deserialises and applies each value to the final <see cref="AuditLog"/>.
     /// Null when no custom columns are configured (or all providers returned null).
     /// </summary>
-    public string? CustomColumnsJson { get; set; }
+    public string? CustomColumnsJson { get; internal set; }
 }

@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **The persistence bookkeeping entities are read-only to consumers.** Every setter on
+  `AuditCaptureQueueEntry` (18), `AuditChainAnchor` (8) and `SnapshotCursor` (5) is now
+  `internal set`. The getters, the types and their EF Core mappings are unchanged, so querying,
+  projecting and reading these tables works exactly as before; the generated schema is
+  byte-for-byte identical.
+
+  These three tables are the library's own transactional state, not data a consumer authors. The
+  claim token and claim timestamp are how a dispatcher *leases* a queue row so two dispatchers
+  cannot process it twice; `Attempts` and `Error` are what dead-lettering is decided on;
+  `LatestEntryHash`, `RowCount` and `PrunedThroughHash` are what tamper-evidence is checked
+  against; `UpdatesSinceLast` is what the snapshot policy counts. Writing any of them from outside
+  the library was never a supported operation — hand-mutating a claim token races the dispatcher's
+  atomic claim and can get a row processed twice, and hand-setting an anchor hash silently
+  invalidates the chain it exists to protect. The setters were public only because EF Core needs
+  the *types* public to map them, and nothing narrowed the columns after that. This closes the gap;
+  it does not withdraw a capability anyone was meant to have.
+
+  Nothing in the OrionAudit packages, the samples or the benchmarks changed as a result, and the
+  only code in the repository that writes these columns is the library itself. If you are affected,
+  you were reaching into the dispatcher's internals: file an issue describing the goal and it can be
+  met with a supported API instead.
+
+  `AuditLog` is deliberately untouched and keeps its public setters. Consumers legitimately
+  construct audit rows — `OrionAudit.Testing`'s `InMemoryAuditHistoryStore` seeds from them, and
+  `AuditImportBuilder` exists to import them — so narrowing `AuditLog` would break a supported path
+  rather than close a hole.
+
 ### Added
 
 - `Microsoft.CodeAnalysis.PublicApiAnalyzers` on all five packable projects (`OrionAudit`,
