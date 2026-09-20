@@ -61,3 +61,37 @@ Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Str
 Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>() -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
 Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>! configure) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
 static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext? context = null, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ChainKey() -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ChainKey(string! EntityType, string! EntityId, string! TenantId) -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.Deconstruct(out string! EntityType, out string! EntityId, out string! TenantId) -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityId.get -> string!
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityId.init -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityType.get -> string!
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityType.init -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.Equals(Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey other) -> bool
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.TenantId.get -> string!
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.TenantId.init -> void
+*REMOVED*override Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.GetHashCode() -> int
+*REMOVED*static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.operator !=(Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey left, Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey right) -> bool
+*REMOVED*static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.operator ==(Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey left, Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey right) -> bool
+*REMOVED*static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.DistinctKeys(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! newRows, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope) -> System.Collections.Generic.IReadOnlyCollection<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey>!
+*REMOVED*static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.KeyFor(Moongazing.OrionAudit.AuditLog! entry, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope) -> Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey
+*REMOVED*static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.Stamp(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! newRows, System.Collections.Generic.IReadOnlyDictionary<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey, string?>! existingHeadHashes, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope, int keyId, System.ReadOnlyMemory<byte> key, System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! customColumnsFor, System.Collections.Generic.IReadOnlyDictionary<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey, long>? existingRowCounts = null) -> void
+*REMOVED*static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.SummarizeBatch(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! newRows, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope) -> System.Collections.Generic.IReadOnlyDictionary<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey, (string! EntryHash, int Added)>!
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordCaptureEntrySize(int bytes) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordCompactionError(string! exceptionType) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchBatchSize(int count) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchClaimDuration(double milliseconds) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchError(string! exceptionType) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchFlushDuration(double milliseconds) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchIdlePoll() -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchLagViolation() -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordEventsPerPublish(int count) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordPublishDuration(double milliseconds) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordReconstructEventsReplayed(int rows) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordRetentionError(string! exceptionType) -> void
+*REMOVED*static Moongazing.OrionAudit.OrionAuditTelemetry.RecordRetriesBeforeSuccess(int retries) -> void
+*REMOVED*~override Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.Equals(object obj) -> bool
+*REMOVED*~override Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ToString() -> string

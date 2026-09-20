@@ -105,6 +105,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ArgumentNullException` rather than silently registering nothing.
     `OrionAuditOptions.Audit<T>(configure = null)` — the surface almost every consumer actually
     calls — is untouched.
+Narrowing the core package's public surface. Writing the API down in 1.0.0 is what made the size of
+it visible — 938 entries across 116 public types, far more than a consumer needs. Each removal below
+is library-internal machinery that was only ever reachable by accident; none of it is part of how
+OrionAudit is meant to be used. 2.0.0 is the release that is allowed to take them back, and every
+removal is recorded in `src/Moongazing.OrionAudit/PublicAPI.Unshipped.txt` as a `*REMOVED*` line, so
+the analyzer — not a reviewer's memory — is what holds the line from here.
+
+- **BREAKING — the 13 `OrionAuditTelemetry.Record*` helpers are now `internal`** (−13 entries):
+  `RecordCaptureEntrySize`, `RecordCompactionError`, `RecordDispatchBatchSize`,
+  `RecordDispatchClaimDuration`, `RecordDispatchError`, `RecordDispatchFlushDuration`,
+  `RecordDispatchIdlePoll`, `RecordDispatchLagViolation`, `RecordEventsPerPublish`,
+  `RecordPublishDuration`, `RecordReconstructEventsReplayed`, `RecordRetentionError`,
+  `RecordRetriesBeforeSuccess`. These are OrionAudit's own instrumentation call sites: each one
+  writes into an instrument that was already `internal`, on a meter that describes the pipeline
+  OrionAudit runs. Their doc comments offered them to "consumer-owned dispatchers", but the only
+  thing an outside caller could achieve with them was to push samples describing *its* pipeline into
+  a meter that claims to describe *ours* — a metric that says `orionaudit.dispatch.lag` while
+  measuring something OrionAudit never dispatched. The surface was also already inconsistent:
+  `RecordRetentionDispatched`, `SetQueueDepth` and `SetDlqDepth` do exactly the same job and were
+  `internal` from the start.
+  **What to do instead:** to *observe* OrionAudit, nothing changes —
+  `OrionAuditTelemetry.ActivitySourceName` and `OrionAuditTelemetry.MeterName` remain public and are
+  the supported attachment point (`AddMeter(OrionAuditTelemetry.MeterName)`,
+  `AddSource(OrionAuditTelemetry.ActivitySourceName)`, or a raw `MeterListener` / `ActivityListener`).
+  To *emit* metrics for a dispatcher or retention driver you wrote yourself, create your own
+  `System.Diagnostics.Metrics.Meter` and mirror the instrument names; that keeps your samples
+  attributable to your component instead of silently merging into OrionAudit's.
+
+- **BREAKING — `AuditHashChainStamper`, and with it the nested `AuditHashChainStamper.ChainKey`, is
+  now `internal`** (−21 entries: the class, the `ChainKey` record struct with all its
+  compiler-generated members, and `KeyFor` / `Stamp` / `DistinctKeys` / `SummarizeBatch`). This is
+  the *write* half of the tamper-evident hash chain. Its only caller is the internal
+  `EfCoreAuditHashChainWriter`, which runs it inside the same transaction that takes each stream's
+  anchor lock, reads the stream's current head, stamps the batch, and advances the anchor. Calling
+  `Stamp` from outside that transaction is not an extension point — it is how you get rows carrying
+  MACs the library did not issue, anchors that disagree with the rows they anchor, and a chain that
+  fails its own verification. `ChainKey` is the dictionary key that walk shares with the anchor
+  lock ordering; it has no meaning outside it.
+  **What to do instead:** nothing, if you were reading the chain — the *verification* half is
+  deliberately untouched and stays public, because verifying a chain without trusting the library
+  is the whole point of keying it. `Integrity.AuditEntryHasher.ComputeEntryHash` recomputes any
+  row's MAC from its content, its predecessor's hash and your key;
+  `Integrity.AuditChainVerifier.VerifyStream` walks a stream in chain order and checks it against
+  its `AuditChainAnchor`; and `IAuditIntegrityVerifier` does both against an EF Core store. If you
+  were *writing* chained rows, use the supported write paths — the save-changes interceptor, the
+  async dispatcher, or `AuditImportBuilder` for bulk import — all of which stamp through the same
+  internal writer and keep the anchors consistent.
 
 ### Added
 
