@@ -240,6 +240,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   around the emitted members, with each link's own accessibility. A module whose chain is not
   `partial` all the way out is reported as **OA0001** at the module's declaration instead of
   emitting a second declaration that cannot merge.
+- **A generic `[OrionAuditModule]` type no longer loses its type parameters.** `partial class
+  Module<T>` emitted `partial class Module` — an unrelated arity-0 type rather than a part of
+  `Module<T>`, so `Module<T>.RegisterAuditedTypes` did not exist. The type parameter list and any
+  constraint clauses are now emitted as declared, for the module and for every generic type it is
+  nested in.
 
 ## [0.11.3] - 2026-07-28
 

@@ -100,6 +100,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 
             chain.Reverse();
 
+            var declarations = new List<TypeDeclarationSyntax>(chain.Count);
             INamedTypeSymbol? blocker = null;
             foreach (var link in chain)
             {
@@ -109,6 +110,8 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
                     blocker = link;
                     break;
                 }
+
+                declarations.Add(declaration);
             }
 
             // Emitting a second, non-matching declaration would only turn a clear miss into an
@@ -123,7 +126,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var source = EmitModule(module, chain, input.Types);
+            var source = EmitModule(module, chain, declarations, input.Types);
             var hint = $"{module.ContainingNamespace.ToDisplayString().Replace('.', '_')}_{module.Name}.OrionAuditModule.g.cs";
             spc.AddSource(hint, source);
         }
@@ -148,6 +151,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
     private static string EmitModule(
         INamedTypeSymbol module,
         List<INamedTypeSymbol> chain,
+        List<TypeDeclarationSyntax> declarations,
         ImmutableArray<INamedTypeSymbol> types)
     {
         var ns = module.ContainingNamespace.IsGlobalNamespace
@@ -171,7 +175,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
         for (var i = 0; i < chain.Count; i++)
         {
             var indent = new string(' ', i * 4);
-            sb.Append(indent).Append(AccessModifier(chain[i])).Append(" partial class ").AppendLine(chain[i].Name);
+            sb.Append(indent).AppendLine(Header(chain[i], declarations[i]));
             sb.Append(indent).AppendLine("{");
         }
 
@@ -219,9 +223,39 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Partial declarations of the same type must agree on accessibility, so each link of the chain
-    /// is re-declared with the one the consumer wrote — including the nested-only modifiers.
+    /// Re-declares one link of the nesting chain as the consumer wrote it: same accessibility
+    /// (partial declarations must agree), same type parameters, same constraints. A generic module
+    /// emitted without its type parameter list is a different type of arity 0, not a part of it.
     /// </summary>
+    private static string Header(INamedTypeSymbol type, TypeDeclarationSyntax declaration)
+    {
+        var sb = new StringBuilder();
+        sb.Append(AccessModifier(type)).Append(" partial class ").Append(type.Name);
+
+        if (declaration.TypeParameterList is not null)
+        {
+            sb.Append(declaration.TypeParameterList.WithoutTrivia().ToFullString());
+        }
+
+        // Constraints may be written on any one part of a partial type; the others must repeat them
+        // identically or omit them. Copying verbatim from whichever part carries them is valid
+        // either way, and the type parameter list always travels with them.
+        foreach (var reference in type.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is TypeDeclarationSyntax other && other.ConstraintClauses.Count > 0)
+            {
+                foreach (var clause in other.ConstraintClauses)
+                {
+                    sb.Append(' ').Append(clause.WithoutTrivia().ToFullString().Trim());
+                }
+
+                break;
+            }
+        }
+
+        return sb.ToString();
+    }
+
     private static string AccessModifier(INamedTypeSymbol type) => type.DeclaredAccessibility switch
     {
         Accessibility.Public => "public",

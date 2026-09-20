@@ -85,6 +85,64 @@ public class OrionAuditModuleGeneratorTests
         Assert.Equal("Registry", TextAt(source, diagnostic));
     }
 
+    [Fact]
+    public void GenericModule_EmitsItsTypeParametersAndConstraints()
+    {
+        const string source = """
+            using Moongazing.OrionAudit;
+            using Moongazing.OrionAudit.Configuration;
+
+            namespace Consumer;
+
+            [Auditable]
+            public sealed class Widget { public int Id { get; set; } }
+
+            [OrionAuditModule]
+            public partial class Registry<TMarker> where TMarker : class, new() { }
+
+            public static class Consume
+            {
+                public static void Use(AuditConfigurationBuilder builder) =>
+                    Registry<Widget>.RegisterAuditedTypes(builder);
+            }
+            """;
+
+        var generated = SingleSource(RunAndAssertConsumerCompiles(source));
+
+        // Dropping the type parameters emitted a second, arity-0 'Registry' instead of a part of
+        // Registry<TMarker>; dropping the constraints is CS0265 against the part that has them.
+        Assert.Contains("partial class Registry<TMarker>", generated, StringComparison.Ordinal);
+        Assert.Contains("where TMarker : class, new()", generated, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenericContainingType_IsReDeclaredWithItsTypeParameters()
+    {
+        const string source = """
+            using Moongazing.OrionAudit;
+            using Moongazing.OrionAudit.Configuration;
+
+            namespace Consumer;
+
+            public partial class Startup<TApp> where TApp : notnull
+            {
+                [OrionAuditModule]
+                public partial class Registry { }
+            }
+
+            public static class Consume
+            {
+                public static void Use(AuditConfigurationBuilder builder) =>
+                    Startup<string>.Registry.RegisterAuditedTypes(builder);
+            }
+            """;
+
+        var generated = SingleSource(RunAndAssertConsumerCompiles(source));
+
+        Assert.Contains("partial class Startup<TApp>", generated, StringComparison.Ordinal);
+        Assert.Contains("where TApp : notnull", generated, StringComparison.Ordinal);
+    }
+
     private static (Compilation Output, GeneratorDriverRunResult Run) Run(string source)
     {
         // Every assembly the test host has loaded, plus OrionAudit itself: enough for a consumer
