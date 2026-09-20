@@ -1,3 +1,4 @@
+﻿using System.Globalization;
 using System.Text.Json.Nodes;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
@@ -35,7 +36,7 @@ public class AuditViewRenderBenchmarks
             rows[i] = new AuditLog
             {
                 EntityType = "Sample.Entity, Sample",
-                EntityId = i.ToString(),
+                EntityId = i.ToString(CultureInfo.InvariantCulture),
                 Action = AuditAction.Updated,
                 OccurredOnUtc = baseTime.AddSeconds(i),
                 UserDisplay = "user@example.com",

@@ -6,10 +6,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!--
+      Warnings are errors here like everywhere else. This project was the one place they were not,
+      and the three it had went unnoticed for exactly that reason - which also cost review time,
+      because every agent and every reviewer had to be told those three were expected.
+    -->
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!--
+      CA1707: a benchmark method's name is a label printed in the results table, and the underscore
+      separates the scenario from what is being measured (Build_WithHashAndRedact). Renaming them to
+      satisfy a naming rule written for public API would make the output harder to read.
+    -->
+    <NoWarn>$(NoWarn);CS1591;CA1707</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
