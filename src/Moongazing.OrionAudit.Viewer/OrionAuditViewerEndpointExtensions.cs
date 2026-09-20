@@ -47,7 +47,7 @@ public static class OrionAuditViewerEndpointExtensions
         var group = endpoints.MapGroup(prefix);
 
         OrionAuditViewerApi.Map<TDbContext>(group);
-        OrionAuditViewerStaticFiles.Map(group);
+        OrionAuditViewerStaticFiles.Map<TDbContext>(group);
 
         accessDecision(group);
 

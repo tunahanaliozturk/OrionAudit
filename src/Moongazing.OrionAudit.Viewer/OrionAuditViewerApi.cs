@@ -64,8 +64,9 @@ internal static class OrionAuditViewerApi
     }
 
     // EF tracks the loaded row, so reading shadow values is an in-memory access — no extra
-    // round-trip per row. Empty dictionary when no columns registered.
-    private static Dictionary<string, object?> ProjectCustoms(
+    // round-trip per row. Empty dictionary when no columns registered. Internal so the
+    // server-rendered page projects custom columns exactly as the JSON API does.
+    internal static Dictionary<string, object?> ProjectCustoms(
         DbContext db, AuditLog row, IAuditConfiguration config)
     {
         if (config.CustomColumns.Count == 0)

@@ -24,48 +24,22 @@
   <h1>OrionAudit Viewer</h1>
   <span class="badge" id="queue">queue: …</span>
 </header>
-<main id="log">Loading…</main>
+<!--
+  The audit entries are rendered SERVER-SIDE into the placeholder below and HTML-encoded
+  on the way out (see OrionAuditViewerStaticFiles). They are deliberately not built in the
+  browser from the JSON API: an audited value is attacker-controlled content, and the
+  previous innerHTML templating executed it in the reviewing admin's session (stored XSS).
+  The only script left touches textContent, which the browser never parses as markup.
+-->
+<main id="log"><!--orionaudit:entries--></main>
 <script>
 const base = location.pathname.replace(/\/$/, "");
-async function load() {
-  const meta = await fetch(base + "/api/meta").then(r => r.json());
-  document.getElementById("queue").textContent =
-    "pending: " + (meta.queueDepth ?? 0);
-  const page = await fetch(base + "/api/log?page=1&size=50").then(r => r.json());
-  const root = document.getElementById("log");
-  root.innerHTML = "";
-  for (const e of page.entries) {
-    const div = document.createElement("div");
-    div.className = "entry";
-    const head = document.createElement("div");
-    head.className = "entry-head";
-    head.innerHTML = '<span class="action">' + e.action + '</span>' +
-      '<span>' + new Date(e.occurredOnUtc).toLocaleString() + '</span>' +
-      '<span>' + (e.userDisplay ?? "—") + '</span>';
-    if (e.customColumns) {
-      for (const [k, v] of Object.entries(e.customColumns)) {
-        if (v === null || v === undefined) continue;
-        const badge = document.createElement('span');
-        badge.className = 'badge';
-        badge.textContent = k + ': ' + v;
-        head.appendChild(badge);
-      }
-    }
-    div.appendChild(head);
-    for (const c of e.changes) {
-      const row = document.createElement("div");
-      row.className = "change";
-      row.innerHTML = '<span class="path">' + c.propertyPath + '</span>' +
-        '<span class="kind">' + c.changeKind + '</span>' +
-        '<span><span class="old">' + (c.oldValue ?? "") + '</span> ' +
-        '<span class="new">' + (c.newValue ?? "") + '</span></span>';
-      div.appendChild(row);
-    }
-    root.appendChild(div);
-  }
-  if (!page.entries.length) root.textContent = "No audit entries yet.";
-}
-load().catch(err => document.getElementById("log").textContent = "Error: " + err);
+fetch(base + "/api/meta")
+  .then(r => r.json())
+  .then(meta => {
+    document.getElementById("queue").textContent = "pending: " + (meta.queueDepth ?? 0);
+  })
+  .catch(() => { document.getElementById("queue").textContent = "queue: n/a"; });
 </script>
 </body>
 </html>

@@ -72,6 +72,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes when no tracing listener is attached (`StartActivity` returns null and there was no span
   to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
   failed intermittently — whenever a listener happened to be live in parallel.
+### Security
+
+- **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
+  concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
+  write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
+  as script in the session of whoever later reviewed the audit log, which is an administrator by
+  definition. The entry list is now rendered server-side in `OrionAuditViewerStaticFiles` and every
+  audit value passes through `HtmlEncoder.Default` on the way out; the one remaining script in the
+  page only writes `textContent`, which the browser never parses as markup. Every interpolation site
+  is an HTML text node - no audit value reaches an attribute, a `<script>` block, or a JSON island -
+  so the HTML encoder is the correct encoder at each of them. The JSON API (`/api/log`,
+  `/api/{entityType}/{key}`, `/api/meta`) is unchanged and still returns raw values.
+
+  **Consumer-visible change:** the viewer's root page now resolves `TDbContext` and
+  `IAuditConfiguration` per request, exactly as the JSON API endpoints in the same route group
+  already did. A host that registered the viewer is unaffected; the page simply arrives filled in
+  rather than filling itself in from a follow-up `fetch`.
 
 ## [0.11.3] - 2026-07-28
 
