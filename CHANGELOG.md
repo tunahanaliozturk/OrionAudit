@@ -245,6 +245,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Module<T>`, so `Module<T>.RegisterAuditedTypes` did not exist. The type parameter list and any
   constraint clauses are now emitted as declared, for the module and for every generic type it is
   nested in.
+- **A `record` module or `[Auditable]` record is no longer skipped in silence.** The syntax
+  predicate was `node is ClassDeclarationSyntax`; a record is a `RecordDeclarationSyntax`, so the
+  declaration was dropped entirely and the consumer's only signal was a missing method at the call
+  site with nothing pointing at the cause. The predicate now matches `TypeDeclarationSyntax` and
+  the emitted part repeats the declaration's own keyword (`class`, `record`, `record class`, ...)
+  rather than hard-coding `class`.
 
 ## [0.11.3] - 2026-07-28
 

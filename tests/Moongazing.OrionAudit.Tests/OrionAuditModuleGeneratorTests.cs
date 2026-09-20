@@ -143,6 +143,41 @@ public class OrionAuditModuleGeneratorTests
         Assert.Contains("where TApp : notnull", generated, StringComparison.Ordinal);
     }
 
+    // [OrionAuditModule] and [Auditable] are AttributeTargets.Class, which covers a record class but
+    // not a struct or record struct, so those are rejected before the generator ever sees them.
+    [Theory]
+    [InlineData("class")]
+    [InlineData("record")]
+    [InlineData("record class")]
+    public void ModuleDeclaredWithAnyClassKeyword_IsGeneratedWithThatKeyword(string keyword)
+    {
+        var source = $$"""
+            using Moongazing.OrionAudit;
+            using Moongazing.OrionAudit.Configuration;
+
+            namespace Consumer;
+
+            [Auditable]
+            public sealed {{keyword}} Widget { public int Id { get; set; } }
+
+            [OrionAuditModule]
+            public partial {{keyword}} Registry { }
+
+            public static class Consume
+            {
+                public static void Use(AuditConfigurationBuilder builder) =>
+                    Registry.RegisterAuditedTypes(builder);
+            }
+            """;
+
+        var generated = SingleSource(RunAndAssertConsumerCompiles(source));
+
+        // A record is a RecordDeclarationSyntax, so the old 'node is ClassDeclarationSyntax'
+        // predicate dropped it entirely - no module, no registration, no word about either.
+        Assert.Contains($"partial {keyword} Registry", generated, StringComparison.Ordinal);
+        Assert.Contains("typeof(global::Consumer.Widget)", generated, StringComparison.Ordinal);
+    }
+
     private static (Compilation Output, GeneratorDriverRunResult Run) Run(string source)
     {
         // Every assembly the test host has loaded, plus OrionAudit itself: enough for a consumer

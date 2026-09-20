@@ -10,7 +10,7 @@ namespace Moongazing.OrionAudit.Generators;
 
 /// <summary>
 /// Emits the AOT-safe registration glue for every <c>[OrionAuditModule]</c>-decorated partial
-/// class in the consuming compilation. The generator walks the same compilation for
+/// type in the consuming compilation. The generator walks the same compilation for
 /// <c>[Auditable]</c> types and produces, on each module:
 /// <list type="bullet">
 ///   <item><c>RegisterAuditedTypes(AuditConfigurationBuilder)</c> — replaces the reflective scan.</item>
@@ -40,10 +40,12 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        // A module or an entity may be declared as a class or a record; a record is a
+        // RecordDeclarationSyntax, which 'node is ClassDeclarationSyntax' dropped without a word.
         var modules = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 ModuleAttributeFqn,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
                 transform: static (ctx, _) => (INamedTypeSymbol?)ctx.TargetSymbol)
             .Where(static sym => sym is not null)
             .Select(static (sym, _) => sym!)
@@ -52,7 +54,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
         var auditableTypes = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AuditableAttributeFqn,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
                 transform: static (ctx, _) => (INamedTypeSymbol?)ctx.TargetSymbol)
             .Where(static sym => sym is not null
                                  && !sym.IsAbstract
@@ -230,7 +232,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
     private static string Header(INamedTypeSymbol type, TypeDeclarationSyntax declaration)
     {
         var sb = new StringBuilder();
-        sb.Append(AccessModifier(type)).Append(" partial class ").Append(type.Name);
+        sb.Append(AccessModifier(type)).Append(" partial ").Append(Keyword(declaration)).Append(' ').Append(type.Name);
 
         if (declaration.TypeParameterList is not null)
         {
@@ -255,6 +257,16 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 
         return sb.ToString();
     }
+
+    /// <summary>
+    /// The declaration's own type keyword — <c>class</c>, <c>record</c>, <c>record class</c>,
+    /// <c>struct</c>, <c>record struct</c>. Hard-coding <c>class</c> makes the emitted part
+    /// disagree with the declaration it is supposed to join.
+    /// </summary>
+    private static string Keyword(TypeDeclarationSyntax declaration) =>
+        declaration is RecordDeclarationSyntax record && !record.ClassOrStructKeyword.IsKind(SyntaxKind.None)
+            ? record.Keyword.ValueText + " " + record.ClassOrStructKeyword.ValueText
+            : declaration.Keyword.ValueText;
 
     private static string AccessModifier(INamedTypeSymbol type) => type.DeclaredAccessibility switch
     {
