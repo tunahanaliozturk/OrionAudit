@@ -7,11 +7,17 @@ using Moongazing.OrionAudit;
 using Xunit;
 
 /// <summary>
-/// Pins the documented concurrency contract of the <see cref="SnapshotCursor"/> counter: a group of
-/// concurrent saves for one entity advances it by one instead of one-per-save, which stretches the
-/// <c>SnapshotEvery(n)</c> cadence and nothing else. The counter is deliberately unguarded — it
-/// drives a replay-cost optimisation, so it must never turn an audit-side collision into a failed
-/// business save the way a concurrency token on the cursor would.
+/// Pins what survives a <see cref="SnapshotCursor"/> collision: both saves commit, every audited
+/// update still gets its audit row, and the counter stays in range. The counter is deliberately
+/// unguarded — it drives a replay-cost optimisation, so it must never turn an audit-side collision
+/// into a failed business save the way a concurrency token on the cursor would.
+/// <para>
+/// Deliberately absent: any assertion that snapshots fall a particular distance apart.
+/// <c>SnapshotEvery(n)</c> guarantees no interval under concurrent writes to one entity — a
+/// collision can snapshot early, and a stale overwrite can lower the counter and defer one without
+/// bound. The counts below follow from the fixed interleave this test constructs, not from a
+/// cadence property; see the remarks on <c>SnapshotPolicyEvaluator</c>.
+/// </para>
 /// </summary>
 public sealed class SnapshotCursorConcurrencyTests : IAsyncLifetime
 {
@@ -86,7 +92,7 @@ public sealed class SnapshotCursorConcurrencyTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Concurrent_saves_on_one_entity_stretch_the_cadence_and_never_fail_the_save()
+    public async Task Concurrent_saves_on_one_entity_never_fail_the_save_and_never_cost_an_audit_row()
     {
         var id = Guid.NewGuid();
 
@@ -126,15 +132,28 @@ public sealed class SnapshotCursorConcurrencyTests : IAsyncLifetime
         // down with it, to protect a counter that only decides when to cache a snapshot.
         await second.SaveChangesAsync();   // update #3 -> also 1 -> 2, one increment lost
 
-        // Exactly one increment lost per overlapping group: the counter moved forward, did not
-        // double-count, and did not reset. Three updates have happened; the cursor says two.
-        Assert.Equal(2, await CursorCountAsync());
-        Assert.Equal(3, (await UpdateSnapshotsAsync()).Count);
-        Assert.All(await UpdateSnapshotsAsync(), Assert.Null);
+        // Every audited update produced its row, whatever the counter did. This is the part that
+        // is guaranteed in general, not just in this interleave.
+        var afterCollision = await UpdateSnapshotsAsync();
+        Assert.Equal(3, afterCollision.Count);
 
-        // ...and the cadence self-heals rather than stalling. SnapshotEvery(3) now lands on the
-        // fourth update instead of the third - late by exactly the one lost increment, never
-        // skipped. That is the documented n..n*k bound with n=3, k=2.
+        // The counter stays in range: never negative, never persisted at or above n. That also
+        // holds in general - the value is only ever written as some reader's value + 1, or reset
+        // to 0 by a snapshot.
+        var counted = await CursorCountAsync();
+        Assert.InRange(counted!.Value, 0, 2);
+
+        // This specific count follows from the interleave constructed above and NOT from any
+        // general cadence guarantee: both savers read 1, so both wrote 2 and one increment was
+        // dropped. Under real concurrency the count can also go backwards (a stale writer
+        // overwriting a higher committed value), so nothing here promises an interval - see the
+        // remarks on SnapshotPolicyEvaluator.
+        Assert.Equal(2, counted.Value);
+        Assert.All(afterCollision, Assert.Null);
+
+        // With the contention over, the next uncontended save reads what the last one wrote and
+        // the cadence resumes. Again: a property of this serialized tail, not a promise that a
+        // deferred snapshot always arrives.
         clock.Advance(TimeSpan.FromSeconds(1));
         await using (var fourth = NewContext())
         {
@@ -145,8 +164,7 @@ public sealed class SnapshotCursorConcurrencyTests : IAsyncLifetime
 
         var snapshots = await UpdateSnapshotsAsync();
         Assert.Equal(4, snapshots.Count);
-        Assert.Null(snapshots[2]);
         Assert.NotNull(snapshots[3]);
-        Assert.Equal(0, await CursorCountAsync());   // reset by the snapshot it finally took
+        Assert.Equal(0, await CursorCountAsync());   // reset by the snapshot it took
     }
 }

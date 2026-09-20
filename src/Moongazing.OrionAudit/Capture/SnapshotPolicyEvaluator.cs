@@ -17,42 +17,62 @@ internal static class SnapshotPolicyEvaluator
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Concurrency.</b> <see cref="SnapshotCursor.UpdatesSinceLast"/> is read-modify-written
-    /// with no lock and no concurrency token, deliberately. Two saves that touch the same entity
-    /// concurrently both read the same count before either commits, and both write
-    /// <c>count + 1</c>: a group of <c>k</c> overlapping saves for one entity advances the counter
-    /// by 1 rather than by <c>k</c>.
+    /// <b>Concurrency: <c>SnapshotEvery(n)</c> is approximate, with no guaranteed interval.</b>
+    /// <see cref="SnapshotCursor.UpdatesSinceLast"/> is read, incremented in memory, and written
+    /// back as an absolute value, with no lock and no concurrency token. With no concurrent writes
+    /// to the same entity that is exact: every save reads what the previous one wrote, and every
+    /// n-th update snapshots. Under concurrent writes to one entity stream
+    /// (<see cref="SnapshotCursor.EntityType"/> + <see cref="SnapshotCursor.EntityId"/> +
+    /// <see cref="SnapshotCursor.TenantId"/>) the cadence is approximate in <em>both</em>
+    /// directions, and no interval is promised either way:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// <b>Snapshots can land closer together than <c>n</c>.</b> Two saves that both read
+    /// <c>n - 1</c> both decide to snapshot, so two snapshots can be a single update apart.
+    /// </item>
+    /// <item>
+    /// <b>The counter can move backwards, so a snapshot can be delayed without bound.</b> The write
+    /// is a blind overwrite, not an increment: A reads 0, B commits 1, C commits 2, then A commits
+    /// its stale 1 and the count has gone down. Sustained contention can repeat that indefinitely,
+    /// so there is no upper bound on how long a snapshot is deferred — not the counter's value
+    /// times anything, not any function of how many writers overlap.
+    /// </item>
+    /// </list>
+    /// <para>
+    /// The value stays sane even so: it is only ever written as some reader's value plus one, or
+    /// reset to 0 by a snapshot, so it never goes negative and never persists above <c>n - 1</c>.
     /// </para>
     /// <para>
-    /// <b>The bound that puts on <c>SnapshotEvery(n)</c>.</b> Consecutive snapshots for an entity
-    /// are at least <c>n</c> and at most <c>n * k</c> updates apart, where <c>k</c> is the largest
-    /// number of saves for that one entity stream (<see cref="SnapshotCursor.EntityType"/> +
-    /// <see cref="SnapshotCursor.EntityId"/> + <see cref="SnapshotCursor.TenantId"/>) that overlap,
-    /// meaning all of them read the cursor before any of them commits. <c>k</c> is 1 for every
-    /// entity that is not written concurrently with itself, so the common case drifts not at all;
-    /// separate entities hold separate cursor rows and never interact. The counter only moves
-    /// forward — every group contributes at least one increment — so the cadence stretches but
-    /// never stalls, and the n-th snapshot always arrives. Members of one group compute the same
-    /// value and so reach the same decision, which means a collision can produce a duplicate
-    /// snapshot but can never skip one.
+    /// <b>What is guaranteed regardless.</b> Everything about the audit trail itself. No row is
+    /// lost, delayed, or mis-stamped; the diff chain stays complete; <c>AuditReconstructor</c> can
+    /// always rebuild any state at any point. <see cref="AuditLog.Snapshot"/> is purely a
+    /// replay-cost optimisation, so a cadence that drifts costs replay time and nothing else.
     /// </para>
     /// <para>
-    /// <b>What is not affected.</b> Nothing about the audit trail itself: no row is lost, delayed,
-    /// or mis-stamped, and the diff chain stays complete, so <c>AuditReconstructor</c> can always
-    /// rebuild any state. <see cref="AuditLog.Snapshot"/> is a replay-cost optimisation, and the
-    /// cost of a lost increment is one snapshot taken later than intended.
+    /// <b>The bounded variant is <c>SnapshotEvery(TimeSpan)</c>.</b> It keys off
+    /// <see cref="SnapshotCursor.LastSnapshotUtc"/> rather than a counter, and that field is only
+    /// ever written as some save's own <c>occurredOn</c> — so it can never be set to a time further
+    /// ahead than a save that really happened. A stale write can only move it <em>earlier</em>,
+    /// which makes the window expire sooner rather than later. Concurrency therefore shows up there
+    /// as an extra snapshot, never as a late one, and the interval is not exceeded (absent clock
+    /// skew between capture hosts). Consumers who need a cadence they can rely on should use it.
     /// </para>
     /// <para>
-    /// <b>Why it is not guarded.</b> A concurrency token on the cursor would make the losing writer
-    /// raise <see cref="DbUpdateConcurrencyException"/> — but the cursor is written inside the
-    /// consumer's <c>SaveChanges</c>, so that exception aborts the consumer's business transaction
-    /// and names a table they never asked for. Failing a customer's order save to keep a snapshot
-    /// cadence exact is the wrong trade, and it would contradict how the rest of capture behaves: a
-    /// diff failure annotates the row, a custom-column provider failure annotates the row, and an
-    /// observer fault is swallowed. Consumers who need a cadence that holds under same-entity
-    /// concurrency should use <c>SnapshotEvery(TimeSpan)</c>, which keys off
-    /// <see cref="SnapshotCursor.LastSnapshotUtc"/> rather than a counter: a concurrent group there
-    /// takes an extra snapshot instead of skipping one, so the interval is never exceeded.
+    /// <b>Why the counter is not guarded.</b> A concurrency token on the cursor would make the
+    /// losing writer raise <see cref="DbUpdateConcurrencyException"/> — but the cursor is written
+    /// inside the consumer's <c>SaveChanges</c>, so that exception aborts the consumer's business
+    /// transaction and names a table they never asked for. Failing a customer's order save to keep
+    /// a snapshot cadence exact is the wrong trade, and it would contradict how the rest of capture
+    /// behaves: a diff failure annotates the row, a custom-column provider failure annotates the
+    /// row, and an observer fault is swallowed. Making the write monotonic instead was considered
+    /// and is not reachable from here either: EF's change tracker emits absolute values, no EF
+    /// transaction exists yet at interceptor time (so any relative SQL we issue ourselves would
+    /// commit separately and count rolled-back saves), and the one conditional shape EF does
+    /// support — a predicate on the old value — is the concurrency token again, because EF checks
+    /// rows-affected and throws when the stale writer matches none. Note also that monotonicity
+    /// alone would not restore a lower bound: two savers that both read <c>n - 1</c> both decide to
+    /// snapshot however the write is performed.
     /// </para>
     /// <para>
     /// <b>Known edge.</b> Two saves that are both the <em>first</em> update to one entity insert

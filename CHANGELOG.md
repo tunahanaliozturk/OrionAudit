@@ -198,30 +198,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
-- **The snapshot cadence counter's behaviour under concurrency is now stated, with a bound.**
-  `SnapshotCursor.UpdatesSinceLast` is read-modify-written with no lock and no concurrency token.
-  A group of `k` saves for the *same* entity that overlap — all reading the cursor before any of
-  them commits — advances it by 1 rather than by `k`. Consecutive snapshots for that entity are
-  therefore at least `n` and at most `n * k` updates apart under `SnapshotEvery(n)`; `k` is 1 for
-  any entity not written concurrently with itself, and separate entities hold separate cursor rows
-  and never interact. The counter only moves forward, so the cadence stretches but never stalls and
-  the n-th snapshot always arrives; a collision can duplicate a snapshot but never skip one.
+- **`SnapshotEvery(n)` is documented as approximate under concurrent writes to one entity, with no
+  guaranteed interval in either direction.** `SnapshotCursor.UpdatesSinceLast` is read, incremented
+  in memory, and written back as an absolute value, with no lock and no concurrency token. With no
+  concurrent writes to the same entity that is exact — every save reads what the previous one
+  wrote, and every n-th update snapshots. Under concurrency it is approximate both ways: two saves
+  that both read `n - 1` both snapshot, so snapshots can land a single update apart; and because
+  the write is a blind overwrite rather than an increment, a stale writer can lower the count (A
+  reads 0, B commits 1, C commits 2, A commits its stale 1), which sustained contention can repeat,
+  deferring a snapshot without bound. The value stays sane regardless — only ever a reader's value
+  plus one, or 0 after a snapshot — so it never goes negative and never persists at or above `n`.
 
-  Nothing about the trail itself is affected — no audit row is lost, delayed, or mis-stamped, and
-  the diff chain stays complete, so `AuditReconstructor` can always rebuild any state. `Snapshot`
-  is a replay-cost optimisation, so the cost of a lost increment is one snapshot taken later than
-  intended.
+  Nothing about the trail itself is affected: no audit row is lost, delayed, or mis-stamped, the
+  diff chain stays complete, and `AuditReconstructor` can always rebuild any state. `Snapshot` is
+  purely a replay-cost optimisation, so a drifting cadence costs replay time and nothing else.
 
-  Guarding the counter with a concurrency token was considered and **rejected**: the cursor is
-  written inside the consumer's `SaveChanges`, so the losing writer would raise
-  `DbUpdateConcurrencyException` out of a business transaction, naming a table the consumer never
-  asked for — failing a customer's save to keep a snapshot cadence exact. That also contradicts how
-  the rest of capture behaves (a diff failure annotates the row, a custom-column provider failure
-  annotates the row, an observer fault is swallowed). It would have required a new non-null
-  `Version` column on `OrionAudit_Snapshot_Cursors`; there is **no schema change**. Consumers who
-  need a cadence that holds under same-entity concurrency should use `SnapshotEvery(TimeSpan)`,
-  which keys off `LastSnapshotUtc` rather than a counter: a concurrent group there takes an extra
-  snapshot instead of skipping one, so the interval is never exceeded.
+  **`SnapshotEvery(TimeSpan)` is the bounded variant.** It keys off `LastSnapshotUtc`, which is only
+  ever written as some save's own timestamp and so can never be set further ahead than a save that
+  really happened; a stale write moves it *earlier*, expiring the window sooner. Concurrency shows
+  up there as an extra snapshot, never a late one, so the interval is not exceeded (absent clock
+  skew between capture hosts).
+
+  Guarding the counter was considered and **rejected**. A concurrency token makes the losing writer
+  raise `DbUpdateConcurrencyException` out of the consumer's business transaction, naming a table
+  they never asked for, and contradicts how the rest of capture isolates audit-side faults (a diff
+  failure annotates the row, a custom-column provider failure annotates the row, an observer fault
+  is swallowed); it would also have added a non-null `Version` column. Making the write monotonic
+  is not reachable either: EF emits absolute values, no EF transaction exists yet at interceptor
+  time (so relative SQL we issue ourselves would commit separately and count rolled-back saves),
+  and EF's only conditional shape is the token again, because it checks rows-affected and throws
+  when the stale writer matches none. Monotonicity alone would not restore a lower bound anyway —
+  two savers reading `n - 1` both snapshot however the write is performed. There is **no schema
+  change**.
 
 ## [0.11.3] - 2026-07-28
 
