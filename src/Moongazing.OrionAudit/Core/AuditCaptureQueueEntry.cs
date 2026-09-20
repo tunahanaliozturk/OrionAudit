@@ -1,4 +1,4 @@
-namespace Moongazing.OrionAudit;
+﻿namespace Moongazing.OrionAudit;
 
 /// <summary>
 /// A pending audit capture awaiting background dispatch. Written by
@@ -6,7 +6,12 @@ namespace Moongazing.OrionAudit;
 /// originating entity change, then consumed by <c>AuditDispatcherHostedService</c> which
 /// computes the diff, writes the final <see cref="AuditLog"/> row, and deletes this row.
 /// </summary>
-public sealed class AuditCaptureQueueEntry
+/// <remarks>
+/// Deliberately not <c>sealed</c>: EF Core's proxy plugin rejects <em>every</em> sealed entity
+/// type in the model, so sealing this would make <c>UseLazyLoadingProxies()</c> throw at model
+/// build for any consumer that maps OrionAudit's tables.
+/// </remarks>
+public class AuditCaptureQueueEntry
 {
     /// <summary>Auto-increment surrogate key; also the dispatch order key.</summary>
     public long Id { get; set; }

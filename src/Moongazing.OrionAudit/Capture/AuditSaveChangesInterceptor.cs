@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -99,9 +99,14 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         // State check is a struct compare; IsAudited is a FrozenDictionary lookup. Both are cheap,
         // but state-first lets us skip the dictionary lookup for entities that aren't being saved.
+        //
+        // Metadata.ClrType, never Entity.GetType(): under UseLazyLoadingProxies() the runtime type
+        // of a materialized entity is a Castle proxy (OrderProxy : Order) that no audit
+        // registration knows about, so GetType() made every audited entity look un-audited. EF's
+        // metadata always reports the declared type. See ResolveClrType.
         var auditedEntries = ctx.ChangeTracker.Entries()
             .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted
-                        && configuration.IsAudited(e.Entity.GetType()))
+                        && configuration.IsAudited(ResolveClrType(e)))
             .ToList();
 
         if (auditedEntries.Count == 0)
@@ -246,6 +251,20 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         activity?.SetStatus(ActivityStatusCode.Ok);
     }
 
+    /// <summary>
+    /// The audited entity's declared CLR type, as EF's model knows it.
+    /// </summary>
+    /// <remarks>
+    /// The single place capture resolves an entity's type. <c>entry.Entity.GetType()</c> must never
+    /// be used for this: with <c>UseLazyLoadingProxies()</c> (or change-tracking proxies) the
+    /// runtime type is a Castle subclass — <c>OrderProxy</c>, not <c>Order</c> — which is not the
+    /// key anything is registered under. Every lookup then missed: <c>IsAudited</c> returned false
+    /// so no row was written at all, and where one was, <c>GetConfig</c> returned null so the field
+    /// rules came back empty and <c>[RedactedAudit]</c> properties were persisted in the clear.
+    /// <c>IEntityType.ClrType</c> is the declared type whether or not proxies are in play.
+    /// </remarks>
+    private static Type ResolveClrType(EntityEntry entry) => entry.Metadata.ClrType;
+
     // Mirrors AuditLog to AuditLogEvent. Centralised so the dispatcher's call-site projects the
     // same shape. DateTimeOffset is constructed from the UTC DateTime + TimeSpan.Zero so the
     // wire shape is timezone-explicit even though AuditLog stores UTC DateTime.
@@ -304,7 +323,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         DateTime occurredOn,
         JsonSerializerContext? jsonContext)
     {
-        var entityType = entry.Entity.GetType();
+        var entityType = ResolveClrType(entry);
         var primaryKey = ExtractPrimaryKey(entry);
         var typeConfig = configuration.GetConfig(entityType);
 
@@ -409,7 +428,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         DateTime occurredOn,
         JsonSerializerContext? jsonContext)
     {
-        var entityType = entry.Entity.GetType();
+        var entityType = ResolveClrType(entry);
         var typeConfig = configuration.GetConfig(entityType);
 
         var action = entry.State switch

@@ -1,10 +1,15 @@
-namespace Moongazing.OrionAudit;
+﻿namespace Moongazing.OrionAudit;
 
 /// <summary>
 /// Persisted record of a single Insert / Update / Delete against an audited entity. Written by
 /// <c>AuditSaveChangesInterceptor</c> in the same transaction as the originating entity change.
 /// </summary>
-public sealed class AuditLog
+/// <remarks>
+/// Deliberately not <c>sealed</c>: EF Core's proxy plugin rejects <em>every</em> sealed entity
+/// type in the model, so sealing this would make <c>UseLazyLoadingProxies()</c> throw at model
+/// build for any consumer that maps OrionAudit's tables.
+/// </remarks>
+public class AuditLog
 {
     /// <summary>Unique row id (auto-assigned).</summary>
     public Guid Id { get; set; } = Guid.NewGuid();

@@ -25,6 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
   rather than duplicated; with neither wired the pipeline completes synchronously and the sync
   override never blocks.
+- **Capture works under `UseLazyLoadingProxies()`.** Capture resolved the audited entity's CLR type
+  with `entry.Entity.GetType()`, which under lazy-loading (or change-tracking) proxies is the Castle
+  subclass — `OrderProxy`, not `Order` — and is not the key anything is registered under. Every
+  lookup missed: `IsAudited` returned false so entities loaded from the database produced no audit
+  rows at all, and where a row was produced its field rules resolved to nothing, so
+  `[RedactedAudit]` properties were persisted **in plaintext**. All three lookups now go through a
+  single `ResolveClrType` helper backed by `entry.Metadata.ClrType`, which is the declared type
+  whether or not proxies are in play.
+- **OrionAudit's own entity types are no longer `sealed`.** EF Core's proxy plugin rejects *every*
+  sealed entity type in the model, so mapping `AuditLog`, `SnapshotCursor`,
+  `AuditCaptureQueueEntry`, or `AuditChainAnchor` made `UseLazyLoadingProxies()` throw at model
+  build. Unsealing them is source- and binary-compatible for consumers.
 
 ## [0.11.3] - 2026-07-28
 
