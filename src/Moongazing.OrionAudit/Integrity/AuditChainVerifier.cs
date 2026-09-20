@@ -12,12 +12,20 @@ public static class AuditChainVerifier
     /// <summary>
     /// The collaborators a stream walk needs that live outside the row list: how to resolve the MAC
     /// key for a row's <see cref="AuditLog.HashKeyId"/>, how to read a row's registered custom-column
-    /// values, and (optionally) the persisted anchor that proves no tail rows were deleted.
+    /// values, and (optionally) the persisted stream head that proves no tail rows were deleted.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Anchor"/> is an <see cref="AuditChainVerificationAnchor"/> - the head's values -
+    /// rather than the EF-mapped <see cref="AuditChainAnchor"/> entity, so a backend that stores its
+    /// heads somewhere other than an EF table can still supply one. An EF-backed caller converts with
+    /// <see cref="AuditChainAnchor.ToVerificationAnchor"/>. Leaving it null is a real choice with a
+    /// real cost: the walk then proves the surviving rows link intact but cannot detect that the tail,
+    /// or the whole stream, was deleted.
+    /// </remarks>
     public readonly record struct StreamVerificationContext(
         Func<int, ReadOnlyMemory<byte>?> KeyResolver,
         Func<AuditLog, IReadOnlyList<KeyValuePair<string, string?>>> CustomColumnsResolver,
-        AuditChainAnchor? Anchor);
+        AuditChainVerificationAnchor? Anchor);
 
     /// <summary>
     /// Verifies one stream's chain. <paramref name="orderedRows"/> is the stream's rows; this method
@@ -141,7 +149,7 @@ public static class AuditChainVerifier
     }
 
     private static AuditChainVerificationResult? CheckAnchor(
-        AuditChainAnchor anchor, AuditLog? lastHashedRow, long thisStreamVerified, long cumulativeVerified)
+        AuditChainVerificationAnchor anchor, AuditLog? lastHashedRow, long thisStreamVerified, long cumulativeVerified)
     {
         // RowCount is the stream's LIFETIME hashed-row total; PrunedRowCount is how much of it the
         // retention sweep legitimately removed from the head. What must still be present is the

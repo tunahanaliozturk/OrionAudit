@@ -13,17 +13,17 @@
 public class SnapshotCursor
 {
     /// <summary>Assembly-qualified name of the audited entity type.</summary>
-    public string EntityType { get; set; } = default!;
+    public string EntityType { get; internal set; } = default!;
 
     /// <summary>The audited entity's primary key in canonical <see cref="AuditKey"/> form.</summary>
-    public string EntityId { get; set; } = default!;
+    public string EntityId { get; internal set; } = default!;
 
     /// <summary>Optional tenant id when multi-tenancy is in play (composite-PK partition).</summary>
-    public string TenantId { get; set; } = string.Empty;
+    public string TenantId { get; internal set; } = string.Empty;
 
     /// <summary>Number of Update audit rows written since the last snapshot.</summary>
-    public int UpdatesSinceLast { get; set; }
+    public int UpdatesSinceLast { get; internal set; }
 
     /// <summary>UTC timestamp of the last snapshot, or null if no snapshot has been written yet.</summary>
-    public DateTime? LastSnapshotUtc { get; set; }
+    public DateTime? LastSnapshotUtc { get; internal set; }
 }

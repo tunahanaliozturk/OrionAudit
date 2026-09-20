@@ -55,7 +55,7 @@ public sealed class EfCoreAuditIntegrityVerifier : IAuditIntegrityVerifier
             var rows = await LoadStreamAsync(request, stream, cancellationToken).ConfigureAwait(false);
 
             var ctx = new AuditChainVerifier.StreamVerificationContext(
-                keyResolver, BuildCustomColumnsResolver(), anchor);
+                keyResolver, BuildCustomColumnsResolver(), anchor?.ToVerificationAnchor());
             var result = AuditChainVerifier.VerifyStream(rows, ctx, verified);
             if (!result.IsValid)
             {

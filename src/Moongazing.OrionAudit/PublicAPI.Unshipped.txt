@@ -1,1 +1,47 @@
 #nullable enable
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Action.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.AfterJson.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Attempts.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.BeforeJson.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.ClaimToken.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.ClaimedUtc.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.CorrelationId.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.CustomColumnsJson.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityBaseType.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityId.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityType.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Error.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Id.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.OccurredOnUtc.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.TenantId.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.UserDisplay.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.UserId.set -> void
+*REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.UserType.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.EntityId.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.EntityType.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.KeyId.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.LatestEntryHash.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.PrunedRowCount.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.PrunedThroughHash.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.RowCount.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainAnchor.TenantId.set -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Anchor.get -> Moongazing.OrionAudit.Integrity.AuditChainAnchor?
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Deconstruct(out System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, out System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, out Moongazing.OrionAudit.Integrity.AuditChainAnchor? Anchor) -> void
+*REMOVED*Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.StreamVerificationContext(System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, Moongazing.OrionAudit.Integrity.AuditChainAnchor? Anchor) -> void
+*REMOVED*Moongazing.OrionAudit.SnapshotCursor.EntityId.set -> void
+*REMOVED*Moongazing.OrionAudit.SnapshotCursor.EntityType.set -> void
+*REMOVED*Moongazing.OrionAudit.SnapshotCursor.LastSnapshotUtc.set -> void
+*REMOVED*Moongazing.OrionAudit.SnapshotCursor.TenantId.set -> void
+*REMOVED*Moongazing.OrionAudit.SnapshotCursor.UpdatesSinceLast.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.ToVerificationAnchor() -> Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor!
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.AuditChainVerificationAnchor(string! entityType, string! entityId, string! latestEntryHash, long rowCount, long prunedRowCount = 0, string? prunedThroughHash = null) -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.EntityId.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.EntityType.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.LatestEntryHash.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.PrunedRowCount.get -> long
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.PrunedThroughHash.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.RowCount.get -> long
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Anchor.get -> Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor?
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Deconstruct(out System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, out System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, out Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor? Anchor) -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.StreamVerificationContext(System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor? Anchor) -> void
