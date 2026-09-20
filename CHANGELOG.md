@@ -72,6 +72,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes when no tracing listener is attached (`StartActivity` returns null and there was no span
   to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
   failed intermittently — whenever a listener happened to be live in parallel.
+### Security
+
+- **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
+  concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
+  write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
+  as script in the session of whoever later reviewed the audit log, which is an administrator by
+  definition. The entry list is now rendered server-side in `OrionAuditViewerStaticFiles` and every
+  audit value passes through `HtmlEncoder.Default` on the way out; the one remaining script in the
+  page only writes `textContent`, which the browser never parses as markup. Every interpolation site
+  is an HTML text node - no audit value reaches an attribute, a `<script>` block, or a JSON island -
+  so the HTML encoder is the correct encoder at each of them. The JSON API (`/api/log`,
+  `/api/{entityType}/{key}`, `/api/meta`) is unchanged and still returns raw values.
+
+  **Consumer-visible change:** the viewer's root page now resolves `TDbContext` and
+  `IAuditConfiguration` per request, exactly as the JSON API endpoints in the same route group
+  already did. A host that registered the viewer is unaffected; the page simply arrives filled in
+  rather than filling itself in from a follow-up `fetch`.
+
+- **Fixed a fail-open tenant filter on the audit read path.** `AuditQueryExtensions.AuditFor<T>()` and
+  `AuditLog()` apply a tenant filter when an `IAuditTenantResolver` is registered. When that resolver
+  returned null - a dropped header, a claim the gateway did not forward, a background thread with no
+  ambient context - the filter fell through **unfiltered** and handed the caller every tenant's audit
+  rows. The read widened to all tenants at exactly the moment the caller's identity was unknown, and
+  it carried into everything built on those extensions, including the viewer's `/api/log` and
+  `/api/{entityType}/{key}`. An unresolved tenant now denies: the read is scoped to the no-tenant
+  stream (`TenantId` null or `""`), which is the read-side mirror of the canonical value the write
+  path persists. In any tenant-stamped deployment that is the empty set; a genuinely single-tenant
+  deployment, whose resolver returns null by design, still reads its own history unchanged. A
+  deliberate empty result rather than a throw - these extensions run on request paths, and the
+  library reserves exceptions for configuration and programming boundaries. `crossTenant: true` is
+  still the explicit, auditable way to read across tenants, and an application with no resolver
+  registered at all is unaffected.
+
+### Fixed
+
+- **Retention no longer makes hash-chain verification report tampering that never happened.** The
+  retention sweep deletes the OLDEST rows of a stream, which the tamper-evident chain could not tell
+  apart from an attacker deleting them: the surviving prefix no longer started at the genesis (its
+  `PreviousHash` pointed at a row that was gone) and the walked row count no longer reached the
+  stream's `AuditChainAnchor`. So from the first purge onward, every `VerifyChainAsync` on a pruned
+  stream returned `BrokenLink` or `Truncated` - a permanent false positive that made the
+  tamper-evidence feature useless, because a report that always cries wolf is a report nobody reads.
+
+  `AuditChainAnchor` gains a retention checkpoint - `PrunedRowCount` and `PrunedThroughHash` - and,
+  when hash-chaining is enabled, the sweep now re-anchors each stream it prunes at the oldest
+  surviving row. Verification checks `walked + PrunedRowCount == RowCount` and expects the surviving
+  genesis to link to `PrunedThroughHash`. Nothing else is relaxed: `RowCount` still records the
+  stream's lifetime total, `LatestEntryHash` still pins its tail, a mutated row still fails its keyed
+  MAC with `ContentMismatch`, and a deletion no sweep recorded still fails as `Truncated` or
+  `BrokenLink`. Both anchor columns default to "never pruned" (`0` / `null`), so an anchor written
+  before this verifies exactly as it did.
+
+  The removal and the checkpoint that explains it commit in one transaction, so a cancellation, a
+  transient database failure or a process exit between them cannot leave deleted rows paired with a
+  stale checkpoint - which would be the same permanent false-tamper state, reached by a crash instead
+  of by design. A provider without transaction support runs the work unwrapped, and
+  `CopyToTableAuditArchiver` joins the sweep's transaction rather than starting its own.
+
+  When retention empties a stream completely the watermark keeps the last pruned hash rather than
+  being cleared. The anchor deliberately retains the deleted tail in `LatestEntryHash`, so the next
+  change to that entity chains onto it; a cleared watermark would make verification expect that new
+  row's `PreviousHash` to be null and report a broken link on a chain nobody touched.
+
+  The pruned total is accumulated from the rows each batch actually removed rather than derived by
+  subtracting a survivor count from `RowCount`. `RowCount` belongs to the append path, so a
+  read-modify-write against it skewed whenever an append committed between the sweep's two reads -
+  one prune went unrecorded and verification then reported truncation on an intact chain. Retention
+  now writes only the columns it owns, so the two writers never contend and no lock or
+  isolation-level assumption is needed.
+
+  The sweep also selects rows in the chain's canonical `(OccurredOnUtc, Id)` order rather than by
+  timestamp alone. Rows of one stream sharing a timestamp are routine - one timestamp is computed per
+  `SaveChanges` and stamped on every row of that save, and column precision truncates further - and
+  under a bare timestamp ordering the provider is free to break those ties any way it likes, so a
+  count- or age-bounded batch could remove an interior row instead of a contiguous head. Re-anchoring
+  at the oldest survivor repairs a pruned head; it cannot close a hole in the middle.
+
+  **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
+  using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
+  its `ExecuteDelete` fast path and materialises each batch instead - the chain repair has to know
+  which streams lost rows, which a bare `ExecuteDelete` never reveals. The batch is already bounded by
+  `MaxRowsPerSweep`, and consumers without hash-chaining keep the fast path unchanged. Dry-run still
+  deletes nothing and writes no checkpoint.
 
 ## [0.11.3] - 2026-07-28
 

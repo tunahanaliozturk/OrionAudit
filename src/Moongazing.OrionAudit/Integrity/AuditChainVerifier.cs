@@ -59,9 +59,12 @@ public static class AuditChainVerifier
                 }
                 // First hashed row of the stream: the genesis. Its predecessor is null by
                 // construction (the stamper had no persisted head to chain onto), regardless of any
-                // unhashed prefix before it.
+                // unhashed prefix before it - UNLESS the anchor records that retention pruned the
+                // head of this chain, in which case the oldest surviving row must link to the
+                // anchored prune watermark. A surviving genesis that links anywhere else is still a
+                // broken link, so pruning is tolerated only to the exact extent it was recorded.
                 chainStarted = true;
-                expectedPreviousHash = null;
+                expectedPreviousHash = context.Anchor?.PrunedThroughHash;
             }
             else if (row.EntryHash is null)
             {
@@ -130,25 +133,35 @@ public static class AuditChainVerifier
     private static AuditChainVerificationResult? CheckAnchor(
         AuditChainAnchor anchor, AuditLog? lastHashedRow, long thisStreamVerified, long cumulativeVerified)
     {
-        // Whole-stream deletion: the anchor says the stream had rows, but none survive in scope.
+        // RowCount is the stream's LIFETIME hashed-row total; PrunedRowCount is how much of it the
+        // retention sweep legitimately removed from the head. What must still be present is the
+        // difference. Unpruned streams carry PrunedRowCount == 0, so this is the original check.
+        var expectedSurviving = anchor.RowCount - anchor.PrunedRowCount;
+
+        // Whole-stream deletion: the anchor says rows should survive, but none do in scope. A stream
+        // retention has pruned in its entirety expects nothing to survive and is valid.
         if (lastHashedRow is null)
         {
-            return AuditChainVerificationResult.BrokenAt(
-                cumulativeVerified, anchor.EntityType, anchor.EntityId, AuditChainBreakReason.Truncated,
-                $"Stream ({anchor.EntityType}/{anchor.EntityId}) has no surviving hashed rows but its " +
-                $"anchor records {anchor.RowCount}; the stream was deleted.");
+            return expectedSurviving <= 0
+                ? null
+                : AuditChainVerificationResult.BrokenAt(
+                    cumulativeVerified, anchor.EntityType, anchor.EntityId, AuditChainBreakReason.Truncated,
+                    $"Stream ({anchor.EntityType}/{anchor.EntityId}) has no surviving hashed rows but its " +
+                    $"anchor records {anchor.RowCount} with {anchor.PrunedRowCount} pruned; the stream was deleted.");
         }
 
-        // Tail deletion: a consistent prefix survives, but it is shorter than the anchor's count or its
-        // tail hash is not the anchored latest hash.
-        if (thisStreamVerified != anchor.RowCount
+        // Tail deletion: a consistent prefix survives, but it is shorter than the anchor expects or its
+        // tail hash is not the anchored latest hash. Retention only ever removes from the head, so it
+        // never moves the tail - a tail disagreement is still tampering.
+        if (thisStreamVerified != expectedSurviving
             || !string.Equals(lastHashedRow.EntryHash, anchor.LatestEntryHash, StringComparison.Ordinal))
         {
             return AuditChainVerificationResult.Broken(
                 cumulativeVerified, lastHashedRow, AuditChainBreakReason.Truncated,
                 $"Stream ({anchor.EntityType}/{anchor.EntityId}) tail disagrees with its anchor " +
                 $"(walked {thisStreamVerified} row(s) ending {Short(lastHashedRow.EntryHash)}, anchor " +
-                $"records {anchor.RowCount} ending {Short(anchor.LatestEntryHash)}); tail rows were deleted.");
+                $"records {anchor.RowCount} with {anchor.PrunedRowCount} pruned, ending " +
+                $"{Short(anchor.LatestEntryHash)}); rows were deleted.");
         }
 
         return null;
