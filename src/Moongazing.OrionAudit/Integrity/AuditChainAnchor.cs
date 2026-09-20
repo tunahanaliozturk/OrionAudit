@@ -53,4 +53,32 @@ public class AuditChainAnchor
 
     /// <summary>The <see cref="AuditLog.HashKeyId"/> of the most recent row, recorded for rotation visibility.</summary>
     public int KeyId { get; set; }
+
+    /// <summary>
+    /// How many of this stream's hashed rows were legitimately removed from the HEAD of the chain by
+    /// the retention sweep. Zero until the stream is first pruned.
+    /// </summary>
+    /// <remarks>
+    /// Retention deletes the oldest rows, which the chain alone cannot distinguish from an attacker
+    /// deleting them: the surviving prefix no longer starts at the genesis, and the walked row count
+    /// no longer reaches <see cref="RowCount"/>. Without this checkpoint every verification after the
+    /// first purge reported tampering, which made the tamper-evidence feature useless. The retention
+    /// sweep records the prune here, so verification checks
+    /// <c>walked + PrunedRowCount == RowCount</c> instead of <c>walked == RowCount</c>.
+    /// <see cref="RowCount"/> itself stays the stream's lifetime hashed-row total, so a genuine
+    /// deletion that nothing recorded still fails the check.
+    /// </remarks>
+    public long PrunedRowCount { get; set; }
+
+    /// <summary>
+    /// The <see cref="AuditLog.EntryHash"/> of the newest pruned row - equivalently, the
+    /// <see cref="AuditLog.PreviousHash"/> carried by the oldest surviving row. Null while the stream
+    /// has never been pruned.
+    /// </summary>
+    /// <remarks>
+    /// This is the chain's re-anchoring point. Verification expects the oldest surviving row to link
+    /// to exactly this hash instead of to nothing, so the pruned prefix reads as intentional while a
+    /// surviving genesis that links anywhere else is still a broken link.
+    /// </remarks>
+    public string? PrunedThroughHash { get; set; }
 }

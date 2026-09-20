@@ -40,7 +40,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         RetentionSweepOptions options,
         TimeProvider clock,
         ILogger<AuditRetentionHostedService<TDbContext>> logger)
-        : this(scopeFactory, policy, options, clock, logger, archiver: null)
+        : this(scopeFactory, policy, options, clock, logger, archiver: null, hashChainOptions: null)
     {
     }
 
@@ -48,7 +48,9 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
     /// v0.7.8 ctor with optional <see cref="IAuditArchiver"/>. Consumers register a
     /// custom archiver (e.g. <see cref="CopyToTableAuditArchiver{TArchiveRow}"/>) to ship
     /// expiring rows to a cold store before deletion. Null defaults to
-    /// <see cref="DeleteAuditArchiver"/>.
+    /// <see cref="DeleteAuditArchiver"/>. <paramref name="hashChainOptions"/> is optional and
+    /// non-null exactly when the consumer called <c>o.UseHashChain()</c>; it makes the sweep
+    /// chain-aware (see the field assignment below).
     /// </summary>
     public AuditRetentionHostedService(
         IServiceScopeFactory scopeFactory,
@@ -56,7 +58,8 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         RetentionSweepOptions options,
         TimeProvider clock,
         ILogger<AuditRetentionHostedService<TDbContext>> logger,
-        IAuditArchiver? archiver)
+        IAuditArchiver? archiver,
+        Integrity.AuditHashChainOptions? hashChainOptions = null)
     {
         this.scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         this.policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -69,7 +72,18 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         // to apply unchanged and exactly the same rows are evaluated; the difference is
         // the wrapper returns the count and skips the delete.
         var configured = archiver ?? new DeleteAuditArchiver();
-        this.archiver = this.options.DryRun ? new DryRunAuditArchiver() : configured;
+        // With hash-chaining on, every delete must re-anchor the chain it pruned, or the next
+        // verification reports tampering that never happened. ChainPruneArchiver wraps whatever
+        // archiver is configured and records the prune on each touched stream's anchor.
+        //
+        // Wrapping also, deliberately, switches every `archiver is DeleteAuditArchiver` fast path
+        // below onto the materialising branch: the anchor repair needs to know WHICH streams lost
+        // rows, which a bare ExecuteDelete never reveals. The materialised batch is already bounded
+        // by MaxRowsPerSweep, so this costs one extra SELECT per batch and only when chaining is on.
+        // Dry-run still wins outright - it must not delete, so there is nothing to re-anchor.
+        this.archiver = this.options.DryRun
+            ? new DryRunAuditArchiver()
+            : hashChainOptions is null ? configured : new ChainPruneArchiver(configured);
     }
 
     /// <inheritdoc />

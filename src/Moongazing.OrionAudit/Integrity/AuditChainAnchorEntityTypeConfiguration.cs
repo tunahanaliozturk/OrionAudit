@@ -44,5 +44,9 @@ public sealed class AuditChainAnchorEntityTypeConfiguration : IEntityTypeConfigu
         builder.Property(x => x.LatestEntryHash).IsRequired().HasMaxLength(64).IsFixedLength();
         builder.Property(x => x.RowCount).IsRequired();
         builder.Property(x => x.KeyId).IsRequired();
+        // Retention checkpoint. Both default to "never pruned" (0 / null) so an anchor written before
+        // this existed keeps verifying exactly as it did, and the same hash shape as LatestEntryHash.
+        builder.Property(x => x.PrunedRowCount).IsRequired();
+        builder.Property(x => x.PrunedThroughHash).HasMaxLength(64).IsFixedLength();
     }
 }

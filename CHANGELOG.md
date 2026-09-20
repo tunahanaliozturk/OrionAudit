@@ -105,6 +105,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still the explicit, auditable way to read across tenants, and an application with no resolver
   registered at all is unaffected.
 
+### Fixed
+
+- **Retention no longer makes hash-chain verification report tampering that never happened.** The
+  retention sweep deletes the OLDEST rows of a stream, which the tamper-evident chain could not tell
+  apart from an attacker deleting them: the surviving prefix no longer started at the genesis (its
+  `PreviousHash` pointed at a row that was gone) and the walked row count no longer reached the
+  stream's `AuditChainAnchor`. So from the first purge onward, every `VerifyChainAsync` on a pruned
+  stream returned `BrokenLink` or `Truncated` - a permanent false positive that made the
+  tamper-evidence feature useless, because a report that always cries wolf is a report nobody reads.
+
+  `AuditChainAnchor` gains a retention checkpoint - `PrunedRowCount` and `PrunedThroughHash` - and,
+  when hash-chaining is enabled, the sweep now re-anchors each stream it prunes at the oldest
+  surviving row. Verification checks `walked + PrunedRowCount == RowCount` and expects the surviving
+  genesis to link to `PrunedThroughHash`. Nothing else is relaxed: `RowCount` still records the
+  stream's lifetime total, `LatestEntryHash` still pins its tail, a mutated row still fails its keyed
+  MAC with `ContentMismatch`, and a deletion no sweep recorded still fails as `Truncated` or
+  `BrokenLink`. Both anchor columns default to "never pruned" (`0` / `null`), so an anchor written
+  before this verifies exactly as it did.
+
+  **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
+  using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
+  its `ExecuteDelete` fast path and materialises each batch instead - the chain repair has to know
+  which streams lost rows, which a bare `ExecuteDelete` never reveals. The batch is already bounded by
+  `MaxRowsPerSweep`, and consumers without hash-chaining keep the fast path unchanged. Dry-run still
+  deletes nothing and writes no checkpoint.
+
 ## [0.11.3] - 2026-07-28
 
 ### Fixed
