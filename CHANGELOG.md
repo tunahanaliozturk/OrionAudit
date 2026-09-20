@@ -110,6 +110,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the EF in-memory provider) raises on begin; that is caught and the work runs unwrapped, the same
   degradation `CopyToTableAuditArchiver` and `ChainPruneArchiver` already use. Consumers who never
   enable hash-chaining are untouched: no chain, no transaction, no schema change.
+
+  **If your `DbContext` uses a retrying execution strategy (`EnableRetryOnFailure()`), you must own
+  the transaction yourself.** EF Core allows a transaction inside a retriable unit only from the code
+  that owns the `SaveChanges` call, and an interceptor is not that code - so OrionAudit cannot open
+  one for you there, and cannot make your save retriable on your behalf either. Wrap your saves once:
+
+  ```csharp
+  var strategy = db.Database.CreateExecutionStrategy();
+  await strategy.ExecuteAsync(async () =>
+  {
+      await using var transaction = await db.Database.BeginTransactionAsync();
+      await db.SaveChangesAsync();
+      await transaction.CommitAsync();
+  });
+  ```
+
+  The chain then stamps inside your transaction and the guarantee is unchanged. Until you do, the
+  first hash-chained save throws `OrionAuditConfigurationException` carrying that snippet, rather than
+  EF's own message about user-initiated transactions, which never mentions OrionAudit. The refusal
+  fires on that first save rather than at registration because whether a strategy *retries* can only
+  be answered from a live `DbContext` (`Database.CreateExecutionStrategy().RetriesOnFailure`) - at
+  registration all that is visible is that some strategy factory was supplied, which is equally true
+  of a non-retrying custom strategy that works fine. The async-capture dispatcher needs nothing from
+  you: it owns its own save, so it now runs the whole begin/stamp/save/commit unit through your
+  strategy.
 - **The chain is verified in the order it was written, not in an order that merely correlates with
   it.** A chain's real order is *insertion* order - each save chains its rows onto the anchor's
   current head - but the verifier walked `(OccurredOnUtc, Id)`. One timestamp is computed per

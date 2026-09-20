@@ -353,6 +353,11 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     // back null from the helper and simply record nothing, so the release callbacks are no-ops.
     private async Task BeginChainTransactionAsync(DbContext ctx, CancellationToken cancellationToken)
     {
+        // A retrying execution strategy forbids the transaction we are about to open, and an
+        // interceptor cannot make the consumer's SaveChanges retriable. Refuse with instructions
+        // rather than let EF raise its own message, which never mentions OrionAudit.
+        Integrity.ChainWriteTransaction.EnsureCanOpenTransaction(ctx);
+
         var transaction = await Integrity.ChainWriteTransaction
             .BeginOrNullAsync(ctx, cancellationToken).ConfigureAwait(false);
         if (transaction is not null)
