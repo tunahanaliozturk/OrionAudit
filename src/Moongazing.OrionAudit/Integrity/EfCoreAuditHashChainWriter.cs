@@ -150,6 +150,11 @@ internal static class EfCoreAuditHashChainWriter
 
     // Loads the anchors for the touched streams, taking a pessimistic row lock on each existing anchor
     // (provider-appropriate) so a concurrent same-stream append blocks until this transaction commits.
+    //
+    // The keys arrive in AuditHashChainStamper.DistinctKeys' sorted order and are locked in it. That
+    // is load-bearing, not incidental: a multi-stream batch holds every lock it has taken while it
+    // goes after the next, so two batches approaching the same two streams in opposite orders would
+    // deadlock on each other. One global order across all callers removes the cycle.
     private static async Task<Dictionary<AuditHashChainStamper.ChainKey, AuditChainAnchor>> LockAndLoadAnchorsAsync(
         DbContext context,
         IReadOnlyCollection<AuditHashChainStamper.ChainKey> keys,

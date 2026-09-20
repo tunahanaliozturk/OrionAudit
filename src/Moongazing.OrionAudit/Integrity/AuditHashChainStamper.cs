@@ -130,7 +130,26 @@ public static class AuditHashChainStamper
     /// <summary>
     /// Returns the distinct <see cref="ChainKey"/>s present in <paramref name="newRows"/> under the
     /// supplied scope, so the caller can fetch exactly those streams' current anchors from the store.
+    /// The result is sorted, and every caller must take the streams' anchor locks in that order.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why sorted.</b> A batch spanning several streams holds each anchor lock it has taken while
+    /// it goes after the next one. Two concurrent batches that both touch streams A and B, and
+    /// approach them in opposite orders, then hold A and B respectively and each wait on the other -
+    /// a deadlock the database can only resolve by killing one of them. Input order alone decided
+    /// that order before: the keys came out of a <see cref="HashSet{T}"/> whose enumeration follows
+    /// insertion, so it was the order the rows happened to be captured in, which two callers have no
+    /// reason to share. A single global order across all callers removes the cycle by construction.
+    /// EF's own command ordering cannot help here, because these locks are raw statements that run
+    /// before any of the batch's commands.
+    /// </para>
+    /// <para>
+    /// The comparison is ordinal over every component of the key, so it is total - two distinct keys
+    /// differ somewhere - and it is culture-independent, which a lock order has to be: two processes
+    /// under different locales must agree.
+    /// </para>
+    /// </remarks>
     public static IReadOnlyCollection<ChainKey> DistinctKeys(
         IReadOnlyList<AuditLog> newRows,
         AuditHashChainScope scope)
@@ -141,7 +160,22 @@ public static class AuditHashChainStamper
         {
             set.Add(KeyFor(row, scope));
         }
-        return set;
+        var ordered = set.ToList();
+        ordered.Sort(CompareKeys);
+        return ordered;
+    }
+
+    // Ordinal over (EntityType, EntityId, TenantId) - the whole key, so distinct keys never compare
+    // equal and the order is total rather than "usually different".
+    private static int CompareKeys(ChainKey left, ChainKey right)
+    {
+        var byType = string.CompareOrdinal(left.EntityType, right.EntityType);
+        if (byType != 0)
+        {
+            return byType;
+        }
+        var byId = string.CompareOrdinal(left.EntityId, right.EntityId);
+        return byId != 0 ? byId : string.CompareOrdinal(left.TenantId, right.TenantId);
     }
 
     /// <summary>

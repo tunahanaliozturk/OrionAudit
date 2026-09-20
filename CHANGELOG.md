@@ -120,6 +120,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wait on - so concurrent writers there fail rather than queue. That is a test-fixture shape, not a
   deployment one, and OrionAudit's own concurrency tests now use a file database accordingly.
 
+  A save or dispatch batch touching **several** streams also takes their anchor locks in a fixed
+  global order now (ordinal over the whole stream key), instead of whatever order the rows were
+  captured in. A multi-stream batch holds each lock while it goes after the next, so two concurrent
+  batches that both touched streams A and B and approached them in opposite orders held one each and
+  waited on the other - a deadlock the database can only resolve by killing one of them. EF's own
+  command ordering cannot prevent it, because these locks are raw statements issued before any of the
+  batch's commands.
+
   **If your `DbContext` uses a retrying execution strategy (`EnableRetryOnFailure()`), you must own
   the transaction yourself.** EF Core allows a transaction inside a retriable unit only from the code
   that owns the `SaveChanges` call, and an interceptor is not that code - so OrionAudit cannot open
