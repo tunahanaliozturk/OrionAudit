@@ -19,13 +19,22 @@
 
 ---
 
-> **Current release: v1.0.0 — the API is stable; any breaking change from here requires 2.0.0.**
-> v1.0.0 is a correctness release: synchronous `SaveChanges()` is captured, capture and redaction
-> work under `UseLazyLoadingProxies()`, pooled/factory contexts no longer misattribute rows, the
-> viewer demands an explicit access decision and HTML-encodes what it renders, the tenant filter
-> scopes to the no-tenant stream instead of failing open when the tenant cannot be resolved, and the hash chain's anchor
-> lock is actually held. It has **breaking changes and a schema migration** — read the
-> [1.0.0 changelog entry](CHANGELOG.md) before upgrading. Recent milestones: v0.11.0 richer history filters + aggregations, v0.10.0 background compaction + history export, and v0.9.0 tamper-evident hash-chaining — opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable and unforgeable without the MAC key, which lives outside the audit database. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive. Earlier: v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> **Current release: v2.0.0 — an API cleanup, enforced by an analyzer from here on.**
+> Writing the public API down for v1.0.0 is what made its problems visible, hours after it shipped:
+> the library's own instrumentation helpers and chain stamper were public, dispatcher bookkeeping
+> was hand-mutable, an ASP.NET Core options type sat in the framework-agnostic package, and two
+> signatures broke the rules that keep overloads addable. v2.0.0 fixes all of it and promotes the
+> corrected surface to the shipped baseline, so the next accidental change fails the build instead
+> of shipping. It has **breaking changes** — read the
+> [2.0.0 changelog entry](CHANGELOG.md) before upgrading.
+>
+> v1.0.0, released the same day, is the correctness release underneath it: synchronous
+> `SaveChanges()` is captured, capture and redaction work under `UseLazyLoadingProxies()`,
+> pooled/factory contexts no longer misattribute rows, the viewer demands an explicit access
+> decision and HTML-encodes what it renders, the tenant filter scopes to the no-tenant stream
+> instead of failing open when the tenant cannot be resolved, and the hash chain's anchor lock is
+> actually held. It carries **a schema migration** — if you are coming from 0.11.3, read its
+> changelog entry too. Recent milestones: v0.11.0 richer history filters + aggregations, v0.10.0 background compaction + history export, and v0.9.0 tamper-evident hash-chaining — opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable and unforgeable without the MAC key, which lives outside the audit database. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive. Earlier: v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
 > [See the changelog](CHANGELOG.md) and [what's next](ROADMAP.md).
 
 ---
@@ -821,7 +830,7 @@ you can scan the output instead of reading source.
 
 ## Documentation
 
-- [Roadmap](ROADMAP.md) — forward plan through v1.0.0 (Q2 2027). Shipped since v0.9.0: v0.10.0 background compaction + history export, v0.11.0 richer history filters + aggregations. Still ahead: a separate audit store, AOT polish, and the API freeze.
+- [Roadmap](ROADMAP.md) — forward plan. The API freeze it aimed at has happened: v1.0.0 declared the surface stable and v2.0.0 promoted the corrected baseline into `PublicAPI.Shipped.txt`, where the analyzer enforces it. Still ahead: a separate audit store and AOT polish.
 - [Contributing guide](CONTRIBUTING.md)
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)
