@@ -63,6 +63,52 @@ public class RetentionHashChainTests
         }
     }
 
+    /// <summary>
+    /// Deletes the rows it is offered and then stands in for a same-stream append that commits while
+    /// the sweep is mid-flight: a new chained row lands and the append path advances the anchor's
+    /// RowCount. The anchor is advanced with ExecuteUpdate so it deliberately bypasses the sweep's
+    /// tracked entity - which is exactly what another transaction's commit looks like from here.
+    /// </summary>
+    private sealed class AppendDuringSweepArchiver : IAuditArchiver
+    {
+        public const string AppendedHash = "appended000000000000000000000000000000000000000000000000during";
+
+        private readonly DeleteAuditArchiver inner = new();
+
+        public async Task<int> ArchiveAsync(
+            DbContext dbContext, IReadOnlyList<AuditLog> rows, RetentionPolicy policy, CancellationToken ct)
+        {
+            var removed = await inner.ArchiveAsync(dbContext, rows, policy, ct);
+
+            var sample = rows[0];
+            var tail = await dbContext.Set<AuditChainAnchor>().AsNoTracking()
+                .Where(a => a.EntityType == sample.EntityType && a.EntityId == sample.EntityId)
+                .Select(a => a.LatestEntryHash)
+                .FirstAsync(ct);
+
+            dbContext.Set<AuditLog>().Add(new AuditLog
+            {
+                EntityType = sample.EntityType,
+                EntityId = sample.EntityId,
+                TenantId = sample.TenantId,
+                Diff = "[]",
+                OccurredOnUtc = sample.OccurredOnUtc.AddDays(1),
+                PreviousHash = tail,
+                EntryHash = AppendedHash,
+                HashKeyId = 1,
+            });
+            await dbContext.SaveChangesAsync(ct);
+
+            await dbContext.Set<AuditChainAnchor>()
+                .Where(a => a.EntityType == sample.EntityType && a.EntityId == sample.EntityId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(a => a.RowCount, a => a.RowCount + 1)
+                    .SetProperty(a => a.LatestEntryHash, AppendedHash), ct);
+
+            return removed;
+        }
+    }
+
     private static async Task<(ServiceProvider sp, SqliteConnection conn, FrozenClock clock)> BuildAsync(
         Action<OrionAuditOptions>? extraOptions = null,
         Action<ServiceCollection>? extraServices = null)
@@ -324,5 +370,36 @@ public class RetentionHashChainTests
         var result = await VerifyAsync(sp, noteId);
         Assert.True(result.IsValid,
             $"a failed sweep must leave the chain exactly as it was, but got {result.Reason}: {result.Detail}");
+    }
+
+    /// <summary>
+    /// RowCount belongs to the append path. Deriving the pruned total by subtracting a separately-read
+    /// survivor count from it skews the moment an append commits between those two reads: the survivor
+    /// count sees the new row, the anchor does not, and one prune goes unrecorded - after which
+    /// verification reports truncation on a chain nobody tampered with.
+    /// </summary>
+    [Fact]
+    public async Task Checkpoint_IsNotSkewed_ByAnAppendThatCommitsDuringTheSweep()
+    {
+        var (sp, conn, clock) = await BuildAsync(
+            extraServices: s => s.AddSingleton<IAuditArchiver, AppendDuringSweepArchiver>());
+        await using var _conn = conn;
+        await using var _sp = sp;
+
+        await SeedSixChainedRowsAsync(sp, clock);
+        Assert.Equal(3, await SweepAsync(sp));
+
+        await using var scope = sp.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<ChainRetentionDb>();
+        var anchor = await ctx.Anchors.SingleAsync();
+        var survivingHashed = await ctx.AuditLogs.CountAsync(a => a.EntryHash != null);
+
+        // 6 original + 1 appended = 7 lifetime; 3 pruned; 4 must survive.
+        Assert.Equal(7, anchor.RowCount);
+        Assert.Equal(3, anchor.PrunedRowCount);
+        Assert.Equal(4, survivingHashed);
+        // The invariant verification relies on. (Verification itself is not asserted here: the
+        // stand-in appended row carries a synthetic MAC, so it would fail on content, not on count.)
+        Assert.Equal(survivingHashed, anchor.RowCount - anchor.PrunedRowCount);
     }
 }

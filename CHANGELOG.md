@@ -135,6 +135,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change to that entity chains onto it; a cleared watermark would make verification expect that new
   row's `PreviousHash` to be null and report a broken link on a chain nobody touched.
 
+  The pruned total is accumulated from the rows each batch actually removed rather than derived by
+  subtracting a survivor count from `RowCount`. `RowCount` belongs to the append path, so a
+  read-modify-write against it skewed whenever an append committed between the sweep's two reads -
+  one prune went unrecorded and verification then reported truncation on an intact chain. Retention
+  now writes only the columns it owns, so the two writers never contend and no lock or
+  isolation-level assumption is needed.
+
   **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
   using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
   its `ExecuteDelete` fast path and materialises each batch instead - the chain repair has to know

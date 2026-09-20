@@ -37,6 +37,15 @@ using Moongazing.OrionAudit.Integrity;
 /// unwrapped, matching <see cref="CopyToTableAuditArchiver{TArchiveRow}"/>. That archiver in turn
 /// detects this transaction as ambient and joins it rather than starting its own.
 /// </para>
+/// <para>
+/// <b>Concurrency.</b> The pruned total is accumulated from the rows each batch actually removed, and
+/// never derived by subtracting a separately-read survivor count from
+/// <see cref="AuditChainAnchor.RowCount"/>. That column belongs to the append path, which advances it
+/// under the anchor's write lock; a read-modify-write against it would skew whenever an append
+/// committed between the sweep's two reads. Retention writes only the columns it owns, so the two
+/// writers never contend - which is why this needs neither a lock of its own nor an isolation-level
+/// assumption.
+/// </para>
 /// </remarks>
 internal sealed class ChainPruneArchiver : IAuditArchiver
 {
@@ -140,22 +149,49 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
         Dictionary<StreamKey, AuditChainAnchor> anchors,
         CancellationToken cancellationToken)
     {
-        foreach (var (stream, anchor) in anchors)
-        {
-            var surviving = ScopeToStream(dbContext.Set<AuditLog>().AsNoTracking(), stream)
-                .Where(a => a.EntryHash != null);
+        // Which of the batch's chained rows actually left. The IAuditArchiver contract allows an
+        // implementation to be handed a row it has already removed (an idempotent retry), and a
+        // custom archiver may remove only some of what it was offered; counting those would
+        // permanently overstate the pruned total, so ask the table rather than assume. Safe inside
+        // the transaction: a concurrent append only ever adds new ids, it cannot resurrect these.
+        var offered = chained.Select(r => r.Id).ToList();
+        var notRemoved = new HashSet<Guid>(await dbContext.Set<AuditLog>().AsNoTracking()
+            .Where(a => offered.Contains(a.Id))
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false));
 
-            var survivingCount = await surviving.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var group in chained.Where(r => !notRemoved.Contains(r.Id)).GroupBy(StreamOf))
+        {
+            if (!anchors.TryGetValue(group.Key, out var anchor))
+            {
+                continue;
+            }
+            var stream = group.Key;
+
+            // ACCUMULATE what this batch removed; never derive the pruned total by subtracting a
+            // separately-read survivor count from RowCount. RowCount belongs to the append path,
+            // which advances it under the anchor's write lock. A read-modify-write against it skews
+            // whenever an append commits between the two reads - the survivor count then includes
+            // the new row while the anchor still holds the pre-append total, recording one fewer
+            // pruned row than there were, and verification reports truncation on an intact chain.
+            // An increment touches only the columns retention owns, so appends move RowCount,
+            // retention moves PrunedRowCount, and the two stay consistent with no lock and no
+            // isolation-level assumption.
+            anchor.PrunedRowCount += group.LongCount();
+
             // The oldest surviving row IS the chain's new genesis, and the hash it already carries is
             // exactly the watermark verification needs. Ordered the same way the verifier walks the
-            // stream so the two agree on which row that is.
-            var genesis = await surviving
+            // stream so the two agree on which row that is. This read is race-tolerant by nature: an
+            // append lands at the tail, so it cannot change which row is the head - except when the
+            // stream was emptied, where the appended row IS the head and its PreviousHash is the
+            // retained tail, which is the same watermark the fallback below would pick.
+            var genesis = await ScopeToStream(dbContext.Set<AuditLog>().AsNoTracking(), stream)
+                .Where(a => a.EntryHash != null)
                 .OrderBy(a => a.OccurredOnUtc)
                 .ThenBy(a => a.Id)
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
-
-            anchor.PrunedRowCount = anchor.RowCount - survivingCount;
 
             // Nothing survives: the whole chain up to the anchored tail was pruned, so the tail IS
             // the last pruned hash. Clearing the watermark here would strand the stream - the anchor
