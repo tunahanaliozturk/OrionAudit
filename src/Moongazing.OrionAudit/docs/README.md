@@ -50,9 +50,11 @@ var orderAsOfYesterday = await reconstructor.ReconstructAsync<Order>(
 ```
 
 Reconstruction is tenant-scoped, through the same filter the read DSL uses: it returns `null` for
-an id belonging to another tenant, and for any id when a registered `IAuditTenantResolver` cannot
-name a tenant. There is no `crossTenant` escape hatch — a cross-tenant replay is not a wider read
-but an incorrect entity.
+an id whose rows belong to another tenant. When a registered `IAuditTenantResolver` cannot name a
+tenant, the replay is scoped to the no-tenant stream rather than refused outright — rows that were
+never tenant-stamped still reconstruct (a single-tenant deployment is unaffected), and only
+tenant-stamped entities come back `null`. There is no `crossTenant` escape hatch — a cross-tenant
+replay is not a wider read but an incorrect entity.
 
 ## Companion packages
 

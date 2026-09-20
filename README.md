@@ -23,7 +23,7 @@
 > v1.0.0 is a correctness release: synchronous `SaveChanges()` is captured, capture and redaction
 > work under `UseLazyLoadingProxies()`, pooled/factory contexts no longer misattribute rows, the
 > viewer demands an explicit access decision and HTML-encodes what it renders, the tenant filter
-> denies instead of failing open when the tenant cannot be resolved, and the hash chain's anchor
+> scopes to the no-tenant stream instead of failing open when the tenant cannot be resolved, and the hash chain's anchor
 > lock is actually held. It has **breaking changes and a schema migration** — read the
 > [1.0.0 changelog entry](CHANGELOG.md) before upgrading. Recent milestones: v0.11.0 richer history filters + aggregations, v0.10.0 background compaction + history export, and v0.9.0 tamper-evident hash-chaining — opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable and unforgeable without the MAC key, which lives outside the audit database. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive. Earlier: v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
 > [See the changelog](CHANGELOG.md) and [what's next](ROADMAP.md).
@@ -229,7 +229,26 @@ dotnet ef migrations add AddOrionAuditHashChain
 opt-in: `ChainSequence` is new on the audit table, and `OrionAudit_Chain_Anchor` gains
 `PrunedRowCount` (non-nullable, defaults to `0`) and `PrunedThroughHash` (nullable). One migration
 covers all three, and **no backfill is needed** — the defaults mean "not known" / "never pruned",
-which is exactly how the walk and the verification treat pre-upgrade rows.
+which is exactly how the walk and the verification treat pre-upgrade rows. The migration is
+backward compatible, so a v0.11.3 process runs against the migrated schema unchanged; apply it
+before the cutover below rather than during it.
+
+> **Drain before you cut over — do not roll v0.11.3 and v1.0.0 writers side by side.**
+> v0.11.3's anchor lock was never actually held (it was released before the anchor head was read —
+> one of the defects v1.0.0 fixes). A v1.0.0 writer holds that lock correctly but cannot serialize
+> against an old writer that is not honouring it, so during an overlap an old and a new process
+> writing the **same stream** can both read head `H` and both stamp `PreviousHash = H`. That is a
+> **fork**, not a mis-ordering: `ChainSequence` orders a chain, it cannot repair one that branched,
+> and `VerifyChainAsync` will report `BrokenLink` on a trail nobody tampered with, permanently.
+> Let the v0.11.3 instances finish their in-flight saves and stop taking audited work, then start
+> the v1.0.0 ones. A blue/green cutover works if the old side is drained first; an
+> instance-by-instance rolling restart does not, because it is defined by both versions serving at
+> once.
+>
+> **This applies only if you enable `UseHashChain`.** Without chaining there is no anchor, no lock
+> and nothing stamped — roll normally. It also does not apply if your streams are already
+> partitioned so one stream is only ever written by one process; the hazard is two versions writing
+> *one* stream, not the two versions coexisting.
 
 ### Retention and the chain
 
@@ -590,7 +609,7 @@ var rows = await context.AuditFor<Order>().ToListAsync();
 var allRows = await context.AuditFor<Order>(crossTenant: true).ToListAsync();
 ```
 
-**An unresolved tenant denies, it does not widen.** If the resolver is registered but returns
+**An unresolved tenant narrows, it does not widen.** If the resolver is registered but returns
 `null` — a dropped header, a claim the gateway did not forward, a background thread with no ambient
 context — the read is scoped to the no-tenant stream (`TenantId` null or `""`), which in any
 tenant-stamped deployment is the empty set. Before v1.0.0 the filter fell through *unfiltered* and
@@ -598,9 +617,10 @@ handed back every tenant's rows at exactly the moment the caller's identity was 
 upgrade and a query that used to return rows now returns none, that is this: your resolver is
 returning `null` on that path and previously nobody noticed. A genuinely single-tenant deployment
 whose resolver returns `null` by design still reads its own history unchanged, and an application
-with no resolver registered at all is unaffected. The deny is an empty result rather than a throw —
-these extensions run on request paths. `crossTenant: true` remains the explicit, auditable way to
-read across tenants.
+with no resolver registered at all is unaffected. Note that this is a narrowed read, not a refusal:
+it yields an empty result rather than a throw — these extensions sit on request paths — and rows
+that were never tenant-stamped are still returned. Do not rely on it to deny; rely on it not to
+leak. `crossTenant: true` remains the explicit, auditable way to read across tenants.
 
 ### Time-travel reconstruction
 
@@ -623,8 +643,12 @@ var manyAsOf = await reconstructor.ReconstructManyAsync<Order>(
 Returns `null` if the entity didn't exist or was deleted at that timestamp.
 
 Reconstruction is **tenant-scoped**, through the same filter `AuditFor<T>()` uses, so it also
-returns `null` for an id that belongs to another tenant, and for any id when the tenant cannot be
-resolved. Before v1.0.0 it read the audit table directly and replayed *every* tenant's history for
+returns `null` for an id whose rows belong to another tenant. When a registered resolver cannot
+name a tenant, the replay is scoped to the no-tenant stream like any other read — so it still
+reconstructs entities from rows that were never tenant-stamped (a single-tenant deployment
+reconstructs its history unchanged), and returns `null` only for entities whose rows *are*
+tenant-stamped. It is a scoped read, not a blanket denial; do not rely on it to refuse.
+Before v1.0.0 it read the audit table directly and replayed *every* tenant's history for
 the requested id into one object — which handed tenant A's values to tenant B and produced an
 entity that had existed in no tenant. There is deliberately no `crossTenant` escape hatch here: a
 cross-tenant replay is not a wider read but an incorrect entity. Read across tenants with

@@ -72,11 +72,40 @@ describe every change in full.
 
    **No backfill is needed and none should be attempted.** Every column defaults to "not known" /
    "never pruned", and both the walk and the verification treat those defaults as the pre-upgrade
-   behaviour exactly. A rolling deployment is safe: rows written by an old build while a new one is
-   already appending keep their place in write order. Consumers who create the audit tables outside
-   EF migrations need the three columns added by hand.
+   behaviour exactly. **The schema change itself is rolling-safe**: a 0.11.3 process simply leaves
+   `ChainSequence` null, and rows it writes while a 1.0.0 process is already appending keep their
+   place in write order rather than being dragged to the front of their stream. That is a statement
+   about the *columns* only — if you use `UseHashChain`, read step 4 before you deploy. Consumers
+   who create the audit tables outside EF migrations need the three columns added by hand.
 
-4. **A retrying execution strategy now has to own its own transaction — but only with
+4. **`UseHashChain` users must not run 0.11.3 and 1.0.0 writers against the same audit database at
+   the same time.** This is a step to perform *before* deploying, not a note to read afterwards.
+
+   One of the defects this release fixes is that 0.11.3's anchor lock was never actually held — it
+   was acquired and released before the anchor head was read. A 1.0.0 writer takes and holds that
+   lock correctly, but it cannot serialize against a 0.11.3 writer that is not honouring it. So
+   during an overlap window, an old process and a new process writing the **same stream**
+   concurrently can both read head `H` and both stamp `PreviousHash = H`. That is a **fork**, not a
+   mis-ordering: `ChainSequence` orders a chain, it cannot repair one that branched, and no later
+   verification or re-anchoring undoes it. `VerifyChainAsync` will report `BrokenLink` on a trail
+   nobody tampered with, permanently.
+
+   So do not roll the two side by side. Drain the 0.11.3 instances fully — let in-flight saves
+   finish and stop them accepting new audited work — then start the 1.0.0 instances. A blue/green
+   cutover works if the old side is drained before the new side takes traffic; an instance-by-
+   instance rolling restart does not, because it is defined by the two versions serving at once.
+   Apply the step-3 migration first; it is backward compatible, so a 0.11.3 process runs against
+   the migrated schema unchanged, which is what lets you migrate before the cutover rather than
+   during it.
+
+   **Consumers who do not enable `UseHashChain` are unaffected and need no drain.** Without
+   chaining there is no anchor, no lock, and nothing stamped — the only thing that reaches them is
+   one nullable column that no 0.11.3 code writes and no 1.0.0 code reads for them. Roll normally.
+   The same is true if your streams are already partitioned so that one stream is only ever written
+   by one process; the requirement is about two versions writing *one* stream, not about the two
+   versions coexisting as such.
+
+5. **A retrying execution strategy now has to own its own transaction — but only with
    `UseHashChain`.** EF Core allows a transaction inside a retriable unit only from the code that
    owns the `SaveChanges` call, and an interceptor is not that code. If your `DbContext` uses
    `EnableRetryOnFailure()` *and* you enable hash chaining, the first chained save throws
@@ -94,7 +123,7 @@ describe every change in full.
 
    Consumers who do not enable hash chaining are unaffected.
 
-5. **A raised dependency floor.** On `net10.0`, `OrionAudit` and `OrionAudit.MySql` now require EF
+6. **A raised dependency floor.** On `net10.0`, `OrionAudit` and `OrionAudit.MySql` now require EF
    Core 10.0.12 and can no longer resolve against EF Core 9; `net8.0` / `net9.0` consumers move
    from EF Core 9.0.0 to 9.0.20. `Microsoft.Extensions.DependencyInjection.Abstractions`,
    `.Hosting.Abstractions` and `.Logging.Abstractions` move to 10.0.12 on every target, which is
@@ -346,8 +375,12 @@ describe every change in full.
   **Consumer-visible changes:** the `OrionAudit_Log` table gains a nullable `ChainSequence`
   (`bigint`) column, so a consumer using migrations needs a migration for it -
   `dotnet ef migrations add AddOrionAuditChainSequence`, emitted by `AuditLogEntityTypeConfiguration`
-  like every other audit column. **No backfill is needed and none should be attempted, and a rolling
-  deployment is safe.** A stream whose rows are all sequenced is walked purely by `ChainSequence`; a
+  like every other audit column. **No backfill is needed and none should be attempted, and the
+  column itself is rolling-safe** — but see the deployment step in Breaking changes above: the
+  *column* tolerates an old build appending beside a new one, while the hash chain's **writer** in
+  0.11.3 does not, because its anchor lock was never held. Two versions writing one stream at once
+  can fork the chain, and ordering cannot repair a fork. A stream whose rows are all sequenced is
+  walked purely by `ChainSequence`; a
   stream written entirely before the column existed is walked in exactly the order the database
   returned it; and a stream holding both - a rolling deployment, where an old build keeps appending
   unsequenced rows after new ones - merges the two groups on `OccurredOnUtc`, each side keeping its
