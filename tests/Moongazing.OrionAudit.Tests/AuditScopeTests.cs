@@ -66,6 +66,35 @@ public class AuditScopeTests
     }
 
     [Fact]
+    public void PushServices_NestsAndRestoresLikeTheCorrelationScope()
+    {
+        var outer = new ServiceCollection().BuildServiceProvider();
+        var inner = new ServiceCollection().BuildServiceProvider();
+        Assert.Null(AuditScope.CurrentServices);
+        using (AuditScope.PushServices(outer))
+        {
+            Assert.Same(outer, AuditScope.CurrentServices);
+            using (AuditScope.PushServices(inner))
+            {
+                Assert.Same(inner, AuditScope.CurrentServices);
+            }
+            Assert.Same(outer, AuditScope.CurrentServices);
+        }
+        Assert.Null(AuditScope.CurrentServices);
+    }
+
+    [Fact]
+    public async Task PushServices_FlowsAcrossAwaits()
+    {
+        var services = new ServiceCollection().BuildServiceProvider();
+        using (AuditScope.PushServices(services))
+        {
+            await Task.Yield();
+            await Task.Run(() => Assert.Same(services, AuditScope.CurrentServices));
+        }
+    }
+
+    [Fact]
     public async Task Push_FlowsAcrossAwaits()
     {
         using (AuditScope.Push("flow-test"))
