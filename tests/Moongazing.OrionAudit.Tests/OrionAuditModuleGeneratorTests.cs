@@ -178,6 +178,34 @@ public class OrionAuditModuleGeneratorTests
         Assert.Contains("typeof(global::Consumer.Widget)", generated, StringComparison.Ordinal);
     }
 
+    [Theory]
+    // namespace A.B + class C_D vs namespace A.B.C + class D: both used to escape to "A_B_C_D".
+    [InlineData("namespace A.B { [OrionAuditModule] public partial class C_D { } }",
+                "namespace A.B.C { [OrionAuditModule] public partial class D { } }")]
+    // namespace A + class B_C vs namespace A.B + class C: "A_B_C" again.
+    [InlineData("namespace A { [OrionAuditModule] public partial class B_C { } }",
+                "namespace A.B { [OrionAuditModule] public partial class C { } }")]
+    // A nested module took only its namespace, so A.B.C nested in B collided with a top-level A.C.
+    [InlineData("namespace A { public partial class B { [OrionAuditModule] public partial class C { } } }",
+                "namespace A { [OrionAuditModule] public partial class C { } }")]
+    // Module vs Module<T>: the hint has to carry the arity.
+    [InlineData("namespace A { [OrionAuditModule] public partial class Module { } }",
+                "namespace A { [OrionAuditModule] public partial class Module<T> { } }")]
+    public void ModulesWithDistinctNames_NeverShareAHintName(string first, string second)
+    {
+        var source = "using Moongazing.OrionAudit;\n" + first + "\n" + second + "\n";
+
+        // A duplicate hint name makes AddSource throw ArgumentException, which fails the whole
+        // generator run and drops every file it had already produced.
+        var run = RunAndAssertConsumerCompiles(source);
+        var result = Assert.Single(run.Results);
+
+        Assert.Equal(2, result.GeneratedSources.Length);
+        Assert.Equal(
+            2,
+            result.GeneratedSources.Select(s => s.HintName).Distinct(StringComparer.Ordinal).Count());
+    }
+
     private static (Compilation Output, GeneratorDriverRunResult Run) Run(string source)
     {
         // Every assembly the test host has loaded, plus OrionAudit itself: enough for a consumer

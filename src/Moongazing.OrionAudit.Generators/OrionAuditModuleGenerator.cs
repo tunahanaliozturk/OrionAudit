@@ -128,9 +128,9 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var source = EmitModule(module, chain, declarations, input.Types);
-            var hint = $"{module.ContainingNamespace.ToDisplayString().Replace('.', '_')}_{module.Name}.OrionAuditModule.g.cs";
-            spc.AddSource(hint, source);
+            spc.AddSource(
+                HintNames.ForType(module) + ".OrionAuditModule.g.cs",
+                EmitModule(module, chain, declarations, input.Types));
         }
     }
 

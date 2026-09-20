@@ -251,6 +251,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   site with nothing pointing at the cause. The predicate now matches `TypeDeclarationSyntax` and
   the emitted part repeats the declaration's own keyword (`class`, `record`, `record class`, ...)
   rather than hard-coding `class`.
+- **Two modules can no longer collide on a generated file's hint name and fail the build.** The
+  hint was `{namespace with '.'→'_'}_{Name}`, so namespace `A.B` + class `C_D` and namespace
+  `A.B.C` + class `D` both produced `A_B_C_D.OrionAuditModule.g.cs`; `AddSource` then threw
+  `ArgumentException` with an opaque message and dropped every file the run had already produced.
+  Nested modules (which took only their namespace) and `Module` vs `Module<T>` collided the same
+  way. The hint now comes from the type's full metadata name — namespace, every enclosing type,
+  generic arity — through an injective escape, in a new `HintNames` helper that mirrors OrionGuard's.
 
 ## [0.11.3] - 2026-07-28
 
