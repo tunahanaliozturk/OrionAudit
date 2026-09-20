@@ -188,7 +188,7 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
             // retained tail, which is the same watermark the fallback below would pick.
             var genesis = await ScopeToStream(dbContext.Set<AuditLog>().AsNoTracking(), stream)
                 .Where(a => a.EntryHash != null)
-                .InChainOrder()
+                .OldestFirst()
                 .FirstOrDefaultAsync(cancellationToken)
                 .ConfigureAwait(false);
 

@@ -154,10 +154,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Consumer-visible changes:** the `OrionAudit_Log` table gains a nullable `ChainSequence`
   (`bigint`) column, so a consumer using migrations needs a migration for it -
   `dotnet ef migrations add AddOrionAuditChainSequence`, emitted by `AuditLogEntityTypeConfiguration`
-  like every other audit column. **No backfill is needed and none should be attempted.** Rows written
-  before the column keep `NULL` and are walked in their original `(OccurredOnUtc, Id)` order, ahead of
-  every sequenced row of the same stream, so a chain written before this upgrade verifies exactly as
-  it did and the rows appended after it continue that chain across the boundary. The null group is
+  like every other audit column. **No backfill is needed and none should be attempted, and a rolling
+  deployment is safe.** The walk orders by `OccurredOnUtc` first and uses the sequence only to settle
+  ties, so a row written before the column existed - or written *during* a rollout by an instance
+  still on the old build, after a new instance has already appended a sequenced row to the same
+  stream - keeps its place in write order instead of being dragged to the front of its stream. (An
+  earlier draft of this change ordered all unsequenced rows first, which reported `BrokenLink` on an
+  intact chain for exactly that mixed-version case, permanently.) The one tie the ordering cannot
+  settle is two builds appending to the *same* stream within a single tick of the timestamp column -
+  100ns on SQL Server and SQLite, a microsecond on PostgreSQL and MySQL - so a deliberately coarse
+  column such as `datetime2(0)` is worth avoiding on a chained audit table. The unsequenced group is
   selected with an explicit sort key rather than relying on `ORDER BY` null placement, which differs
   between SQL Server/SQLite and PostgreSQL. `AuditHashChainStamper.Stamp` gained an optional trailing
   parameter carrying each stream's persisted row count; omitting it leaves `ChainSequence` unassigned,
