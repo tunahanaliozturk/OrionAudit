@@ -28,6 +28,13 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
     private const string HelpLink = "https://github.com/tunahanaliozturk/OrionAudit#source-generated-registration-aot-aware";
 
     /// <summary>
+    /// Constraint types are emitted into a file with no using directives, so they are written
+    /// <c>global::</c>-qualified, with the nullable annotation the consumer declared.
+    /// </summary>
+    private static readonly SymbolDisplayFormat ConstraintTypeFormat = SymbolDisplayFormat.FullyQualifiedFormat
+        .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
+    /// <summary>
     /// OA0001: an <c>[OrionAuditModule]</c> type, or one of the types it is nested in, is not
     /// declared <c>partial</c>, so the generator has nothing it can add members to.
     /// </summary>
@@ -286,37 +293,119 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Re-declares one link of the nesting chain as the consumer wrote it: same accessibility
-    /// (partial declarations must agree), same type parameters, same constraints. A generic module
-    /// emitted without its type parameter list is a different type of arity 0, not a part of it.
+    /// Re-declares one link of the nesting chain: same accessibility (partial declarations must
+    /// agree), same type parameters, same constraints. A generic link emitted without its type
+    /// parameter list is a different type of arity 0, not a part of it.
+    /// <para>
+    /// Everything but the type keyword comes from the symbol, never from the declaration's syntax.
+    /// The generated file carries none of the consumer's using directives, so syntax copied out of
+    /// a file that had them — <c>where T : IMarker</c>, or an alias — does not resolve there
+    /// (CS0246), and the part that fails to resolve then disagrees with the one that does (CS0265).
+    /// </para>
     /// </summary>
     private static string Header(INamedTypeSymbol type, TypeDeclarationSyntax declaration)
     {
         var sb = new StringBuilder();
         sb.Append(AccessModifier(type)).Append(" partial ").Append(Keyword(declaration)).Append(' ').Append(type.Name);
 
-        if (declaration.TypeParameterList is not null)
-        {
-            sb.Append(declaration.TypeParameterList.WithoutTrivia().ToFullString());
-        }
-
-        // Constraints may be written on any one part of a partial type; the others must repeat them
-        // identically or omit them. Copying verbatim from whichever part carries them is valid
-        // either way, and the type parameter list always travels with them.
-        foreach (var reference in type.DeclaringSyntaxReferences)
-        {
-            if (reference.GetSyntax() is TypeDeclarationSyntax other && other.ConstraintClauses.Count > 0)
-            {
-                foreach (var clause in other.ConstraintClauses)
-                {
-                    sb.Append(' ').Append(clause.WithoutTrivia().ToFullString().Trim());
-                }
-
-                break;
-            }
-        }
+        AppendTypeParameters(sb, type);
+        AppendConstraints(sb, type);
 
         return sb.ToString();
+    }
+
+    private static void AppendTypeParameters(StringBuilder sb, INamedTypeSymbol type)
+    {
+        if (type.TypeParameters.Length == 0)
+        {
+            return;
+        }
+
+        sb.Append('<');
+        for (var i = 0; i < type.TypeParameters.Length; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(", ");
+            }
+
+            var parameter = type.TypeParameters[i];
+            switch (parameter.Variance)
+            {
+                case VarianceKind.In:
+                    sb.Append("in ");
+                    break;
+                case VarianceKind.Out:
+                    sb.Append("out ");
+                    break;
+                default:
+                    break;
+            }
+
+            // Attributes on a type parameter are deliberately not repeated: a partial type combines
+            // them from every part, so omitting them here is both legal and one less name to resolve.
+            sb.Append(parameter.Name);
+        }
+
+        sb.Append('>');
+    }
+
+    /// <summary>
+    /// Rebuilds the constraint clauses from the type parameter symbols, with every constraint type
+    /// fully qualified. C# fixes the order: the primary constraint, then types, then <c>new()</c>.
+    /// </summary>
+    // ponytail: 'allows ref struct' (C# 13) has no ITypeParameterSymbol API in the Roslyn 4.10 this
+    // component compiles against, so it is not reproduced. Lift the pin to surface it.
+    private static void AppendConstraints(StringBuilder sb, INamedTypeSymbol type)
+    {
+        foreach (var parameter in type.TypeParameters)
+        {
+            var constraints = new List<string>();
+
+            if (parameter.HasUnmanagedTypeConstraint)
+            {
+                // Roslyn sets HasValueTypeConstraint too; 'unmanaged' is the one that was written.
+                constraints.Add("unmanaged");
+            }
+            else if (parameter.HasValueTypeConstraint)
+            {
+                constraints.Add("struct");
+            }
+            else if (parameter.HasReferenceTypeConstraint)
+            {
+                constraints.Add(parameter.ReferenceTypeConstraintNullableAnnotation == NullableAnnotation.Annotated
+                    ? "class?"
+                    : "class");
+            }
+            else if (parameter.HasNotNullConstraint)
+            {
+                constraints.Add("notnull");
+            }
+
+            for (var i = 0; i < parameter.ConstraintTypes.Length; i++)
+            {
+                var constraintType = parameter.ConstraintTypes[i].ToDisplayString(ConstraintTypeFormat);
+                if (parameter.ConstraintNullableAnnotations[i] == NullableAnnotation.Annotated
+                    && !constraintType.EndsWith("?", System.StringComparison.Ordinal))
+                {
+                    // A nullability mismatch between partial declarations is CS8665, which a
+                    // consumer building with TreatWarningsAsErrors reads as a build break.
+                    constraintType += "?";
+                }
+
+                constraints.Add(constraintType);
+            }
+
+            if (parameter.HasConstructorConstraint)
+            {
+                constraints.Add("new()");
+            }
+
+            if (constraints.Count > 0)
+            {
+                sb.Append(" where ").Append(parameter.Name).Append(" : ").Append(string.Join(", ", constraints));
+            }
+        }
     }
 
     /// <summary>

@@ -244,7 +244,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Module<T>` emitted `partial class Module` — an unrelated arity-0 type rather than a part of
   `Module<T>`, so `Module<T>.RegisterAuditedTypes` did not exist. The type parameter list and any
   constraint clauses are now emitted as declared, for the module and for every generic type it is
-  nested in.
+  nested in. Constraints are resolved from the type parameter symbols and written `global::`-
+  qualified, with the declared nullable annotation: the generated file carries none of the
+  consumer's `using` directives, so a constraint such as `where T : IMarker` — or one written
+  through a `using` alias — would not resolve there if it were copied verbatim from the
+  declaration (CS0246, then CS0265 against the part that does resolve it).
 - **A `record` module or `[Auditable]` record is no longer skipped in silence.** The syntax
   predicate was `node is ClassDeclarationSyntax`; a record is a `RecordDeclarationSyntax`, so the
   declaration was dropped entirely and the consumer's only signal was a missing method at the call

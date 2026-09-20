@@ -304,6 +304,48 @@ public class OrionAuditModuleGeneratorTests
         Assert.Empty(Run(source).Run.Diagnostics);
     }
 
+    [Theory]
+    // The constraint type is only in scope through a using directive of the consumer's file...
+    [InlineData("using Contracts;", "IMarker")]
+    // ...or only through an alias, which does not exist anywhere else in the compilation.
+    [InlineData("using Marker = Contracts.IMarker;", "Marker")]
+    public void ConstraintTypeReachableOnlyThroughAUsing_IsEmittedFullyQualified(
+        string usingDirective,
+        string constraintName)
+    {
+        var source = $$"""
+            namespace Contracts
+            {
+                public interface IMarker { }
+            }
+
+            namespace Consumer
+            {
+                using Moongazing.OrionAudit;
+                using Moongazing.OrionAudit.Configuration;
+                {{usingDirective}}
+
+                [OrionAuditModule]
+                public partial class Registry<T> where T : {{constraintName}} { }
+
+                public sealed class Marked : Contracts.IMarker { }
+
+                public static class Consume
+                {
+                    public static void Use(AuditConfigurationBuilder builder) =>
+                        Registry<Marked>.RegisterAuditedTypes(builder);
+                }
+            }
+            """;
+
+        // The generated file carries none of the consumer's using directives, so a constraint
+        // copied verbatim from the declaration is CS0246 there - and then CS0265 against the part
+        // that does resolve it.
+        var generated = SingleSource(RunAndAssertConsumerCompiles(source));
+
+        Assert.Contains("where T : global::Contracts.IMarker", generated, StringComparison.Ordinal);
+    }
+
     private static (Compilation Output, GeneratorDriverRunResult Run) Run(string source)
     {
         // Every assembly the test host has loaded, plus OrionAudit itself: enough for a consumer
