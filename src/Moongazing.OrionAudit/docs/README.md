@@ -49,6 +49,11 @@ var orderAsOfYesterday = await reconstructor.ReconstructAsync<Order>(
     DateTime.UtcNow.AddDays(-1));
 ```
 
+Reconstruction is tenant-scoped, through the same filter the read DSL uses: it returns `null` for
+an id belonging to another tenant, and for any id when a registered `IAuditTenantResolver` cannot
+name a tenant. There is no `crossTenant` escape hatch — a cross-tenant replay is not a wider read
+but an incorrect entity.
+
 ## Companion packages
 
 - **OrionAudit.AspNetCore** — `HttpContextAuditUserResolver` for ASP.NET Core apps

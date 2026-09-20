@@ -9,6 +9,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-20
+
+The public API is stable from here. Any breaking change after this release requires 2.0.0.
+
+What made this a 1.0.0 rather than an 0.12.0 is that the test gate was not one. The five test
+projects are xunit.v3 on Microsoft Testing Platform with no VSTest adapter, so `dotnet test`
+discovered nothing, ran nothing, and exited 0 — and every pull request since the suite was written
+had merged on that green check. Fixing the gate turned a zero-test run into a 579-test run and
+surfaced everything below it: a synchronous `SaveChanges()` that captured no audit rows at all,
+`[RedactedAudit]` values persisted in plaintext under `UseLazyLoadingProxies()`, pooled contexts
+attributing every row to the first request's user, stored XSS in the viewer, a viewer any
+authenticated user could read, a tenant filter that failed open, a reconstructor that merged two
+tenants into one entity, a hash-chain anchor lock that was never actually held, and a retention
+sweep that broke the chain permanently on its first purge.
+
+Several fixes are breaking. They are listed together immediately below; the sections after that
+describe every change in full.
+
+### Breaking changes
+
+1. **`MapOrionAuditViewer` requires an explicit access decision.** A registration that named no
+   policy used to fall through to a bare `RequireAuthorization()` — any authenticated user could
+   read the entire audit trail. The viewer now throws `InvalidOperationException` at startup
+   instead. **You will hit this as a startup failure on the first run after upgrading.** Name the
+   decision at the call site:
+
+   ```csharp
+   app.MapOrionAuditViewer<AppDbContext>("/audit", o => o.RequireAuthorization("AuditViewers"));
+   ```
+
+   `o.RequireAuthorization(p => p.RequireRole("Auditor"))` (new inline-policy overload),
+   `o.RequireAuthorization(p => p.RequireAuthenticatedUser())` (the old default, chosen
+   deliberately) and `o.AllowAnonymous()` (local development) all satisfy it. Registrations that
+   already named a policy or called `AllowAnonymous()` need no change.
+
+2. **Pooled and factory-registered contexts refuse to guess the user.** `AddDbContextPool`, and
+   `AddDbContextFactory` at its default `Singleton` lifetime, run the options lambda once from the
+   **root** provider, so `UseOrionAudit(sp)` captured the root provider and every later save
+   resolved the *first* request's `IAuditUserResolver` / `IAuditTenantResolver`. Rather than keep
+   writing a trail that names the wrong person, the first audited save — and the first
+   tenant-scoped read — now throws `OrionAuditConfigurationException`. Push the real request scope:
+
+   ```csharp
+   using var scope = AuditScope.PushServices(httpContext.RequestServices);
+   await db.SaveChangesAsync();
+   ```
+
+   Or switch that registration to `AddDbContext<T>((sp, o) => o.UseOrionAudit(sp))`, which is
+   unaffected and always was. Single-tenant applications with no resolver registered are
+   unaffected, as is `crossTenant: true`.
+
+3. **Two schema additions — one migration.** `OrionAudit_Log` gains a nullable `ChainSequence`
+   (`bigint`), and `OrionAudit_Chain_Anchor` gains `PrunedRowCount` (`bigint`, defaults to `0`) and
+   `PrunedThroughHash` (`char(64)`, nullable). All three are emitted by the shipped entity
+   configurations, so one migration covers them:
+
+   ```bash
+   dotnet ef migrations add OrionAudit_1_0_0 --context AppDbContext
+   dotnet ef database update --context AppDbContext
+   ```
+
+   **No backfill is needed and none should be attempted.** Every column defaults to "not known" /
+   "never pruned", and both the walk and the verification treat those defaults as the pre-upgrade
+   behaviour exactly. A rolling deployment is safe: rows written by an old build while a new one is
+   already appending keep their place in write order. Consumers who create the audit tables outside
+   EF migrations need the three columns added by hand.
+
+4. **A retrying execution strategy now has to own its own transaction — but only with
+   `UseHashChain`.** EF Core allows a transaction inside a retriable unit only from the code that
+   owns the `SaveChanges` call, and an interceptor is not that code. If your `DbContext` uses
+   `EnableRetryOnFailure()` *and* you enable hash chaining, the first chained save throws
+   `OrionAuditConfigurationException` carrying the snippet you need:
+
+   ```csharp
+   var strategy = db.Database.CreateExecutionStrategy();
+   await strategy.ExecuteAsync(async () =>
+   {
+       await using var transaction = await db.Database.BeginTransactionAsync();
+       await db.SaveChangesAsync();
+       await transaction.CommitAsync();
+   });
+   ```
+
+   Consumers who do not enable hash chaining are unaffected.
+
+5. **A raised dependency floor.** On `net10.0`, `OrionAudit` and `OrionAudit.MySql` now require EF
+   Core 10.0.12 and can no longer resolve against EF Core 9; `net8.0` / `net9.0` consumers move
+   from EF Core 9.0.0 to 9.0.20. `Microsoft.Extensions.DependencyInjection.Abstractions`,
+   `.Hosting.Abstractions` and `.Logging.Abstractions` move to 10.0.12 on every target, which is
+   not optional — EF Core 10.0.12 lifts the transitive minimum above a direct 9.0.0 reference and
+   fails restore with `NU1605`. No public API changed with either.
+
 ### Security
 
 - **`IAuditReconstructor` no longer replays other tenants' audit rows.** `AuditReconstructor`
@@ -51,6 +143,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, restored deliberately — use it only if every authenticated user really is entitled to
   the audit trail), or `o.AllowAnonymous()` (unchanged; local development only). Registrations
   that already named a policy or called `AllowAnonymous()` are unaffected.
+
+- **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
+  concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
+  write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
+  as script in the session of whoever later reviewed the audit log, which is an administrator by
+  definition. The entry list is now rendered server-side in `OrionAuditViewerStaticFiles` and every
+  audit value passes through `HtmlEncoder.Default` on the way out; the one remaining script in the
+  page only writes `textContent`, which the browser never parses as markup. Every interpolation site
+  is an HTML text node - no audit value reaches an attribute, a `<script>` block, or a JSON island -
+  so the HTML encoder is the correct encoder at each of them. The JSON API (`/api/log`,
+  `/api/{entityType}/{key}`, `/api/meta`) is unchanged and still returns raw values.
+
+  **Consumer-visible change:** the viewer's root page now resolves `TDbContext` and
+  `IAuditConfiguration` per request, exactly as the JSON API endpoints in the same route group
+  already did. A host that registered the viewer is unaffected; the page simply arrives filled in
+  rather than filling itself in from a follow-up `fetch`.
+
+- **Fixed a fail-open tenant filter on the audit read path.** `AuditQueryExtensions.AuditFor<T>()` and
+  `AuditLog()` apply a tenant filter when an `IAuditTenantResolver` is registered. When that resolver
+  returned null - a dropped header, a claim the gateway did not forward, a background thread with no
+  ambient context - the filter fell through **unfiltered** and handed the caller every tenant's audit
+  rows. The read widened to all tenants at exactly the moment the caller's identity was unknown, and
+  it carried into everything built on those extensions, including the viewer's `/api/log` and
+  `/api/{entityType}/{key}`. An unresolved tenant now denies: the read is scoped to the no-tenant
+  stream (`TenantId` null or `""`), which is the read-side mirror of the canonical value the write
+  path persists. In any tenant-stamped deployment that is the empty set; a genuinely single-tenant
+  deployment, whose resolver returns null by design, still reads its own history unchanged. A
+  deliberate empty result rather than a throw - these extensions run on request paths, and the
+  library reserves exceptions for configuration and programming boundaries. `crossTenant: true` is
+  still the explicit, auditable way to read across tenants, and an application with no resolver
+  registered at all is unaffected.
 
 ### Fixed
 
@@ -224,12 +347,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`bigint`) column, so a consumer using migrations needs a migration for it -
   `dotnet ef migrations add AddOrionAuditChainSequence`, emitted by `AuditLogEntityTypeConfiguration`
   like every other audit column. **No backfill is needed and none should be attempted, and a rolling
-  deployment is safe.** The walk orders by `OccurredOnUtc` first and uses the sequence only to settle
-  ties, so a row written before the column existed - or written *during* a rollout by an instance
-  still on the old build, after a new instance has already appended a sequenced row to the same
-  stream - keeps its place in write order instead of being dragged to the front of its stream. (An
-  earlier draft of this change ordered all unsequenced rows first, which reported `BrokenLink` on an
-  intact chain for exactly that mixed-version case, permanently.) The one tie the ordering cannot
+  deployment is safe.** A stream whose rows are all sequenced is walked purely by `ChainSequence`; a
+  stream written entirely before the column existed is walked in exactly the order the database
+  returned it; and a stream holding both - a rolling deployment, where an old build keeps appending
+  unsequenced rows after new ones - merges the two groups on `OccurredOnUtc`, each side keeping its
+  own exact order through the merge. So a row written before the column existed, or written *during*
+  a rollout by an instance still on the old build, keeps its place in write order instead of being
+  dragged to the front of its stream. (An earlier draft of this change ordered all unsequenced rows
+  first, which reported `BrokenLink` on an intact chain for exactly that mixed-version case,
+  permanently.) The one tie the merge cannot
   settle is two builds appending to the *same* stream within a single tick of the timestamp column -
   100ns on SQL Server and SQLite, a microsecond on PostgreSQL and MySQL - so a deliberately coarse
   column such as `datetime2(0)` is worth avoiding on a chained audit table. The unsequenced group is
@@ -237,89 +363,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between SQL Server/SQLite and PostgreSQL. `AuditHashChainStamper.Stamp` gained an optional trailing
   parameter carrying each stream's persisted row count; omitting it leaves `ChainSequence` unassigned,
   so an existing call site compiles and behaves as before.
-- **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
-  races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
-  100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while
-  `dotnet test` ran nothing; with the suites actually running it fails under load. It now drives
-  the interceptor's existing `TimeProvider` seam, so it is deterministic and no longer sleeps.
-  Test-only; the snapshot policy itself was correct and is unchanged.
-- **Synchronous `SaveChanges()` is audited again.** `AuditSaveChangesInterceptor` implemented only
-  `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
-  audit rows — silently, with no error raised. The capture pipeline is now a single private
-  `CaptureAsync` shared by both entry points, with `SavingChanges` added as a thin sync wrapper, so
-  the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
-  chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
-  rather than duplicated; with neither wired the pipeline completes synchronously and the sync
-  override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
-  duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
-  otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
-  ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
-- **Capture works under `UseLazyLoadingProxies()`.** Capture resolved the audited entity's CLR type
-  with `entry.Entity.GetType()`, which under lazy-loading (or change-tracking) proxies is the Castle
-  subclass — `OrderProxy`, not `Order` — and is not the key anything is registered under. Every
-  lookup missed: `IsAudited` returned false so entities loaded from the database produced no audit
-  rows at all, and where a row was produced its field rules resolved to nothing, so
-  `[RedactedAudit]` properties were persisted **in plaintext**. All three lookups now go through a
-  single `ResolveClrType` helper backed by `entry.Metadata.ClrType`, which is the declared type
-  whether or not proxies are in play.
-- **OrionAudit's own entity types are no longer `sealed`.** EF Core's proxy plugin rejects *every*
-  sealed entity type in the model, so mapping `AuditLog`, `SnapshotCursor`,
-  `AuditCaptureQueueEntry`, or `AuditChainAnchor` made `UseLazyLoadingProxies()` throw at model
-  build. Unsealing them is source- and binary-compatible for consumers.
-- **`CorrelationId` records the caller's trace, not OrionAudit's own span.** The ambient
-  `Activity.Current` was read *after* the interceptor had already started its `OrionAudit.Capture`
-  span, so every row was stamped with OrionAudit's internal span id and could not be joined back to
-  the request that produced it. The read now happens before any OrionAudit span is started. Nothing
-  changes when no tracing listener is attached (`StartActivity` returns null and there was no span
-  to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
-  failed intermittently — whenever a listener happened to be live in parallel.
-### Security
-
-- **Fixed stored XSS in `OrionAudit.Viewer`.** The viewer page built its markup in the browser by
-  concatenating audit values into `innerHTML` (`wwwroot/index.html`), so any value an attacker could
-  write into an audited entity - a display name of `<img src=x onerror=...>`, for example - executed
-  as script in the session of whoever later reviewed the audit log, which is an administrator by
-  definition. The entry list is now rendered server-side in `OrionAuditViewerStaticFiles` and every
-  audit value passes through `HtmlEncoder.Default` on the way out; the one remaining script in the
-  page only writes `textContent`, which the browser never parses as markup. Every interpolation site
-  is an HTML text node - no audit value reaches an attribute, a `<script>` block, or a JSON island -
-  so the HTML encoder is the correct encoder at each of them. The JSON API (`/api/log`,
-  `/api/{entityType}/{key}`, `/api/meta`) is unchanged and still returns raw values.
-
-  **Consumer-visible change:** the viewer's root page now resolves `TDbContext` and
-  `IAuditConfiguration` per request, exactly as the JSON API endpoints in the same route group
-  already did. A host that registered the viewer is unaffected; the page simply arrives filled in
-  rather than filling itself in from a follow-up `fetch`.
-
-- **Fixed a fail-open tenant filter on the audit read path.** `AuditQueryExtensions.AuditFor<T>()` and
-  `AuditLog()` apply a tenant filter when an `IAuditTenantResolver` is registered. When that resolver
-  returned null - a dropped header, a claim the gateway did not forward, a background thread with no
-  ambient context - the filter fell through **unfiltered** and handed the caller every tenant's audit
-  rows. The read widened to all tenants at exactly the moment the caller's identity was unknown, and
-  it carried into everything built on those extensions, including the viewer's `/api/log` and
-  `/api/{entityType}/{key}`. An unresolved tenant now denies: the read is scoped to the no-tenant
-  stream (`TenantId` null or `""`), which is the read-side mirror of the canonical value the write
-  path persists. In any tenant-stamped deployment that is the empty set; a genuinely single-tenant
-  deployment, whose resolver returns null by design, still reads its own history unchanged. A
-  deliberate empty result rather than a throw - these extensions run on request paths, and the
-  library reserves exceptions for configuration and programming boundaries. `crossTenant: true` is
-  still the explicit, auditable way to read across tenants, and an application with no resolver
-  registered at all is unaffected.
-
-### Fixed
-
-- **The benchmarks project builds warning-free, and its warnings are errors again.** It was
-  the one project with `TreatWarningsAsErrors=false`, which is why three warnings sat there
-  unnoticed. `CA1305` is fixed (`ToString(CultureInfo.InvariantCulture)`); `CA1707` is
-  suppressed with a reason, because a benchmark method name is a label in the results table
-  and the underscore separates the scenario from what is measured. The whole solution now
-  builds with zero warnings, so a new one is a signal rather than noise.
-- **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
-  races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
-  100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while
-  `dotnet test` ran nothing; with the suites actually running it fails under load. It now drives
-  the interceptor's existing `TimeProvider` seam, so it is deterministic and no longer sleeps.
-  Test-only; the snapshot policy itself was correct and is unchanged.
 - **Synchronous `SaveChanges()` is audited again.** `AuditSaveChangesInterceptor` implemented only
   `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
   audit rows — silently, with no error raised. The capture pipeline is now a single private
@@ -327,7 +370,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the two paths cannot drift apart again. The opt-in legs that are genuinely async (the hash
   chain's anchor lock/read, `IAuditEventPublisher.PublishAsync`, and the periodic snapshot policy's
   cursor read) are awaited on that one pipeline rather than duplicated; with none of them wired the
-  pipeline completes synchronously and the sync override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
+  pipeline completes synchronously and the sync override never blocks. The sync path also clears
+  the ambient `SynchronizationContext` for the
   duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
   otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
   ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
@@ -385,12 +429,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now writes only the columns it owns, so the two writers never contend and no lock or
   isolation-level assumption is needed.
 
-  The sweep also selects rows in the chain's canonical `(OccurredOnUtc, Id)` order rather than by
-  timestamp alone. Rows of one stream sharing a timestamp are routine - one timestamp is computed per
-  `SaveChanges` and stamped on every row of that save, and column precision truncates further - and
-  under a bare timestamp ordering the provider is free to break those ties any way it likes, so a
-  count- or age-bounded batch could remove an interior row instead of a contiguous head. Re-anchoring
-  at the oldest survivor repairs a pruned head; it cannot close a hole in the middle.
+  The sweep also selects rows through `AuditChainOrder.OldestFirst` / `NewestFirst` — age first,
+  ties settled on `ChainSequence` — rather than by timestamp alone. Rows of one stream sharing a
+  timestamp are routine, not exotic: one timestamp is computed per `SaveChanges` and stamped on
+  every row of that save, and column precision truncates further, so under a bare timestamp ordering
+  the provider is free to break those ties any way it likes. `Id` is a random `Guid` and orders tied
+  rows in a way unrelated to how they were chained, which is why the tie-break is the sequence.
+  Ordering alone cannot make the prune contiguous, though, and is not asked to — age and chain order
+  can disagree outright. Re-anchoring at the oldest survivor repairs a pruned head; it cannot close a
+  hole in the middle, and what keeps holes from opening is `ChainPruneArchiver` narrowing each batch
+  to the contiguous run it can safely remove (see the entry above).
 
   **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
   using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
@@ -479,6 +527,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to a fresh builder writes a second row. Retrying `SaveAsync` on the *same* builder after a
   failed flush is safe either way. README and the `AuditImportBuilder` / `AuditImportOptions` docs
   now say this instead of promising blanket re-run safety.
+
+#### Build and CI
+
+Nothing here reaches a shipped package, but it is why the rest of this release exists.
+
+- **The CI test step actually runs the tests.** All five test projects are xunit.v3 on Microsoft
+  Testing Platform with no VSTest adapter, so plain `dotnet test` discovered nothing, ran nothing,
+  and exited 0 — and said so nowhere in the log. Every pull request since the suite was written had
+  merged on a green check from a suite that never executed, which is how a `SaveChanges()` path
+  capturing no audit rows reached a published package. A `global.json` selects the Microsoft Testing
+  Platform runner, and the CI step now passes `-- --minimum-expected-tests 1`, so a run reporting
+  zero tests fails instead of passing. The `--` is a gate on the gate as well: plain `dotnet test`
+  rejects that argument rather than ignoring it, so silently dropping the runner opt-in breaks the
+  build loudly. 0 tests running became 579.
+- **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer races
+  the wall clock.** With the suites actually running, its assumption that two consecutive
+  `SaveChangesAsync` calls land inside a 100 ms window failed under load. It now drives the
+  interceptor's existing `TimeProvider` seam, so it is deterministic and no longer sleeps. The
+  snapshot policy itself was correct and is unchanged.
+- **The benchmarks project builds warning-free, and its warnings are errors again.** It was the one
+  project with `TreatWarningsAsErrors=false`, which is why three warnings sat there unnoticed.
+  `CA1305` is fixed (`ToString(CultureInfo.InvariantCulture)`); `CA1707` is suppressed with a
+  reason, because a benchmark method name is a label in the results table and the underscore
+  separates the scenario from what is measured. The whole solution now builds with zero warnings,
+  so a new one is a signal rather than noise.
 
 #### Dependency refresh
 
