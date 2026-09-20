@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dotnet test` ran nothing; with the suites actually running it fails under load. It now drives
   the interceptor's existing `TimeProvider` seam, so it is deterministic and no longer sleeps.
   Test-only; the snapshot policy itself was correct and is unchanged.
+- **Synchronous `SaveChanges()` is audited again.** `AuditSaveChangesInterceptor` implemented only
+  `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
+  audit rows — silently, with no error raised. The capture pipeline is now a single private
+  `CaptureAsync` shared by both entry points, with `SavingChanges` added as a thin sync wrapper, so
+  the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
+  chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
+  rather than duplicated; with neither wired the pipeline completes synchronously and the sync
+  override never blocks.
 
 ## [0.11.3] - 2026-07-28
 

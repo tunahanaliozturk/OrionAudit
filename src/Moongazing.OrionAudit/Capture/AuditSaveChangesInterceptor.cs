@@ -59,6 +59,39 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(eventData);
+        await CaptureAsync(eventData, cancellationToken).ConfigureAwait(false);
+        return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Runs the exact same <see cref="CaptureAsync"/> pipeline as the async overload — there is one
+    /// capture implementation, so the two entry points cannot drift apart (before v0.11.4 this
+    /// override did not exist at all and <c>SaveChanges()</c> silently audited nothing).
+    /// <para>
+    /// Two legs of that pipeline are genuinely async and have no synchronous counterpart: the hash
+    /// chain's anchor lock/read (<c>EfCoreAuditHashChainWriter.StampAsync</c>) and the consumer's
+    /// <see cref="IAuditEventPublisher.PublishAsync"/>. Both are opt-in, so with neither wired the
+    /// task below completes synchronously and <c>GetResult</c> never blocks. When one is wired we
+    /// block here rather than duplicating either leg. That is safe because every <c>await</c> on
+    /// this path uses <c>ConfigureAwait(false)</c>, so no continuation is posted back to an ambient
+    /// <see cref="SynchronizationContext"/> and the classic sync-over-async deadlock cannot form;
+    /// the cost is one blocked thread for the duration of the publish, which is the price the caller
+    /// already accepted by choosing the blocking <c>SaveChanges()</c> overload.
+    /// </para>
+    /// </remarks>
+    public override InterceptionResult<int> SavingChanges(
+        DbContextEventData eventData,
+        InterceptionResult<int> result)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        CaptureAsync(eventData, CancellationToken.None).GetAwaiter().GetResult();
+        return base.SavingChanges(eventData, result);
+    }
+
+    // The single capture implementation shared by both SaveChanges entry points.
+    private async Task CaptureAsync(DbContextEventData eventData, CancellationToken cancellationToken)
+    {
         var ctx = eventData.Context!;
         var configuration = serviceProvider.GetRequiredService<IAuditConfiguration>();
         var clock = serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
@@ -73,7 +106,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         if (auditedEntries.Count == 0)
         {
-            return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         using var activity = OrionAuditTelemetry.ActivitySource.StartActivity("OrionAudit.Capture", ActivityKind.Internal);
@@ -118,7 +151,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             // v0.7.26: notify the optional capture observer (async-capture path).
             NotifyCaptureObserver(auditedEntries.Count, isAsyncCapture: true);
             activity?.SetStatus(ActivityStatusCode.Ok);
-            return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         var snapshotsTaken = 0;
@@ -211,8 +244,6 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         // Status is set only once everything (capture + publish) has succeeded so a publisher
         // exception is correctly reflected as a failure span.
         activity?.SetStatus(ActivityStatusCode.Ok);
-
-        return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
 
     // Mirrors AuditLog to AuditLogEvent. Centralised so the dispatcher's call-site projects the
