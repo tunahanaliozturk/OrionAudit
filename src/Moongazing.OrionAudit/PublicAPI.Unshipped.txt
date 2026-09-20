@@ -1,4 +1,4 @@
-﻿﻿#nullable enable
+﻿#nullable enable
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Action.set -> void
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.AfterJson.set -> void
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Attempts.set -> void
@@ -61,7 +61,6 @@ Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Str
 Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>() -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
 Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>! configure) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
 static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext? context = null, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
-#nullable enable
 *REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper
 *REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey
 *REMOVED*Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ChainKey() -> void
