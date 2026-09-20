@@ -1,10 +1,11 @@
-namespace Moongazing.OrionAudit;
-
 using System.Security.Claims;
+
+namespace Moongazing.OrionAudit.AspNetCore;
 
 /// <summary>
 /// Configuration for the claim-driven audit user resolver
-/// (<c>Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver</c>).
+/// (<see cref="ClaimAuditUserResolver"/>). Claims are an ASP.NET Core concept, so this
+/// lives in the ASP.NET Core package next to its only consumer.
 /// </summary>
 public sealed class ClaimAuditUserResolverOptions
 {

@@ -1,1 +1,15 @@
 #nullable enable
+*REMOVED*Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver.ClaimAuditUserResolver(Microsoft.Extensions.Options.IOptions<Moongazing.OrionAudit.ClaimAuditUserResolverOptions!>! options) -> void
+*REMOVED*static Moongazing.OrionAudit.AspNetCore.AuditAspNetCoreServiceCollectionExtensions.AddOrionAuditClaimResolver(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Moongazing.OrionAudit.ClaimAuditUserResolverOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver.ClaimAuditUserResolver(Microsoft.Extensions.Options.IOptions<Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions!>! options) -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.ClaimAuditUserResolverOptions() -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.DefaultUserType.get -> string!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.DefaultUserType.set -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.DisplayNameClaimTypes.get -> System.Collections.Generic.IList<string!>!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.IdClaimTypes.get -> System.Collections.Generic.IList<string!>!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.RequireAuthenticated.get -> bool
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.RequireAuthenticated.set -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.TypeClaimType.get -> string?
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.TypeClaimType.set -> void
+static Moongazing.OrionAudit.AspNetCore.AuditAspNetCoreServiceCollectionExtensions.AddOrionAuditClaimResolver(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

@@ -60,6 +60,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the separation is enforced by the compiler instead of by a naming convention. An
   `AuditChainVerificationAnchor` has no EF mapping, so constructing one can inform a verdict but can
   never be saved as the library's own record of a chain it did not write.
+- `ClaimAuditUserResolverOptions` moved out of the core `OrionAudit` package and into
+  `OrionAudit.AspNetCore`, from namespace `Moongazing.OrionAudit` to
+  `Moongazing.OrionAudit.AspNetCore` — next to `ClaimAuditUserResolver`, its only consumer.
+  Claims are an ASP.NET Core concept and nothing in the framework-agnostic core referenced the
+  type; writing the API down for 1.0.0 is what made that visible. Consumers that name the type
+  explicitly change one line:
+
+  ```diff
+  - using Moongazing.OrionAudit;
+  + using Moongazing.OrionAudit.AspNetCore;
+  ```
+
+  `services.AddOrionAuditClaimResolver(o => o.RequireAuthenticated = false)` needs no change at
+  all: the lambda parameter's type is inferred, and anyone calling it already references
+  `OrionAudit.AspNetCore`. Property names and defaults are untouched.
 
 ### Added
 
