@@ -130,6 +130,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of by design. A provider without transaction support runs the work unwrapped, and
   `CopyToTableAuditArchiver` joins the sweep's transaction rather than starting its own.
 
+  When retention empties a stream completely the watermark keeps the last pruned hash rather than
+  being cleared. The anchor deliberately retains the deleted tail in `LatestEntryHash`, so the next
+  change to that entity chains onto it; a cleared watermark would make verification expect that new
+  row's `PreviousHash` to be null and report a broken link on a chain nobody touched.
+
   **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
   using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
   its `ExecuteDelete` fast path and materialises each batch instead - the chain repair has to know

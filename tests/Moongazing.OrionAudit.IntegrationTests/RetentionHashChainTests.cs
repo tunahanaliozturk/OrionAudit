@@ -241,6 +241,61 @@ public class RetentionHashChainTests
     }
 
     /// <summary>
+    /// Retention can empty a stream completely. The anchor deliberately keeps the deleted tail in
+    /// LatestEntryHash, so the next change to that entity chains onto it - which means the watermark
+    /// must keep the last pruned hash, not be cleared, or that next row reads as a broken link.
+    /// </summary>
+    [Fact]
+    public async Task Verification_PassesWhenAFullyPrunedStreamIsAppendedToAgain()
+    {
+        var (sp, conn, clock) = await BuildAsync(o => o.RetainFor(TimeSpan.FromDays(7)));
+        await using var _conn = conn;
+        await using var _sp = sp;
+
+        var noteId = await SeedSixChainedRowsAsync(sp, clock);
+
+        // Age every row out of the window, so the sweep removes the entire stream.
+        clock.Advance(TimeSpan.FromDays(30));
+        Assert.Equal(6, await SweepAsync(sp));
+
+        string tailHash;
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ChainRetentionDb>();
+            Assert.Equal(0, await ctx.AuditLogs.CountAsync());
+            var anchor = await ctx.Anchors.SingleAsync();
+            tailHash = anchor.LatestEntryHash;
+            Assert.Equal(6, anchor.PrunedRowCount);
+            Assert.Equal(tailHash, anchor.PrunedThroughHash);   // the tail IS the last pruned hash
+        }
+
+        // An empty-but-anchored stream still verifies...
+        var afterPurge = await VerifyAsync(sp, noteId);
+        Assert.True(afterPurge.IsValid, $"{afterPurge.Reason}: {afterPurge.Detail}");
+
+        // ...and so does the stream once it is written to again.
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ChainRetentionDb>();
+            var fresh = await ctx.Notes.FirstAsync();
+            fresh.Body = "after the purge";
+            await ctx.SaveChangesAsync();
+        }
+
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ChainRetentionDb>();
+            var appended = await ctx.AuditLogs.SingleAsync();
+            Assert.Equal(tailHash, appended.PreviousHash);   // it chained onto the retained tail
+        }
+
+        var result = await VerifyAsync(sp, noteId);
+        Assert.True(result.IsValid,
+            $"a fully pruned stream written to again must verify, but got {result.Reason}: {result.Detail}");
+        Assert.Equal(1, result.VerifiedRowCount);
+    }
+
+    /// <summary>
     /// The delete and the checkpoint that explains it must commit together. If the rows can go while
     /// the checkpoint stays behind, the stream is left in exactly the permanent false-tamper state
     /// this feature exists to remove - reached by a crash instead of by design.

@@ -156,7 +156,17 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
                 .ConfigureAwait(false);
 
             anchor.PrunedRowCount = anchor.RowCount - survivingCount;
-            anchor.PrunedThroughHash = genesis?.PreviousHash;
+
+            // Nothing survives: the whole chain up to the anchored tail was pruned, so the tail IS
+            // the last pruned hash. Clearing the watermark here would strand the stream - the anchor
+            // deliberately keeps the deleted tail in LatestEntryHash, so the next append to this
+            // entity chains onto it, and verification would then expect that new row's PreviousHash
+            // to be null and report a broken link on a chain nobody touched.
+            //
+            // The explicit null test rather than ??: a surviving genesis whose PreviousHash is
+            // legitimately null (only an unchained prefix was pruned, the true genesis remains) must
+            // keep that null, not inherit the tail.
+            anchor.PrunedThroughHash = genesis is not null ? genesis.PreviousHash : anchor.LatestEntryHash;
         }
     }
 
