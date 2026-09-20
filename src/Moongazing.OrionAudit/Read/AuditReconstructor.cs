@@ -40,7 +40,7 @@ public sealed class AuditReconstructor : IAuditReconstructor
         try
         {
             var entityTypeName = typeof(T).AssemblyQualifiedName!;
-            var rows = await context.Set<AuditLog>()
+            var rows = await context.TenantScopedAuditLog(crossTenant: false)
                 .Where(a => a.EntityType == entityTypeName && a.EntityId == entityId && a.OccurredOnUtc <= asOf)
                 .OrderBy(a => a.OccurredOnUtc)
                 .ToListAsync(cancellationToken)
@@ -76,7 +76,7 @@ public sealed class AuditReconstructor : IAuditReconstructor
             activity?.SetTag("orionaudit.entity_id_count", idList.Count);
             var entityTypeName = typeof(T).AssemblyQualifiedName!;
 
-            var rows = await context.Set<AuditLog>()
+            var rows = await context.TenantScopedAuditLog(crossTenant: false)
                 .Where(a => a.EntityType == entityTypeName && idList.Contains(a.EntityId) && a.OccurredOnUtc <= asOf)
                 .OrderBy(a => a.OccurredOnUtc)
                 .ToListAsync(cancellationToken)

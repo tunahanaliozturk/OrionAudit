@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`IAuditReconstructor` no longer replays other tenants' audit rows.** `AuditReconstructor`
+  queried `context.Set<AuditLog>()` directly, which is the one read path that never went through
+  the tenant filter `AuditFor<T>()` and `AuditLog()` apply. Both `ReconstructAsync<T>()` and
+  `ReconstructManyAsync<T>()` therefore replayed **every** tenant's history for the requested
+  entity id into a single object. Two failures at once: tenant A's field values were handed to
+  tenant B, and the reconstruction itself was wrong — tenant B's diff applied on top of tenant A's
+  snapshot produces an entity that existed in no tenant, silently, with no error to notice it by.
+  Deployments that stamp a tenant and reconstruct by an id that is not globally unique (a per-tenant
+  sequence, a natural key) are the exposed case; single-tenant deployments are unaffected.
+
+  Both queries now start from the same tenant-scoped audit query the read DSL uses, so the
+  reconstructor inherits its semantics exactly, including the unresolved-tenant deny below: a
+  registered `IAuditTenantResolver` that cannot name a tenant scopes the replay to the no-tenant
+  stream instead of widening it. The scoping logic now lives in exactly one place rather than two.
+  No public signature changed — `IAuditReconstructor` deliberately gained no `crossTenant` escape
+  hatch, because a cross-tenant replay is not a wider read but an incorrect entity; read across
+  tenants with `AuditFor<T>(crossTenant: true)`, which returns rows rather than merging them.
+
 - **BREAKING — `MapOrionAuditViewer` no longer defaults to "any authenticated user".** A
   registration that stated no access decision fell through to a bare `RequireAuthorization()`, so
   every logged-in account — every customer, every low-privilege internal user — could read the

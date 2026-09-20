@@ -40,21 +40,26 @@ public static class AuditQueryExtensions
         ArgumentNullException.ThrowIfNull(context);
         var typeName = typeof(T).AssemblyQualifiedName!;
         var baseTypeName = typeof(T).FullName!;
-        return ApplyTenantFilter(
-            context.Set<AuditLog>().Where(a => a.EntityType == typeName || a.EntityBaseType == baseTypeName),
-            context,
-            crossTenant);
+        return context.TenantScopedAuditLog(crossTenant)
+            .Where(a => a.EntityType == typeName || a.EntityBaseType == baseTypeName);
     }
 
     /// <summary>Returns an unfiltered <see cref="IQueryable{T}"/> over the entire audit table.</summary>
     public static IQueryable<AuditLog> AuditLog(this DbContext context, bool crossTenant = false)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return ApplyTenantFilter(context.Set<AuditLog>(), context, crossTenant);
+        return context.TenantScopedAuditLog(crossTenant);
     }
 
-    private static IQueryable<AuditLog> ApplyTenantFilter(IQueryable<AuditLog> query, DbContext context, bool crossTenant)
+    /// <summary>
+    /// The single tenant-scoping entry point for the read side: the audit table with the tenant
+    /// filter already applied. Every read that is meant to be scoped to the calling tenant must
+    /// start here rather than from <c>context.Set&lt;AuditLog&gt;()</c> - a second copy of this
+    /// logic elsewhere is how the reconstructor drifted into returning other tenants' rows.
+    /// </summary>
+    internal static IQueryable<AuditLog> TenantScopedAuditLog(this DbContext context, bool crossTenant)
     {
+        var query = context.Set<AuditLog>();
         if (crossTenant)
         {
             return query;
