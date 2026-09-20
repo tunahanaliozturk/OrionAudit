@@ -163,6 +163,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OperationCanceledException`, so it resurfaced as an unobserved task exception during host
   shutdown. The source is now disposed only once the reader has actually finished — immediately
   when it completed within the drain budget, otherwise from a continuation on the reader task.
+- **Retrying `AuditImportBuilder.SaveAsync` after a partial flush no longer drops records and
+  reports them as `Skipped`.** Flushing happens per `BatchSize`, but the buffer was cleared only
+  after every flush had succeeded. When a later flush threw, the earlier batches were already
+  committed and the buffer still held every record; the retry rebuilt its already-present set from
+  the rows those batches wrote, and because records added without a `SourceId` all share the single
+  `import:{ImportBatch}` correlation, the check matched *every* remaining record. They were counted
+  as `Skipped` and never written — the README promised `Skipped` means "already present", and here
+  it was returned for rows that were not. Two changes fix it: the already-present check now applies
+  only to records that carry a `SourceId` (the only per-record identity there is), and only the
+  records that actually reached the database leave the buffer, so a retry re-processes exactly the
+  records that did not. A failed flush also detaches its batch so the retry cannot insert those
+  rows twice.
+
+### Changed
+
+- **Import idempotency is documented as per-record, which requires `SourceId(...)`.** A record
+  added without one is stamped with the batch-wide `import:{ImportBatch}` correlation, which
+  identifies the batch and not the record, so it is never reported as `Skipped` and re-adding it
+  to a fresh builder writes a second row. Retrying `SaveAsync` on the *same* builder after a
+  failed flush is safe either way. README and the `AuditImportBuilder` / `AuditImportOptions` docs
+  now say this instead of promising blanket re-run safety.
 
 ### Performance
 
