@@ -15,4 +15,21 @@
     <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
     <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
   </ItemGroup>
+  <!--
+    API freeze. OrionAudit 1.0.0 declared the public surface stable, so every addition or removal
+    has to be written down: RS0016 fires when a public member is missing from the baseline, RS0017
+    when the baseline names one the code no longer has. With TreatWarningsAsErrors on, both are
+    build breaks. New public API goes in PublicAPI.Unshipped.txt; the release cut promotes it into
+    PublicAPI.Shipped.txt.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.11.0-beta1.24508.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
 </Project>

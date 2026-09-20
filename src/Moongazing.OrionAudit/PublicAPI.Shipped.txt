@@ -1,0 +1,939 @@
+#nullable enable
+abstract Moongazing.OrionAudit.Configuration.RetentionPolicy.<Clone>$() -> Moongazing.OrionAudit.Configuration.RetentionPolicy!
+abstract Moongazing.OrionAudit.Configuration.SnapshotPolicy.<Clone>$() -> Moongazing.OrionAudit.Configuration.SnapshotPolicy!
+const Moongazing.OrionAudit.AuditCaptureQueueEntityTypeConfiguration.DefaultTableName = "OrionAudit_Capture_Queue" -> string!
+const Moongazing.OrionAudit.AuditKey.Separator = '|' -> char
+const Moongazing.OrionAudit.AuditLogEntityTypeConfiguration.DefaultTableName = "OrionAudit_Log" -> string!
+const Moongazing.OrionAudit.Capture.SnapshotBuilder.RedactedMarker = "<redacted>" -> string!
+const Moongazing.OrionAudit.Integrity.AuditChainAnchorEntityTypeConfiguration.DefaultTableName = "OrionAudit_Chain_Anchor" -> string!
+const Moongazing.OrionAudit.Integrity.StaticAuditChainKeyProvider.MinKeyBytes = 16 -> int
+const Moongazing.OrionAudit.OrionAuditTelemetry.ActivitySourceName = "OrionAudit" -> string!
+const Moongazing.OrionAudit.OrionAuditTelemetry.MeterName = "OrionAudit" -> string!
+const Moongazing.OrionAudit.SnapshotCursorEntityTypeConfiguration.DefaultTableName = "OrionAudit_Snapshot_Cursors" -> string!
+const Moongazing.OrionAudit.Store.AuditHistoryExporter.DefaultPageSize = 500 -> int
+const Moongazing.OrionAudit.Store.AuditHistoryQuery.DefaultPageSize = 100 -> int
+Moongazing.OrionAudit.AuditableAttribute
+Moongazing.OrionAudit.AuditableAttribute.AuditableAttribute() -> void
+Moongazing.OrionAudit.AuditableAttribute.AuditableAttribute(System.Type! baseType) -> void
+Moongazing.OrionAudit.AuditableAttribute.BaseType.get -> System.Type?
+Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditAction.Deleted = 2 -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditAction.Inserted = 0 -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditAction.SoftDeleted = 3 -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditAction.Updated = 1 -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditCaptureQueueEntityTypeConfiguration
+Moongazing.OrionAudit.AuditCaptureQueueEntityTypeConfiguration.AuditCaptureQueueEntityTypeConfiguration() -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntityTypeConfiguration.AuditCaptureQueueEntityTypeConfiguration(string! tableName) -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntityTypeConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Moongazing.OrionAudit.AuditCaptureQueueEntry!>! builder) -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Action.get -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Action.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.AfterJson.get -> string!
+Moongazing.OrionAudit.AuditCaptureQueueEntry.AfterJson.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Attempts.get -> int
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Attempts.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.AuditCaptureQueueEntry() -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.BeforeJson.get -> string!
+Moongazing.OrionAudit.AuditCaptureQueueEntry.BeforeJson.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.ClaimedUtc.get -> System.DateTime?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.ClaimedUtc.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.ClaimToken.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.ClaimToken.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.CorrelationId.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.CorrelationId.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.CustomColumnsJson.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.CustomColumnsJson.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityBaseType.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityBaseType.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityId.get -> string!
+Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityId.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityType.get -> string!
+Moongazing.OrionAudit.AuditCaptureQueueEntry.EntityType.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Error.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Error.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Id.get -> long
+Moongazing.OrionAudit.AuditCaptureQueueEntry.Id.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.OccurredOnUtc.get -> System.DateTime
+Moongazing.OrionAudit.AuditCaptureQueueEntry.OccurredOnUtc.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.TenantId.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.TenantId.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.UserDisplay.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.UserDisplay.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.UserId.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.UserId.set -> void
+Moongazing.OrionAudit.AuditCaptureQueueEntry.UserType.get -> string?
+Moongazing.OrionAudit.AuditCaptureQueueEntry.UserType.set -> void
+Moongazing.OrionAudit.AuditDailyActionBucket
+Moongazing.OrionAudit.AuditDailyActionBucket.<Clone>$() -> Moongazing.OrionAudit.AuditDailyActionBucket!
+Moongazing.OrionAudit.AuditDailyActionBucket.Action.get -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditDailyActionBucket.Action.init -> void
+Moongazing.OrionAudit.AuditDailyActionBucket.AuditDailyActionBucket(System.DateOnly Day, Moongazing.OrionAudit.AuditAction Action, int Count) -> void
+Moongazing.OrionAudit.AuditDailyActionBucket.Count.get -> int
+Moongazing.OrionAudit.AuditDailyActionBucket.Count.init -> void
+Moongazing.OrionAudit.AuditDailyActionBucket.Day.get -> System.DateOnly
+Moongazing.OrionAudit.AuditDailyActionBucket.Day.init -> void
+Moongazing.OrionAudit.AuditDailyActionBucket.Deconstruct(out System.DateOnly Day, out Moongazing.OrionAudit.AuditAction Action, out int Count) -> void
+Moongazing.OrionAudit.AuditDailyActionBucket.Equals(Moongazing.OrionAudit.AuditDailyActionBucket? other) -> bool
+Moongazing.OrionAudit.AuditDailyBucket
+Moongazing.OrionAudit.AuditDailyBucket.<Clone>$() -> Moongazing.OrionAudit.AuditDailyBucket!
+Moongazing.OrionAudit.AuditDailyBucket.AuditDailyBucket(System.DateOnly Day, int Count) -> void
+Moongazing.OrionAudit.AuditDailyBucket.Count.get -> int
+Moongazing.OrionAudit.AuditDailyBucket.Count.init -> void
+Moongazing.OrionAudit.AuditDailyBucket.Day.get -> System.DateOnly
+Moongazing.OrionAudit.AuditDailyBucket.Day.init -> void
+Moongazing.OrionAudit.AuditDailyBucket.Deconstruct(out System.DateOnly Day, out int Count) -> void
+Moongazing.OrionAudit.AuditDailyBucket.Equals(Moongazing.OrionAudit.AuditDailyBucket? other) -> bool
+Moongazing.OrionAudit.AuditDailyUserBucket
+Moongazing.OrionAudit.AuditDailyUserBucket.<Clone>$() -> Moongazing.OrionAudit.AuditDailyUserBucket!
+Moongazing.OrionAudit.AuditDailyUserBucket.ActivityCount.get -> int
+Moongazing.OrionAudit.AuditDailyUserBucket.ActivityCount.init -> void
+Moongazing.OrionAudit.AuditDailyUserBucket.AuditDailyUserBucket(System.DateOnly Day, string! UserId, int ActivityCount) -> void
+Moongazing.OrionAudit.AuditDailyUserBucket.Day.get -> System.DateOnly
+Moongazing.OrionAudit.AuditDailyUserBucket.Day.init -> void
+Moongazing.OrionAudit.AuditDailyUserBucket.Deconstruct(out System.DateOnly Day, out string! UserId, out int ActivityCount) -> void
+Moongazing.OrionAudit.AuditDailyUserBucket.Equals(Moongazing.OrionAudit.AuditDailyUserBucket? other) -> bool
+Moongazing.OrionAudit.AuditDailyUserBucket.UserId.get -> string!
+Moongazing.OrionAudit.AuditDailyUserBucket.UserId.init -> void
+Moongazing.OrionAudit.AuditImportExtensions
+Moongazing.OrionAudit.AuditKey
+Moongazing.OrionAudit.AuditLog
+Moongazing.OrionAudit.AuditLog.Action.get -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.AuditLog.Action.set -> void
+Moongazing.OrionAudit.AuditLog.AuditLog() -> void
+Moongazing.OrionAudit.AuditLog.ChainSequence.get -> long?
+Moongazing.OrionAudit.AuditLog.ChainSequence.set -> void
+Moongazing.OrionAudit.AuditLog.CorrelationId.get -> string?
+Moongazing.OrionAudit.AuditLog.CorrelationId.set -> void
+Moongazing.OrionAudit.AuditLog.Diff.get -> string!
+Moongazing.OrionAudit.AuditLog.Diff.set -> void
+Moongazing.OrionAudit.AuditLog.EntityBaseType.get -> string?
+Moongazing.OrionAudit.AuditLog.EntityBaseType.set -> void
+Moongazing.OrionAudit.AuditLog.EntityId.get -> string!
+Moongazing.OrionAudit.AuditLog.EntityId.set -> void
+Moongazing.OrionAudit.AuditLog.EntityType.get -> string!
+Moongazing.OrionAudit.AuditLog.EntityType.set -> void
+Moongazing.OrionAudit.AuditLog.EntryHash.get -> string?
+Moongazing.OrionAudit.AuditLog.EntryHash.set -> void
+Moongazing.OrionAudit.AuditLog.Error.get -> string?
+Moongazing.OrionAudit.AuditLog.Error.set -> void
+Moongazing.OrionAudit.AuditLog.HashKeyId.get -> int?
+Moongazing.OrionAudit.AuditLog.HashKeyId.set -> void
+Moongazing.OrionAudit.AuditLog.Id.get -> System.Guid
+Moongazing.OrionAudit.AuditLog.Id.set -> void
+Moongazing.OrionAudit.AuditLog.OccurredOnUtc.get -> System.DateTime
+Moongazing.OrionAudit.AuditLog.OccurredOnUtc.set -> void
+Moongazing.OrionAudit.AuditLog.PreviousHash.get -> string?
+Moongazing.OrionAudit.AuditLog.PreviousHash.set -> void
+Moongazing.OrionAudit.AuditLog.Snapshot.get -> string?
+Moongazing.OrionAudit.AuditLog.Snapshot.set -> void
+Moongazing.OrionAudit.AuditLog.TenantId.get -> string?
+Moongazing.OrionAudit.AuditLog.TenantId.set -> void
+Moongazing.OrionAudit.AuditLog.UserDisplay.get -> string?
+Moongazing.OrionAudit.AuditLog.UserDisplay.set -> void
+Moongazing.OrionAudit.AuditLog.UserId.get -> string?
+Moongazing.OrionAudit.AuditLog.UserId.set -> void
+Moongazing.OrionAudit.AuditLog.UserType.get -> string?
+Moongazing.OrionAudit.AuditLog.UserType.set -> void
+Moongazing.OrionAudit.AuditLogEntityTypeConfiguration
+Moongazing.OrionAudit.AuditLogEntityTypeConfiguration.AuditLogEntityTypeConfiguration() -> void
+Moongazing.OrionAudit.AuditLogEntityTypeConfiguration.AuditLogEntityTypeConfiguration(string! tableName) -> void
+Moongazing.OrionAudit.AuditLogEntityTypeConfiguration.AuditLogEntityTypeConfiguration(string! tableName, Moongazing.OrionAudit.OrionAuditColumnHints columnHints) -> void
+Moongazing.OrionAudit.AuditLogEntityTypeConfiguration.AuditLogEntityTypeConfiguration(string! tableName, Moongazing.OrionAudit.OrionAuditColumnHints columnHints, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>! customColumns) -> void
+Moongazing.OrionAudit.AuditLogEntityTypeConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Moongazing.OrionAudit.AuditLog!>! builder) -> void
+Moongazing.OrionAudit.AuditLogQueryExtensions
+Moongazing.OrionAudit.AuditModelBuilderExtensions
+Moongazing.OrionAudit.AuditMonthlyBucket
+Moongazing.OrionAudit.AuditMonthlyBucket.<Clone>$() -> Moongazing.OrionAudit.AuditMonthlyBucket!
+Moongazing.OrionAudit.AuditMonthlyBucket.AuditMonthlyBucket(int Year, int Month, int Count) -> void
+Moongazing.OrionAudit.AuditMonthlyBucket.Count.get -> int
+Moongazing.OrionAudit.AuditMonthlyBucket.Count.init -> void
+Moongazing.OrionAudit.AuditMonthlyBucket.Deconstruct(out int Year, out int Month, out int Count) -> void
+Moongazing.OrionAudit.AuditMonthlyBucket.Equals(Moongazing.OrionAudit.AuditMonthlyBucket? other) -> bool
+Moongazing.OrionAudit.AuditMonthlyBucket.Month.get -> int
+Moongazing.OrionAudit.AuditMonthlyBucket.Month.init -> void
+Moongazing.OrionAudit.AuditMonthlyBucket.Year.get -> int
+Moongazing.OrionAudit.AuditMonthlyBucket.Year.init -> void
+Moongazing.OrionAudit.AuditQueryExtensions
+Moongazing.OrionAudit.AuditRollupExtensions
+Moongazing.OrionAudit.AuditScope
+Moongazing.OrionAudit.AuditServiceCollectionExtensions
+Moongazing.OrionAudit.AuditUser
+Moongazing.OrionAudit.AuditUser.<Clone>$() -> Moongazing.OrionAudit.AuditUser!
+Moongazing.OrionAudit.AuditUser.AuditUser(string! Id, string? DisplayName = null, string! Type = "user") -> void
+Moongazing.OrionAudit.AuditUser.Deconstruct(out string! Id, out string? DisplayName, out string! Type) -> void
+Moongazing.OrionAudit.AuditUser.DisplayName.get -> string?
+Moongazing.OrionAudit.AuditUser.DisplayName.init -> void
+Moongazing.OrionAudit.AuditUser.Equals(Moongazing.OrionAudit.AuditUser? other) -> bool
+Moongazing.OrionAudit.AuditUser.Id.get -> string!
+Moongazing.OrionAudit.AuditUser.Id.init -> void
+Moongazing.OrionAudit.AuditUser.Type.get -> string!
+Moongazing.OrionAudit.AuditUser.Type.init -> void
+Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext>
+Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext>.AuditDispatcher(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Moongazing.OrionAudit.Configuration.AsyncCaptureOptions! options, Moongazing.OrionAudit.Configuration.SnapshotPolicy! snapshotPolicy, Moongazing.OrionAudit.Configuration.IAuditConfiguration! configuration, System.TimeProvider! clock, Microsoft.Extensions.Logging.ILogger<Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext!>!>! logger, Moongazing.OrionAudit.Integrity.AuditHashChainOptions? hashChain = null) -> void
+Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext>.DispatchOnceAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext>.FlushPendingAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext>.GetQueueDepthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.AuditDispatcherHostedService<TDbContext>
+Moongazing.OrionAudit.Capture.AuditDispatcherHostedService<TDbContext>.AuditDispatcherHostedService(Moongazing.OrionAudit.Capture.AuditDispatcher<TDbContext!>! dispatcher, Moongazing.OrionAudit.Configuration.AsyncCaptureOptions! options, System.TimeProvider! clock, Microsoft.Extensions.Logging.ILogger<Moongazing.OrionAudit.Capture.AuditDispatcherHostedService<TDbContext!>!>! logger) -> void
+Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor
+Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.AuditSaveChangesInterceptor(System.IServiceProvider! serviceProvider) -> void
+Moongazing.OrionAudit.Capture.DiffEngine
+Moongazing.OrionAudit.Capture.IAuditCaptureObserver
+Moongazing.OrionAudit.Capture.IAuditCaptureObserver.OnCaptured(int auditedEntityCount, bool isAsyncCapture) -> void
+Moongazing.OrionAudit.Capture.IAuditDispatcher
+Moongazing.OrionAudit.Capture.IAuditDispatcher.FlushPendingAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.IAuditDispatcher.GetQueueDepthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.NoOpAuditDispatcher
+Moongazing.OrionAudit.Capture.NoOpAuditDispatcher.FlushPendingAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.NoOpAuditDispatcher.GetQueueDepthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Capture.NoOpAuditDispatcher.NoOpAuditDispatcher() -> void
+Moongazing.OrionAudit.Capture.NullAuditCaptureObserver
+Moongazing.OrionAudit.Capture.NullAuditCaptureObserver.NullAuditCaptureObserver() -> void
+Moongazing.OrionAudit.Capture.NullAuditCaptureObserver.OnCaptured(int auditedEntityCount, bool isAsyncCapture) -> void
+Moongazing.OrionAudit.Capture.SnapshotBuilder
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.ClaimAuditUserResolverOptions() -> void
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.DefaultUserType.get -> string!
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.DefaultUserType.set -> void
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.DisplayNameClaimTypes.get -> System.Collections.Generic.IList<string!>!
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.IdClaimTypes.get -> System.Collections.Generic.IList<string!>!
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.RequireAuthenticated.get -> bool
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.RequireAuthenticated.set -> void
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.TypeClaimType.get -> string?
+Moongazing.OrionAudit.ClaimAuditUserResolverOptions.TypeClaimType.set -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder.AsyncCaptureBuilder() -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder.BatchSize(int size) -> Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder!
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder.ClaimLease(System.TimeSpan lease) -> Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder!
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder.DispatchLagViolationThreshold(System.TimeSpan? threshold) -> Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder!
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder.MaxAttempts(int attempts) -> Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder!
+Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder.PollInterval(System.TimeSpan interval) -> Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder!
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.AsyncCaptureOptions() -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.BatchSize.get -> int
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.BatchSize.set -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.ClaimLease.get -> System.TimeSpan
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.ClaimLease.set -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.DispatchLagViolationThreshold.get -> System.TimeSpan?
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.DispatchLagViolationThreshold.set -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.MaxAttempts.get -> int
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.MaxAttempts.set -> void
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.PollInterval.get -> System.TimeSpan
+Moongazing.OrionAudit.Configuration.AsyncCaptureOptions.PollInterval.set -> void
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.AuditableTypeConfig(System.Type! entityType, System.Collections.Generic.IDictionary<string!, Moongazing.OrionAudit.Configuration.AuditFieldRule>! rules, string? softDeleteProperty = null, System.Type? baseType = null, System.Collections.Generic.IDictionary<string!, string!>? fieldLabels = null, string? entityLabel = null) -> void
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.BaseType.get -> System.Type?
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.EntityLabel.get -> string?
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.EntityType.get -> System.Type!
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.FieldLabel(string! propertyName) -> string?
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.FieldRule(string! propertyName) -> Moongazing.OrionAudit.Configuration.AuditFieldRule
+Moongazing.OrionAudit.Configuration.AuditableTypeConfig.SoftDeleteProperty.get -> string?
+Moongazing.OrionAudit.Configuration.AuditableTypeDiscovery
+Moongazing.OrionAudit.Configuration.AuditColumnContext
+Moongazing.OrionAudit.Configuration.AuditColumnContext.<Clone>$() -> Moongazing.OrionAudit.Configuration.AuditColumnContext!
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Action.get -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Action.init -> void
+Moongazing.OrionAudit.Configuration.AuditColumnContext.AuditColumnContext(object! Entity, Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry! Entry, Moongazing.OrionAudit.AuditAction Action, Moongazing.OrionAudit.AuditUser? User, string? TenantId) -> void
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Deconstruct(out object! Entity, out Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry! Entry, out Moongazing.OrionAudit.AuditAction Action, out Moongazing.OrionAudit.AuditUser? User, out string? TenantId) -> void
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Entity.get -> object!
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Entity.init -> void
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Entry.get -> Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry!
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Entry.init -> void
+Moongazing.OrionAudit.Configuration.AuditColumnContext.Equals(Moongazing.OrionAudit.Configuration.AuditColumnContext? other) -> bool
+Moongazing.OrionAudit.Configuration.AuditColumnContext.TenantId.get -> string?
+Moongazing.OrionAudit.Configuration.AuditColumnContext.TenantId.init -> void
+Moongazing.OrionAudit.Configuration.AuditColumnContext.User.get -> Moongazing.OrionAudit.AuditUser?
+Moongazing.OrionAudit.Configuration.AuditColumnContext.User.init -> void
+Moongazing.OrionAudit.Configuration.AuditConfiguration
+Moongazing.OrionAudit.Configuration.AuditConfiguration.AuditConfiguration(System.Collections.Generic.IDictionary<System.Type!, Moongazing.OrionAudit.Configuration.AuditableTypeConfig!>! byType, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> void
+Moongazing.OrionAudit.Configuration.AuditConfiguration.AuditedTypeNames.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Moongazing.OrionAudit.Configuration.AuditConfiguration.CustomColumns.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>!
+Moongazing.OrionAudit.Configuration.AuditConfiguration.GetConfig(System.Type! entityType) -> Moongazing.OrionAudit.Configuration.AuditableTypeConfig?
+Moongazing.OrionAudit.Configuration.AuditConfiguration.IsAudited(System.Type! entityType) -> bool
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit(System.Type! entityType) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>? configure = null) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.AuditConfigurationBuilder() -> void
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Build() -> Moongazing.OrionAudit.Configuration.IAuditConfiguration!
+Moongazing.OrionAudit.Configuration.AuditFieldRule
+Moongazing.OrionAudit.Configuration.AuditFieldRule.Capture = 0 -> Moongazing.OrionAudit.Configuration.AuditFieldRule
+Moongazing.OrionAudit.Configuration.AuditFieldRule.Exclude = 1 -> Moongazing.OrionAudit.Configuration.AuditFieldRule
+Moongazing.OrionAudit.Configuration.AuditFieldRule.Hash = 2 -> Moongazing.OrionAudit.Configuration.AuditFieldRule
+Moongazing.OrionAudit.Configuration.AuditFieldRule.Redact = 3 -> Moongazing.OrionAudit.Configuration.AuditFieldRule
+Moongazing.OrionAudit.Configuration.AuditImportBuilder
+Moongazing.OrionAudit.Configuration.AuditImportBuilder.Add<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!>! configure) -> Moongazing.OrionAudit.Configuration.AuditImportBuilder!
+Moongazing.OrionAudit.Configuration.AuditImportBuilder.SaveAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Configuration.ImportResult!>!
+Moongazing.OrionAudit.Configuration.AuditImportOptions
+Moongazing.OrionAudit.Configuration.AuditImportOptions.AuditImportOptions() -> void
+Moongazing.OrionAudit.Configuration.AuditImportOptions.BatchSize.get -> int
+Moongazing.OrionAudit.Configuration.AuditImportOptions.BatchSize.set -> void
+Moongazing.OrionAudit.Configuration.AuditImportOptions.ImportBatch.get -> string?
+Moongazing.OrionAudit.Configuration.AuditImportOptions.ImportBatch.set -> void
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.Action(Moongazing.OrionAudit.AuditAction value) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.After(T? state) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.At(System.DateTime utc) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.Before(T? state) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.By(string? id, string? display = null, string? type = null) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.Key(object! key) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.Key(params object?[]! parts) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.SourceId(object? value) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.Tenant(string? value) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditImportRecord<T>.WithColumn(string! name, object? value) -> Moongazing.OrionAudit.Configuration.AuditImportRecord<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.AuditTypeBuilder() -> void
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.Exclude<TProp>(System.Linq.Expressions.Expression<System.Func<T!, TProp>!>! selector) -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.Hash<TProp>(System.Linq.Expressions.Expression<System.Func<T!, TProp>!>! selector) -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.Label(string! displayLabel) -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.Label<TProp>(System.Linq.Expressions.Expression<System.Func<T!, TProp>!>! selector, string! displayLabel) -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.Redact<TProp>(System.Linq.Expressions.Expression<System.Func<T!, TProp>!>! selector) -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.SoftDelete(System.Linq.Expressions.Expression<System.Func<T!, bool>!>! selector) -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T>.UseBaseType<TBase>() -> Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!
+Moongazing.OrionAudit.Configuration.CustomColumn
+Moongazing.OrionAudit.Configuration.CustomColumn.<Clone>$() -> Moongazing.OrionAudit.Configuration.CustomColumn!
+Moongazing.OrionAudit.Configuration.CustomColumn.ClrType.get -> System.Type!
+Moongazing.OrionAudit.Configuration.CustomColumn.ClrType.init -> void
+Moongazing.OrionAudit.Configuration.CustomColumn.CustomColumn(string! Name, System.Type! ClrType, System.Func<Moongazing.OrionAudit.Configuration.AuditColumnContext!, object?>! Provider) -> void
+Moongazing.OrionAudit.Configuration.CustomColumn.Deconstruct(out string! Name, out System.Type! ClrType, out System.Func<Moongazing.OrionAudit.Configuration.AuditColumnContext!, object?>! Provider) -> void
+Moongazing.OrionAudit.Configuration.CustomColumn.Equals(Moongazing.OrionAudit.Configuration.CustomColumn? other) -> bool
+Moongazing.OrionAudit.Configuration.CustomColumn.Name.get -> string!
+Moongazing.OrionAudit.Configuration.CustomColumn.Name.init -> void
+Moongazing.OrionAudit.Configuration.CustomColumn.Provider.get -> System.Func<Moongazing.OrionAudit.Configuration.AuditColumnContext!, object?>!
+Moongazing.OrionAudit.Configuration.CustomColumn.Provider.init -> void
+Moongazing.OrionAudit.Configuration.IAuditConfiguration
+Moongazing.OrionAudit.Configuration.IAuditConfiguration.AuditedTypeNames.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Moongazing.OrionAudit.Configuration.IAuditConfiguration.CustomColumns.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>!
+Moongazing.OrionAudit.Configuration.IAuditConfiguration.GetConfig(System.Type! entityType) -> Moongazing.OrionAudit.Configuration.AuditableTypeConfig?
+Moongazing.OrionAudit.Configuration.IAuditConfiguration.IsAudited(System.Type! entityType) -> bool
+Moongazing.OrionAudit.Configuration.ImportResult
+Moongazing.OrionAudit.Configuration.ImportResult.<Clone>$() -> Moongazing.OrionAudit.Configuration.ImportResult!
+Moongazing.OrionAudit.Configuration.ImportResult.DeadLettered.get -> int
+Moongazing.OrionAudit.Configuration.ImportResult.DeadLettered.init -> void
+Moongazing.OrionAudit.Configuration.ImportResult.Deconstruct(out int Written, out int Skipped, out int DeadLettered) -> void
+Moongazing.OrionAudit.Configuration.ImportResult.Equals(Moongazing.OrionAudit.Configuration.ImportResult? other) -> bool
+Moongazing.OrionAudit.Configuration.ImportResult.ImportResult(int Written, int Skipped, int DeadLettered) -> void
+Moongazing.OrionAudit.Configuration.ImportResult.Skipped.get -> int
+Moongazing.OrionAudit.Configuration.ImportResult.Skipped.init -> void
+Moongazing.OrionAudit.Configuration.ImportResult.Written.get -> int
+Moongazing.OrionAudit.Configuration.ImportResult.Written.init -> void
+Moongazing.OrionAudit.Configuration.RetentionPolicy
+Moongazing.OrionAudit.Configuration.RetentionPolicy.RetentionPolicy() -> void
+Moongazing.OrionAudit.Configuration.RetentionPolicy.RetentionPolicy(Moongazing.OrionAudit.Configuration.RetentionPolicy! original) -> void
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.DryRun.get -> bool
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.DryRun.set -> void
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.MaxRowsPerSweep.get -> int
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.MaxRowsPerSweep.set -> void
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.MaxSweepDuration.get -> System.TimeSpan?
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.MaxSweepDuration.set -> void
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.RetentionSweepOptions() -> void
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.SweepInterval.get -> System.TimeSpan
+Moongazing.OrionAudit.Configuration.RetentionSweepOptions.SweepInterval.set -> void
+Moongazing.OrionAudit.Configuration.SnapshotPolicy
+Moongazing.OrionAudit.Configuration.SnapshotPolicy.SnapshotPolicy() -> void
+Moongazing.OrionAudit.Configuration.SnapshotPolicy.SnapshotPolicy(Moongazing.OrionAudit.Configuration.SnapshotPolicy! original) -> void
+Moongazing.OrionAudit.DbContextOptionsBuilderExtensions
+Moongazing.OrionAudit.HashedAuditAttribute
+Moongazing.OrionAudit.HashedAuditAttribute.HashedAuditAttribute() -> void
+Moongazing.OrionAudit.IAuditReconstructor
+Moongazing.OrionAudit.IAuditReconstructor.ReconstructAsync<T>(string! entityId, System.DateTime asOf, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Moongazing.OrionAudit.IAuditReconstructor.ReconstructManyAsync<T>(System.Collections.Generic.IEnumerable<string!>! entityIds, System.DateTime asOf, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, T?>!>!
+Moongazing.OrionAudit.IAuditTenantResolver
+Moongazing.OrionAudit.IAuditTenantResolver.Resolve(System.IServiceProvider! serviceProvider) -> string?
+Moongazing.OrionAudit.IAuditUserEnricher
+Moongazing.OrionAudit.IAuditUserEnricher.Enrich(Moongazing.OrionAudit.AuditUser! user, System.IServiceProvider! serviceProvider) -> Moongazing.OrionAudit.AuditUser?
+Moongazing.OrionAudit.IAuditUserResolver
+Moongazing.OrionAudit.IAuditUserResolver.Resolve(System.IServiceProvider! serviceProvider) -> Moongazing.OrionAudit.AuditUser?
+Moongazing.OrionAudit.Integrity.AuditChainAnchor
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.AuditChainAnchor() -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.EntityId.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.EntityId.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.EntityType.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.EntityType.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.KeyId.get -> int
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.KeyId.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.LatestEntryHash.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.LatestEntryHash.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.PrunedRowCount.get -> long
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.PrunedRowCount.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.PrunedThroughHash.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.PrunedThroughHash.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.RowCount.get -> long
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.RowCount.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.TenantId.get -> string!
+Moongazing.OrionAudit.Integrity.AuditChainAnchor.TenantId.set -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchorEntityTypeConfiguration
+Moongazing.OrionAudit.Integrity.AuditChainAnchorEntityTypeConfiguration.AuditChainAnchorEntityTypeConfiguration() -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchorEntityTypeConfiguration.AuditChainAnchorEntityTypeConfiguration(string! tableName) -> void
+Moongazing.OrionAudit.Integrity.AuditChainAnchorEntityTypeConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Moongazing.OrionAudit.Integrity.AuditChainAnchor!>! builder) -> void
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason.BrokenLink = 2 -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason.ContentMismatch = 1 -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason.MissingHashAfterChainStart = 3 -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason.None = 0 -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason.Truncated = 4 -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainBreakReason.UnknownKey = 5 -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainKeysBuilder
+Moongazing.OrionAudit.Integrity.AuditChainKeysBuilder.Add(int keyId, byte[]! key) -> Moongazing.OrionAudit.Integrity.AuditChainKeysBuilder!
+Moongazing.OrionAudit.Integrity.AuditChainKeysBuilder.Add(int keyId, string! base64Key) -> Moongazing.OrionAudit.Integrity.AuditChainKeysBuilder!
+Moongazing.OrionAudit.Integrity.AuditChainKeysBuilder.AuditChainKeysBuilder() -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.<Clone>$() -> Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest!
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.AuditChainVerificationRequest() -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.EntityId.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.EntityId.init -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.EntityType.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.EntityType.init -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.Equals(Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest? other) -> bool
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.TenantId.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.TenantId.init -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.Validate() -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.BrokenAtId.get -> System.Guid?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.BrokenEntityId.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.BrokenEntityType.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.Detail.get -> string?
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.IsValid.get -> bool
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.Reason.get -> Moongazing.OrionAudit.Integrity.AuditChainBreakReason
+Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.VerifiedRowCount.get -> long
+Moongazing.OrionAudit.Integrity.AuditChainVerifier
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Anchor.get -> Moongazing.OrionAudit.Integrity.AuditChainAnchor?
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Anchor.init -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.CustomColumnsResolver.get -> System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>!
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.CustomColumnsResolver.init -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Deconstruct(out System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, out System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, out Moongazing.OrionAudit.Integrity.AuditChainAnchor? Anchor) -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Equals(Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext other) -> bool
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.KeyResolver.get -> System.Func<int, System.ReadOnlyMemory<byte>?>!
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.KeyResolver.init -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.StreamVerificationContext() -> void
+Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.StreamVerificationContext(System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, Moongazing.OrionAudit.Integrity.AuditChainAnchor? Anchor) -> void
+Moongazing.OrionAudit.Integrity.AuditEntryHasher
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.ActiveKeyId.get -> int
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.ActiveKeyId.set -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.AuditHashChainOptions() -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.Scope.get -> Moongazing.OrionAudit.Integrity.AuditHashChainScope
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.Scope.set -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.UseKey(int keyId, byte[]! key) -> Moongazing.OrionAudit.Integrity.AuditHashChainOptions!
+Moongazing.OrionAudit.Integrity.AuditHashChainOptions.UseKey(int keyId, string! base64Key) -> Moongazing.OrionAudit.Integrity.AuditHashChainOptions!
+Moongazing.OrionAudit.Integrity.AuditHashChainScope
+Moongazing.OrionAudit.Integrity.AuditHashChainScope.PerEntityStream = 0 -> Moongazing.OrionAudit.Integrity.AuditHashChainScope
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ChainKey() -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ChainKey(string! EntityType, string! EntityId, string! TenantId) -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.Deconstruct(out string! EntityType, out string! EntityId, out string! TenantId) -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityId.get -> string!
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityId.init -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityType.get -> string!
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.EntityType.init -> void
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.Equals(Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey other) -> bool
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.TenantId.get -> string!
+Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.TenantId.init -> void
+Moongazing.OrionAudit.Integrity.EfCoreAuditIntegrityVerifier
+Moongazing.OrionAudit.Integrity.EfCoreAuditIntegrityVerifier.EfCoreAuditIntegrityVerifier(Microsoft.EntityFrameworkCore.DbContext! context, Moongazing.OrionAudit.Integrity.IAuditChainKeyProvider! keyProvider, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>! customColumns) -> void
+Moongazing.OrionAudit.Integrity.EfCoreAuditIntegrityVerifier.VerifyChainAsync(Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Integrity.AuditChainVerificationResult!>!
+Moongazing.OrionAudit.Integrity.IAuditChainKeyProvider
+Moongazing.OrionAudit.Integrity.IAuditChainKeyProvider.ActiveKeyId.get -> int
+Moongazing.OrionAudit.Integrity.IAuditChainKeyProvider.TryGetKey(int keyId) -> System.ReadOnlyMemory<byte>?
+Moongazing.OrionAudit.Integrity.IAuditIntegrityVerifier
+Moongazing.OrionAudit.Integrity.IAuditIntegrityVerifier.VerifyChainAsync(Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Integrity.AuditChainVerificationResult!>!
+Moongazing.OrionAudit.Integrity.OrionAuditChainKeyException
+Moongazing.OrionAudit.Integrity.OrionAuditChainKeyException.OrionAuditChainKeyException(string! message) -> void
+Moongazing.OrionAudit.Integrity.StaticAuditChainKeyProvider
+Moongazing.OrionAudit.Integrity.StaticAuditChainKeyProvider.ActiveKeyId.get -> int
+Moongazing.OrionAudit.Integrity.StaticAuditChainKeyProvider.StaticAuditChainKeyProvider(System.Collections.Generic.IReadOnlyDictionary<int, byte[]!>! keys, int activeKeyId) -> void
+Moongazing.OrionAudit.Integrity.StaticAuditChainKeyProvider.TryGetKey(int keyId) -> System.ReadOnlyMemory<byte>?
+Moongazing.OrionAudit.NotAuditableAttribute
+Moongazing.OrionAudit.NotAuditableAttribute.NotAuditableAttribute() -> void
+Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditColumnHints.Auto = 0 -> Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditColumnHints.MySqlJson = 4 -> Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditColumnHints.MySqlLongText = 5 -> Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditColumnHints.PostgresJsonb = 2 -> Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditColumnHints.SqliteText = 3 -> Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditColumnHints.SqlServerNvarcharMax = 1 -> Moongazing.OrionAudit.OrionAuditColumnHints
+Moongazing.OrionAudit.OrionAuditConfigurationException
+Moongazing.OrionAudit.OrionAuditConfigurationException.OrionAuditConfigurationException(string! message) -> void
+Moongazing.OrionAudit.OrionAuditConfigurationException.OrionAuditConfigurationException(string! message, System.Exception! inner) -> void
+Moongazing.OrionAudit.OrionAuditException
+Moongazing.OrionAudit.OrionAuditException.OrionAuditException(string! message) -> void
+Moongazing.OrionAudit.OrionAuditException.OrionAuditException(string! message, System.Exception! inner) -> void
+Moongazing.OrionAudit.OrionAuditModuleAttribute
+Moongazing.OrionAudit.OrionAuditModuleAttribute.OrionAuditModuleAttribute() -> void
+Moongazing.OrionAudit.OrionAuditOptions
+Moongazing.OrionAudit.OrionAuditOptions.AddColumn<T>(string! name, System.Func<Moongazing.OrionAudit.Configuration.AuditColumnContext!, object?>! provider) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.AsyncCaptureEnabled.get -> bool
+Moongazing.OrionAudit.OrionAuditOptions.AsyncCaptureOptions.get -> Moongazing.OrionAudit.Configuration.AsyncCaptureOptions!
+Moongazing.OrionAudit.OrionAuditOptions.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>? configure = null) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.CompactInBackground(System.Action<Moongazing.OrionAudit.Store.CompactionSweepOptions!>? configure = null) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.ConfigurationBuilder.get -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
+Moongazing.OrionAudit.OrionAuditOptions.CustomColumns.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>!
+Moongazing.OrionAudit.OrionAuditOptions.MaxRowsPerSweep(int max) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.OrionAuditOptions() -> void
+Moongazing.OrionAudit.OrionAuditOptions.RetainCount(int rows) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.RetainFor(System.TimeSpan age) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.RetentionSweepInterval(System.TimeSpan interval) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.ScanAssembly(System.Reflection.Assembly! assembly) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.SnapshotEvery(int updates) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.SnapshotEvery(System.TimeSpan elapsed) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.TableName(string! tableName) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.TenantResolver<TResolver>() -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.UseAsyncCapture(System.Action<Moongazing.OrionAudit.Configuration.AsyncCaptureBuilder!>? configure = null) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.UseChannelEventPublisher(System.Func<Moongazing.OrionAudit.Publishing.AuditLogEvent!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! handler, System.Action<Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions!>? configure = null) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.UseEventPublisher<TPublisher>() -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.UseHashChain(System.Action<Moongazing.OrionAudit.Integrity.AuditHashChainOptions!>? configure = null) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.UseJsonContext(System.Text.Json.Serialization.JsonSerializerContext! context) -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditOptions.UserResolver<TResolver>() -> Moongazing.OrionAudit.OrionAuditOptions!
+Moongazing.OrionAudit.OrionAuditTelemetry
+Moongazing.OrionAudit.Publishing.AuditLogEvent
+Moongazing.OrionAudit.Publishing.AuditLogEvent.<Clone>$() -> Moongazing.OrionAudit.Publishing.AuditLogEvent!
+Moongazing.OrionAudit.Publishing.AuditLogEvent.Action.get -> string!
+Moongazing.OrionAudit.Publishing.AuditLogEvent.Action.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.At.get -> System.DateTimeOffset
+Moongazing.OrionAudit.Publishing.AuditLogEvent.At.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.AuditLogEvent(System.Guid AuditLogId, string! EntityType, string! EntityKey, string! Action, System.DateTimeOffset At, string? TenantId, string? UserId, string? CorrelationId, string? Diff) -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.AuditLogId.get -> System.Guid
+Moongazing.OrionAudit.Publishing.AuditLogEvent.AuditLogId.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.CorrelationId.get -> string?
+Moongazing.OrionAudit.Publishing.AuditLogEvent.CorrelationId.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.Deconstruct(out System.Guid AuditLogId, out string! EntityType, out string! EntityKey, out string! Action, out System.DateTimeOffset At, out string? TenantId, out string? UserId, out string? CorrelationId, out string? Diff) -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.Diff.get -> string?
+Moongazing.OrionAudit.Publishing.AuditLogEvent.Diff.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.EntityKey.get -> string!
+Moongazing.OrionAudit.Publishing.AuditLogEvent.EntityKey.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.EntityType.get -> string!
+Moongazing.OrionAudit.Publishing.AuditLogEvent.EntityType.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.Equals(Moongazing.OrionAudit.Publishing.AuditLogEvent? other) -> bool
+Moongazing.OrionAudit.Publishing.AuditLogEvent.TenantId.get -> string?
+Moongazing.OrionAudit.Publishing.AuditLogEvent.TenantId.init -> void
+Moongazing.OrionAudit.Publishing.AuditLogEvent.UserId.get -> string?
+Moongazing.OrionAudit.Publishing.AuditLogEvent.UserId.init -> void
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisher
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisher.ChannelAuditEventPublisher(System.Func<Moongazing.OrionAudit.Publishing.AuditLogEvent!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>! handler, Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions! options, Microsoft.Extensions.Logging.ILogger<Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisher!>? logger = null) -> void
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisher.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisher.PublishAsync(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Publishing.AuditLogEvent!>! events, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions.Capacity.get -> int
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions.Capacity.set -> void
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions.ChannelAuditEventPublisherOptions() -> void
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions.DrainTimeout.get -> System.TimeSpan
+Moongazing.OrionAudit.Publishing.ChannelAuditEventPublisherOptions.DrainTimeout.set -> void
+Moongazing.OrionAudit.Publishing.IAuditEventPublisher
+Moongazing.OrionAudit.Publishing.IAuditEventPublisher.PublishAsync(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Publishing.AuditLogEvent!>! events, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+Moongazing.OrionAudit.Publishing.NullAuditEventPublisher
+Moongazing.OrionAudit.Publishing.NullAuditEventPublisher.NullAuditEventPublisher() -> void
+Moongazing.OrionAudit.Publishing.NullAuditEventPublisher.PublishAsync(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Publishing.AuditLogEvent!>! events, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+Moongazing.OrionAudit.Read.AuditEntryView
+Moongazing.OrionAudit.Read.AuditEntryView.Action.get -> Moongazing.OrionAudit.AuditAction
+Moongazing.OrionAudit.Read.AuditEntryView.Action.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.AuditEntryView() -> void
+Moongazing.OrionAudit.Read.AuditEntryView.Changes.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Read.FieldChange!>!
+Moongazing.OrionAudit.Read.AuditEntryView.Changes.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.CorrelationId.get -> string?
+Moongazing.OrionAudit.Read.AuditEntryView.CorrelationId.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.CustomColumns.get -> System.Collections.Generic.IReadOnlyDictionary<string!, object?>!
+Moongazing.OrionAudit.Read.AuditEntryView.CustomColumns.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.EntityDisplayLabel.get -> string?
+Moongazing.OrionAudit.Read.AuditEntryView.EntityDisplayLabel.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.Id.get -> System.Guid
+Moongazing.OrionAudit.Read.AuditEntryView.Id.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.OccurredOnUtc.get -> System.DateTime
+Moongazing.OrionAudit.Read.AuditEntryView.OccurredOnUtc.init -> void
+Moongazing.OrionAudit.Read.AuditEntryView.UserDisplay.get -> string?
+Moongazing.OrionAudit.Read.AuditEntryView.UserDisplay.init -> void
+Moongazing.OrionAudit.Read.AuditReconstructor
+Moongazing.OrionAudit.Read.AuditReconstructor.AuditReconstructor(Microsoft.EntityFrameworkCore.DbContext! context) -> void
+Moongazing.OrionAudit.Read.AuditReconstructor.AuditReconstructor(Microsoft.EntityFrameworkCore.DbContext! context, System.Text.Json.Serialization.JsonSerializerContext? jsonContext) -> void
+Moongazing.OrionAudit.Read.AuditReconstructor.ReconstructAsync<T>(string! entityId, System.DateTime asOf, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+Moongazing.OrionAudit.Read.AuditReconstructor.ReconstructManyAsync<T>(System.Collections.Generic.IEnumerable<string!>! entityIds, System.DateTime asOf, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<string!, T?>!>!
+Moongazing.OrionAudit.Read.AuditViewRenderer
+Moongazing.OrionAudit.Read.ChangeKind
+Moongazing.OrionAudit.Read.ChangeKind.Added = 0 -> Moongazing.OrionAudit.Read.ChangeKind
+Moongazing.OrionAudit.Read.ChangeKind.Modified = 2 -> Moongazing.OrionAudit.Read.ChangeKind
+Moongazing.OrionAudit.Read.ChangeKind.Removed = 1 -> Moongazing.OrionAudit.Read.ChangeKind
+Moongazing.OrionAudit.Read.FieldChange
+Moongazing.OrionAudit.Read.FieldChange.ChangeKind.get -> Moongazing.OrionAudit.Read.ChangeKind
+Moongazing.OrionAudit.Read.FieldChange.ChangeKind.init -> void
+Moongazing.OrionAudit.Read.FieldChange.DisplayLabel.get -> string?
+Moongazing.OrionAudit.Read.FieldChange.DisplayLabel.init -> void
+Moongazing.OrionAudit.Read.FieldChange.FieldChange() -> void
+Moongazing.OrionAudit.Read.FieldChange.NewValue.get -> string?
+Moongazing.OrionAudit.Read.FieldChange.NewValue.init -> void
+Moongazing.OrionAudit.Read.FieldChange.OldValue.get -> string?
+Moongazing.OrionAudit.Read.FieldChange.OldValue.init -> void
+Moongazing.OrionAudit.Read.FieldChange.PropertyPath.get -> string!
+Moongazing.OrionAudit.Read.FieldChange.PropertyPath.init -> void
+Moongazing.OrionAudit.RedactedAuditAttribute
+Moongazing.OrionAudit.RedactedAuditAttribute.RedactedAuditAttribute() -> void
+Moongazing.OrionAudit.Retention.AuditRetentionHostedService<TDbContext>
+Moongazing.OrionAudit.Retention.AuditRetentionHostedService<TDbContext>.AuditRetentionHostedService(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Moongazing.OrionAudit.Configuration.RetentionPolicy! policy, Moongazing.OrionAudit.Configuration.RetentionSweepOptions! options, System.TimeProvider! clock, Microsoft.Extensions.Logging.ILogger<Moongazing.OrionAudit.Retention.AuditRetentionHostedService<TDbContext!>!>! logger) -> void
+Moongazing.OrionAudit.Retention.AuditRetentionHostedService<TDbContext>.AuditRetentionHostedService(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Moongazing.OrionAudit.Configuration.RetentionPolicy! policy, Moongazing.OrionAudit.Configuration.RetentionSweepOptions! options, System.TimeProvider! clock, Microsoft.Extensions.Logging.ILogger<Moongazing.OrionAudit.Retention.AuditRetentionHostedService<TDbContext!>!>! logger, Moongazing.OrionAudit.Retention.IAuditArchiver? archiver, Moongazing.OrionAudit.Integrity.AuditHashChainOptions? hashChainOptions = null) -> void
+Moongazing.OrionAudit.Retention.AuditRetentionHostedService<TDbContext>.SweepOnceAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Retention.CopyToTableAuditArchiver<TArchiveRow>
+Moongazing.OrionAudit.Retention.CopyToTableAuditArchiver<TArchiveRow>.ArchiveAsync(Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! rows, Moongazing.OrionAudit.Configuration.RetentionPolicy! policy, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Retention.CopyToTableAuditArchiver<TArchiveRow>.CopyToTableAuditArchiver(System.Func<Moongazing.OrionAudit.AuditLog!, TArchiveRow!>! map) -> void
+Moongazing.OrionAudit.Retention.DeleteAuditArchiver
+Moongazing.OrionAudit.Retention.DeleteAuditArchiver.ArchiveAsync(Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! rows, Moongazing.OrionAudit.Configuration.RetentionPolicy! policy, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Retention.DeleteAuditArchiver.DeleteAuditArchiver() -> void
+Moongazing.OrionAudit.Retention.IAuditArchiver
+Moongazing.OrionAudit.Retention.IAuditArchiver.ArchiveAsync(Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! rows, Moongazing.OrionAudit.Configuration.RetentionPolicy! policy, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.SnapshotCursor
+Moongazing.OrionAudit.SnapshotCursor.EntityId.get -> string!
+Moongazing.OrionAudit.SnapshotCursor.EntityId.set -> void
+Moongazing.OrionAudit.SnapshotCursor.EntityType.get -> string!
+Moongazing.OrionAudit.SnapshotCursor.EntityType.set -> void
+Moongazing.OrionAudit.SnapshotCursor.LastSnapshotUtc.get -> System.DateTime?
+Moongazing.OrionAudit.SnapshotCursor.LastSnapshotUtc.set -> void
+Moongazing.OrionAudit.SnapshotCursor.SnapshotCursor() -> void
+Moongazing.OrionAudit.SnapshotCursor.TenantId.get -> string!
+Moongazing.OrionAudit.SnapshotCursor.TenantId.set -> void
+Moongazing.OrionAudit.SnapshotCursor.UpdatesSinceLast.get -> int
+Moongazing.OrionAudit.SnapshotCursor.UpdatesSinceLast.set -> void
+Moongazing.OrionAudit.SnapshotCursorEntityTypeConfiguration
+Moongazing.OrionAudit.SnapshotCursorEntityTypeConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Moongazing.OrionAudit.SnapshotCursor!>! builder) -> void
+Moongazing.OrionAudit.SnapshotCursorEntityTypeConfiguration.SnapshotCursorEntityTypeConfiguration() -> void
+Moongazing.OrionAudit.SnapshotCursorEntityTypeConfiguration.SnapshotCursorEntityTypeConfiguration(string! tableName) -> void
+Moongazing.OrionAudit.SoftDeleteAttribute
+Moongazing.OrionAudit.SoftDeleteAttribute.PropertyName.get -> string!
+Moongazing.OrionAudit.SoftDeleteAttribute.SoftDeleteAttribute(string! propertyName) -> void
+Moongazing.OrionAudit.Store.AuditAggregateBucket
+Moongazing.OrionAudit.Store.AuditAggregateBucket.AuditAggregateBucket(string? key, long count) -> void
+Moongazing.OrionAudit.Store.AuditAggregateBucket.BucketStartUtc.get -> System.DateTime?
+Moongazing.OrionAudit.Store.AuditAggregateBucket.BucketStartUtc.init -> void
+Moongazing.OrionAudit.Store.AuditAggregateBucket.Count.get -> long
+Moongazing.OrionAudit.Store.AuditAggregateBucket.Key.get -> string?
+Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregateBy.Action = 0 -> Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregateBy.EntityType = 1 -> Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregateBy.TenantId = 3 -> Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregateBy.TimeBucket = 4 -> Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregateBy.UserId = 2 -> Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregationQuery
+Moongazing.OrionAudit.Store.AuditAggregationQuery.<Clone>$() -> Moongazing.OrionAudit.Store.AuditAggregationQuery!
+Moongazing.OrionAudit.Store.AuditAggregationQuery.AuditAggregationQuery() -> void
+Moongazing.OrionAudit.Store.AuditAggregationQuery.Equals(Moongazing.OrionAudit.Store.AuditAggregationQuery? other) -> bool
+Moongazing.OrionAudit.Store.AuditAggregationQuery.Filter.get -> Moongazing.OrionAudit.Store.AuditHistoryQuery!
+Moongazing.OrionAudit.Store.AuditAggregationQuery.Filter.init -> void
+Moongazing.OrionAudit.Store.AuditAggregationQuery.GroupBy.get -> Moongazing.OrionAudit.Store.AuditAggregateBy
+Moongazing.OrionAudit.Store.AuditAggregationQuery.GroupBy.init -> void
+Moongazing.OrionAudit.Store.AuditAggregationQuery.TimeBucket.get -> Moongazing.OrionAudit.Store.AuditTimeBucket
+Moongazing.OrionAudit.Store.AuditAggregationQuery.TimeBucket.init -> void
+Moongazing.OrionAudit.Store.AuditAggregationQuery.Validate() -> void
+Moongazing.OrionAudit.Store.AuditCompactionHostedService<TDbContext>
+Moongazing.OrionAudit.Store.AuditCompactionHostedService<TDbContext>.AuditCompactionHostedService(Microsoft.Extensions.DependencyInjection.IServiceScopeFactory! scopeFactory, Moongazing.OrionAudit.Store.CompactionSweepOptions! options, System.TimeProvider! clock, Microsoft.Extensions.Logging.ILogger<Moongazing.OrionAudit.Store.AuditCompactionHostedService<TDbContext!>!>! logger, Moongazing.OrionAudit.Integrity.AuditHashChainOptions? hashChainOptions = null) -> void
+Moongazing.OrionAudit.Store.AuditCompactionHostedService<TDbContext>.SweepOnceAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Moongazing.OrionAudit.Store.AuditCompactionRequest
+Moongazing.OrionAudit.Store.AuditCompactionRequest.<Clone>$() -> Moongazing.OrionAudit.Store.AuditCompactionRequest!
+Moongazing.OrionAudit.Store.AuditCompactionRequest.AuditCompactionRequest() -> void
+Moongazing.OrionAudit.Store.AuditCompactionRequest.EntityId.get -> string!
+Moongazing.OrionAudit.Store.AuditCompactionRequest.EntityId.init -> void
+Moongazing.OrionAudit.Store.AuditCompactionRequest.EntityType.get -> string!
+Moongazing.OrionAudit.Store.AuditCompactionRequest.EntityType.init -> void
+Moongazing.OrionAudit.Store.AuditCompactionRequest.Equals(Moongazing.OrionAudit.Store.AuditCompactionRequest? other) -> bool
+Moongazing.OrionAudit.Store.AuditCompactionRequest.RetainTail.get -> int
+Moongazing.OrionAudit.Store.AuditCompactionRequest.RetainTail.init -> void
+Moongazing.OrionAudit.Store.AuditCompactionRequest.TenantId.get -> string?
+Moongazing.OrionAudit.Store.AuditCompactionRequest.TenantId.init -> void
+Moongazing.OrionAudit.Store.AuditCompactionRequest.Validate() -> void
+Moongazing.OrionAudit.Store.AuditCompactionResult
+Moongazing.OrionAudit.Store.AuditCompactionResult.AuditCompactionResult(int rowsBefore, int rowsRemoved, int rowsAfter, bool snapshotWritten) -> void
+Moongazing.OrionAudit.Store.AuditCompactionResult.RowsAfter.get -> int
+Moongazing.OrionAudit.Store.AuditCompactionResult.RowsBefore.get -> int
+Moongazing.OrionAudit.Store.AuditCompactionResult.RowsRemoved.get -> int
+Moongazing.OrionAudit.Store.AuditCompactionResult.SnapshotWritten.get -> bool
+Moongazing.OrionAudit.Store.AuditHistoryCompactor
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan.IsEffective.get -> bool
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan.RetainedTail.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan.RowsBefore.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan.RowsToRemove.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>!
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan.SnapshotRow.get -> Moongazing.OrionAudit.AuditLog?
+Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan.ToResult() -> Moongazing.OrionAudit.Store.AuditCompactionResult!
+Moongazing.OrionAudit.Store.AuditHistoryExporter
+Moongazing.OrionAudit.Store.AuditHistoryExporter.AuditHistoryExporter(Moongazing.OrionAudit.Store.IAuditHistoryStore! store) -> void
+Moongazing.OrionAudit.Store.AuditHistoryExporter.ExportNdjsonAsync(System.IO.Stream! destination, Moongazing.OrionAudit.Store.AuditHistoryQuery! filter, int pageSize = 500, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+Moongazing.OrionAudit.Store.AuditHistoryExporter.StreamRowsAsync(Moongazing.OrionAudit.Store.AuditHistoryQuery! filter, int pageSize = 500, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Moongazing.OrionAudit.AuditLog!>!
+Moongazing.OrionAudit.Store.AuditHistoryOrder
+Moongazing.OrionAudit.Store.AuditHistoryOrder.NewestFirst = 0 -> Moongazing.OrionAudit.Store.AuditHistoryOrder
+Moongazing.OrionAudit.Store.AuditHistoryOrder.OldestFirst = 1 -> Moongazing.OrionAudit.Store.AuditHistoryOrder
+Moongazing.OrionAudit.Store.AuditHistoryPage
+Moongazing.OrionAudit.Store.AuditHistoryPage.AuditHistoryPage(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! items, int totalCount, int skip, int take) -> void
+Moongazing.OrionAudit.Store.AuditHistoryPage.HasMore.get -> bool
+Moongazing.OrionAudit.Store.AuditHistoryPage.Items.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>!
+Moongazing.OrionAudit.Store.AuditHistoryPage.Skip.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryPage.Take.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryPage.TotalCount.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryQuery
+Moongazing.OrionAudit.Store.AuditHistoryQuery.<Clone>$() -> Moongazing.OrionAudit.Store.AuditHistoryQuery!
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Action.get -> Moongazing.OrionAudit.AuditAction?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Action.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Actions.get -> System.Collections.Generic.IReadOnlyCollection<Moongazing.OrionAudit.AuditAction>?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Actions.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.AuditHistoryQuery() -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.ChangedPath.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.ChangedPath.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.ChangedPathExactTokens.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Moongazing.OrionAudit.Store.AuditHistoryQuery.ChangedPathPrefixTokens.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Moongazing.OrionAudit.Store.AuditHistoryQuery.CorrelationId.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.CorrelationId.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EffectiveTake.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityBaseType.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityBaseType.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityId.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityId.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityType.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityType.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityTypes.get -> System.Collections.Generic.IReadOnlyCollection<string!>?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.EntityTypes.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Equals(Moongazing.OrionAudit.Store.AuditHistoryQuery? other) -> bool
+Moongazing.OrionAudit.Store.AuditHistoryQuery.FromUtc.get -> System.DateTime?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.FromUtc.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.HasActionsFilter.get -> bool
+Moongazing.OrionAudit.Store.AuditHistoryQuery.HasEntityTypesFilter.get -> bool
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Order.get -> Moongazing.OrionAudit.Store.AuditHistoryOrder
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Order.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Skip.get -> int
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Skip.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.SortBy.get -> Moongazing.OrionAudit.Store.AuditHistorySortField
+Moongazing.OrionAudit.Store.AuditHistoryQuery.SortBy.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Take.get -> int?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Take.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.TenantId.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.TenantId.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.ToUtc.get -> System.DateTime?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.ToUtc.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.UserId.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.UserId.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.UserType.get -> string?
+Moongazing.OrionAudit.Store.AuditHistoryQuery.UserType.init -> void
+Moongazing.OrionAudit.Store.AuditHistoryQuery.Validate() -> void
+Moongazing.OrionAudit.Store.AuditHistorySortField
+Moongazing.OrionAudit.Store.AuditHistorySortField.Action = 2 -> Moongazing.OrionAudit.Store.AuditHistorySortField
+Moongazing.OrionAudit.Store.AuditHistorySortField.EntityType = 1 -> Moongazing.OrionAudit.Store.AuditHistorySortField
+Moongazing.OrionAudit.Store.AuditHistorySortField.OccurredOn = 0 -> Moongazing.OrionAudit.Store.AuditHistorySortField
+Moongazing.OrionAudit.Store.AuditHistorySortField.UserId = 3 -> Moongazing.OrionAudit.Store.AuditHistorySortField
+Moongazing.OrionAudit.Store.AuditHistoryStoreBase
+Moongazing.OrionAudit.Store.AuditHistoryStoreBase.AuditHistoryStoreBase() -> void
+Moongazing.OrionAudit.Store.AuditNdjsonWriter
+Moongazing.OrionAudit.Store.AuditTimeBucket
+Moongazing.OrionAudit.Store.AuditTimeBucket.Day = 1 -> Moongazing.OrionAudit.Store.AuditTimeBucket
+Moongazing.OrionAudit.Store.AuditTimeBucket.Hour = 0 -> Moongazing.OrionAudit.Store.AuditTimeBucket
+Moongazing.OrionAudit.Store.AuditTimeBucket.Month = 2 -> Moongazing.OrionAudit.Store.AuditTimeBucket
+Moongazing.OrionAudit.Store.CompactionSweepOptions
+Moongazing.OrionAudit.Store.CompactionSweepOptions.CompactionSweepOptions() -> void
+Moongazing.OrionAudit.Store.CompactionSweepOptions.MaxStreamsPerSweep.get -> int
+Moongazing.OrionAudit.Store.CompactionSweepOptions.MaxStreamsPerSweep.set -> void
+Moongazing.OrionAudit.Store.CompactionSweepOptions.MaxSweepDuration.get -> System.TimeSpan?
+Moongazing.OrionAudit.Store.CompactionSweepOptions.MaxSweepDuration.set -> void
+Moongazing.OrionAudit.Store.CompactionSweepOptions.MinRowsBeforeCompaction.get -> int
+Moongazing.OrionAudit.Store.CompactionSweepOptions.MinRowsBeforeCompaction.set -> void
+Moongazing.OrionAudit.Store.CompactionSweepOptions.RetainTail.get -> int
+Moongazing.OrionAudit.Store.CompactionSweepOptions.RetainTail.set -> void
+Moongazing.OrionAudit.Store.CompactionSweepOptions.SweepInterval.get -> System.TimeSpan
+Moongazing.OrionAudit.Store.CompactionSweepOptions.SweepInterval.set -> void
+Moongazing.OrionAudit.Store.EfCoreAuditHistoryStore
+Moongazing.OrionAudit.Store.EfCoreAuditHistoryStore.EfCoreAuditHistoryStore(Microsoft.EntityFrameworkCore.DbContext! context) -> void
+Moongazing.OrionAudit.Store.IAuditHistoryStore
+Moongazing.OrionAudit.Store.IAuditHistoryStore.AggregateAsync(Moongazing.OrionAudit.Store.AuditAggregationQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Store.AuditAggregateBucket!>!>!
+Moongazing.OrionAudit.Store.IAuditHistoryStore.CompactAsync(Moongazing.OrionAudit.Store.AuditCompactionRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditCompactionResult!>!
+Moongazing.OrionAudit.Store.IAuditHistoryStore.QueryAsync(Moongazing.OrionAudit.Store.AuditHistoryQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditHistoryPage!>!
+Moongazing.OrionAudit.UserActivitySummary
+Moongazing.OrionAudit.UserActivitySummary.<Clone>$() -> Moongazing.OrionAudit.UserActivitySummary!
+Moongazing.OrionAudit.UserActivitySummary.ActivityCount.get -> int
+Moongazing.OrionAudit.UserActivitySummary.ActivityCount.init -> void
+Moongazing.OrionAudit.UserActivitySummary.Deconstruct(out string! UserId, out int ActivityCount) -> void
+Moongazing.OrionAudit.UserActivitySummary.Equals(Moongazing.OrionAudit.UserActivitySummary? other) -> bool
+Moongazing.OrionAudit.UserActivitySummary.UserActivitySummary(string! UserId, int ActivityCount) -> void
+Moongazing.OrionAudit.UserActivitySummary.UserId.get -> string!
+Moongazing.OrionAudit.UserActivitySummary.UserId.init -> void
+override Moongazing.OrionAudit.AuditDailyActionBucket.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.AuditDailyActionBucket.GetHashCode() -> int
+override Moongazing.OrionAudit.AuditDailyActionBucket.ToString() -> string!
+override Moongazing.OrionAudit.AuditDailyBucket.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.AuditDailyBucket.GetHashCode() -> int
+override Moongazing.OrionAudit.AuditDailyBucket.ToString() -> string!
+override Moongazing.OrionAudit.AuditDailyUserBucket.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.AuditDailyUserBucket.GetHashCode() -> int
+override Moongazing.OrionAudit.AuditDailyUserBucket.ToString() -> string!
+override Moongazing.OrionAudit.AuditMonthlyBucket.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.AuditMonthlyBucket.GetHashCode() -> int
+override Moongazing.OrionAudit.AuditMonthlyBucket.ToString() -> string!
+override Moongazing.OrionAudit.AuditUser.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.AuditUser.GetHashCode() -> int
+override Moongazing.OrionAudit.AuditUser.ToString() -> string!
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SaveChangesCanceled(Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData! eventData) -> void
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SaveChangesCanceledAsync(Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData! eventData, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SaveChangesFailed(Microsoft.EntityFrameworkCore.Diagnostics.DbContextErrorEventData! eventData) -> void
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SaveChangesFailedAsync(Microsoft.EntityFrameworkCore.Diagnostics.DbContextErrorEventData! eventData, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SavedChanges(Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesCompletedEventData! eventData, int result) -> int
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SavedChangesAsync(Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesCompletedEventData! eventData, int result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<int>
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SavingChanges(Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData! eventData, Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result) -> Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>
+override Moongazing.OrionAudit.Capture.AuditSaveChangesInterceptor.SavingChangesAsync(Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData! eventData, Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>>
+override Moongazing.OrionAudit.Configuration.AuditColumnContext.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Configuration.AuditColumnContext.GetHashCode() -> int
+override Moongazing.OrionAudit.Configuration.AuditColumnContext.ToString() -> string!
+override Moongazing.OrionAudit.Configuration.CustomColumn.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Configuration.CustomColumn.GetHashCode() -> int
+override Moongazing.OrionAudit.Configuration.CustomColumn.ToString() -> string!
+override Moongazing.OrionAudit.Configuration.ImportResult.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Configuration.ImportResult.GetHashCode() -> int
+override Moongazing.OrionAudit.Configuration.ImportResult.ToString() -> string!
+override Moongazing.OrionAudit.Configuration.RetentionPolicy.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Configuration.RetentionPolicy.GetHashCode() -> int
+override Moongazing.OrionAudit.Configuration.RetentionPolicy.ToString() -> string!
+override Moongazing.OrionAudit.Configuration.SnapshotPolicy.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Configuration.SnapshotPolicy.GetHashCode() -> int
+override Moongazing.OrionAudit.Configuration.SnapshotPolicy.ToString() -> string!
+override Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.GetHashCode() -> int
+override Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.ToString() -> string!
+override Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.GetHashCode() -> int
+override Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.GetHashCode() -> int
+override Moongazing.OrionAudit.Publishing.AuditLogEvent.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Publishing.AuditLogEvent.GetHashCode() -> int
+override Moongazing.OrionAudit.Publishing.AuditLogEvent.ToString() -> string!
+override Moongazing.OrionAudit.Store.AuditAggregationQuery.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Store.AuditAggregationQuery.GetHashCode() -> int
+override Moongazing.OrionAudit.Store.AuditAggregationQuery.ToString() -> string!
+override Moongazing.OrionAudit.Store.AuditCompactionRequest.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Store.AuditCompactionRequest.GetHashCode() -> int
+override Moongazing.OrionAudit.Store.AuditCompactionRequest.ToString() -> string!
+override Moongazing.OrionAudit.Store.AuditHistoryQuery.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.Store.AuditHistoryQuery.GetHashCode() -> int
+override Moongazing.OrionAudit.Store.AuditHistoryQuery.ToString() -> string!
+override Moongazing.OrionAudit.Store.EfCoreAuditHistoryStore.AggregateAsync(Moongazing.OrionAudit.Store.AuditAggregationQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Store.AuditAggregateBucket!>!>!
+override Moongazing.OrionAudit.Store.EfCoreAuditHistoryStore.CompactAsync(Moongazing.OrionAudit.Store.AuditCompactionRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditCompactionResult!>!
+override Moongazing.OrionAudit.Store.EfCoreAuditHistoryStore.QueryAsync(Moongazing.OrionAudit.Store.AuditHistoryQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditHistoryPage!>!
+override Moongazing.OrionAudit.UserActivitySummary.Equals(object? obj) -> bool
+override Moongazing.OrionAudit.UserActivitySummary.GetHashCode() -> int
+override Moongazing.OrionAudit.UserActivitySummary.ToString() -> string!
+static Moongazing.OrionAudit.AuditDailyActionBucket.operator !=(Moongazing.OrionAudit.AuditDailyActionBucket? left, Moongazing.OrionAudit.AuditDailyActionBucket? right) -> bool
+static Moongazing.OrionAudit.AuditDailyActionBucket.operator ==(Moongazing.OrionAudit.AuditDailyActionBucket? left, Moongazing.OrionAudit.AuditDailyActionBucket? right) -> bool
+static Moongazing.OrionAudit.AuditDailyBucket.operator !=(Moongazing.OrionAudit.AuditDailyBucket? left, Moongazing.OrionAudit.AuditDailyBucket? right) -> bool
+static Moongazing.OrionAudit.AuditDailyBucket.operator ==(Moongazing.OrionAudit.AuditDailyBucket? left, Moongazing.OrionAudit.AuditDailyBucket? right) -> bool
+static Moongazing.OrionAudit.AuditDailyUserBucket.operator !=(Moongazing.OrionAudit.AuditDailyUserBucket? left, Moongazing.OrionAudit.AuditDailyUserBucket? right) -> bool
+static Moongazing.OrionAudit.AuditDailyUserBucket.operator ==(Moongazing.OrionAudit.AuditDailyUserBucket? left, Moongazing.OrionAudit.AuditDailyUserBucket? right) -> bool
+static Moongazing.OrionAudit.AuditImportExtensions.CreateAuditImport(this Microsoft.EntityFrameworkCore.DbContext! context, System.Action<Moongazing.OrionAudit.Configuration.AuditImportOptions!>? configure = null) -> Moongazing.OrionAudit.Configuration.AuditImportBuilder!
+static Moongazing.OrionAudit.AuditKey.From(params object?[]! components) -> string!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.BetweenDates(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, System.DateTime fromUtc, System.DateTime toUtc) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.ByAction(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, Moongazing.OrionAudit.AuditAction action) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.ByCorrelation(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, string! correlationId) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.ByTenant(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, string! tenantId) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.ByUser(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, string! userId) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.ByUsers(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, System.Collections.Generic.IEnumerable<string!>! userIds) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.ByUserType(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, string! userType) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.DistinctUserIds(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query) -> System.Linq.IQueryable<string!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.Matching(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, System.Linq.Expressions.Expression<System.Func<Moongazing.OrionAudit.AuditLog!, bool>!>! predicate) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.Newest(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query) -> System.Linq.IOrderedQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.Oldest(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query) -> System.Linq.IOrderedQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.TopActorsByCount(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, int top) -> System.Linq.IQueryable<Moongazing.OrionAudit.UserActivitySummary!>!
+static Moongazing.OrionAudit.AuditLogQueryExtensions.WithinLast(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query, System.TimeSpan window) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext! context, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
+static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
+static Moongazing.OrionAudit.AuditMonthlyBucket.operator !=(Moongazing.OrionAudit.AuditMonthlyBucket? left, Moongazing.OrionAudit.AuditMonthlyBucket? right) -> bool
+static Moongazing.OrionAudit.AuditMonthlyBucket.operator ==(Moongazing.OrionAudit.AuditMonthlyBucket? left, Moongazing.OrionAudit.AuditMonthlyBucket? right) -> bool
+static Moongazing.OrionAudit.AuditQueryExtensions.AuditFor<T>(this Microsoft.EntityFrameworkCore.DbContext! context, bool crossTenant = false) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditQueryExtensions.AuditLog(this Microsoft.EntityFrameworkCore.DbContext! context, bool crossTenant = false) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>!
+static Moongazing.OrionAudit.AuditRollupExtensions.RollupByDay(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditDailyBucket!>!
+static Moongazing.OrionAudit.AuditRollupExtensions.RollupByDayAndAction(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditDailyActionBucket!>!
+static Moongazing.OrionAudit.AuditRollupExtensions.RollupByDayAndUser(this System.Collections.Generic.IEnumerable<Moongazing.OrionAudit.AuditLog!>! query, int topUsersPerDay) -> System.Collections.Generic.IEnumerable<Moongazing.OrionAudit.AuditDailyUserBucket!>!
+static Moongazing.OrionAudit.AuditRollupExtensions.RollupByMonth(this System.Linq.IQueryable<Moongazing.OrionAudit.AuditLog!>! query) -> System.Linq.IQueryable<Moongazing.OrionAudit.AuditMonthlyBucket!>!
+static Moongazing.OrionAudit.AuditScope.Current.get -> string?
+static Moongazing.OrionAudit.AuditScope.CurrentServices.get -> System.IServiceProvider?
+static Moongazing.OrionAudit.AuditScope.Push(string! correlationId) -> System.IDisposable!
+static Moongazing.OrionAudit.AuditScope.PushServices(System.IServiceProvider! services) -> System.IDisposable!
+static Moongazing.OrionAudit.AuditServiceCollectionExtensions.AddOrionAudit<TDbContext>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Moongazing.OrionAudit.OrionAuditOptions!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Moongazing.OrionAudit.AuditUser.operator !=(Moongazing.OrionAudit.AuditUser? left, Moongazing.OrionAudit.AuditUser? right) -> bool
+static Moongazing.OrionAudit.AuditUser.operator ==(Moongazing.OrionAudit.AuditUser? left, Moongazing.OrionAudit.AuditUser? right) -> bool
+static Moongazing.OrionAudit.Capture.DiffEngine.Apply(System.Text.Json.Nodes.JsonObject! target, string! patchJson) -> System.Text.Json.Nodes.JsonObject!
+static Moongazing.OrionAudit.Capture.DiffEngine.Compute(System.Text.Json.Nodes.JsonObject! before, System.Text.Json.Nodes.JsonObject! after) -> string!
+static Moongazing.OrionAudit.Capture.SnapshotBuilder.Build(System.Type! entityType, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! propertyValues, Moongazing.OrionAudit.Configuration.IAuditConfiguration! configuration) -> System.Text.Json.Nodes.JsonObject!
+static Moongazing.OrionAudit.Capture.SnapshotBuilder.Build(System.Type! entityType, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! propertyValues, Moongazing.OrionAudit.Configuration.IAuditConfiguration! configuration, System.Text.Json.Serialization.JsonSerializerContext! jsonContext) -> System.Text.Json.Nodes.JsonObject!
+static Moongazing.OrionAudit.Configuration.AuditableTypeDiscovery.Discover(System.Collections.Generic.IEnumerable<System.Reflection.Assembly!>! assemblies) -> System.Collections.Generic.IReadOnlyList<System.Type!>!
+static Moongazing.OrionAudit.Configuration.AuditColumnContext.operator !=(Moongazing.OrionAudit.Configuration.AuditColumnContext? left, Moongazing.OrionAudit.Configuration.AuditColumnContext? right) -> bool
+static Moongazing.OrionAudit.Configuration.AuditColumnContext.operator ==(Moongazing.OrionAudit.Configuration.AuditColumnContext? left, Moongazing.OrionAudit.Configuration.AuditColumnContext? right) -> bool
+static Moongazing.OrionAudit.Configuration.CustomColumn.IsSupportedColumnType(System.Type! t) -> bool
+static Moongazing.OrionAudit.Configuration.CustomColumn.operator !=(Moongazing.OrionAudit.Configuration.CustomColumn? left, Moongazing.OrionAudit.Configuration.CustomColumn? right) -> bool
+static Moongazing.OrionAudit.Configuration.CustomColumn.operator ==(Moongazing.OrionAudit.Configuration.CustomColumn? left, Moongazing.OrionAudit.Configuration.CustomColumn? right) -> bool
+static Moongazing.OrionAudit.Configuration.ImportResult.operator !=(Moongazing.OrionAudit.Configuration.ImportResult? left, Moongazing.OrionAudit.Configuration.ImportResult? right) -> bool
+static Moongazing.OrionAudit.Configuration.ImportResult.operator ==(Moongazing.OrionAudit.Configuration.ImportResult? left, Moongazing.OrionAudit.Configuration.ImportResult? right) -> bool
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.None.get -> Moongazing.OrionAudit.Configuration.RetentionPolicy!
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.operator !=(Moongazing.OrionAudit.Configuration.RetentionPolicy? left, Moongazing.OrionAudit.Configuration.RetentionPolicy? right) -> bool
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.operator ==(Moongazing.OrionAudit.Configuration.RetentionPolicy? left, Moongazing.OrionAudit.Configuration.RetentionPolicy? right) -> bool
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.PerEntityType(System.Collections.Generic.IReadOnlyDictionary<string!, Moongazing.OrionAudit.Configuration.RetentionPolicy!>! byEntityType, Moongazing.OrionAudit.Configuration.RetentionPolicy! fallback) -> Moongazing.OrionAudit.Configuration.RetentionPolicy!
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.PerTenant(System.Collections.Generic.IReadOnlyDictionary<string!, Moongazing.OrionAudit.Configuration.RetentionPolicy!>! byTenantId, Moongazing.OrionAudit.Configuration.RetentionPolicy! fallback) -> Moongazing.OrionAudit.Configuration.RetentionPolicy!
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.RetainCount(int rows) -> Moongazing.OrionAudit.Configuration.RetentionPolicy!
+static Moongazing.OrionAudit.Configuration.RetentionPolicy.RetainFor(System.TimeSpan age) -> Moongazing.OrionAudit.Configuration.RetentionPolicy!
+static Moongazing.OrionAudit.Configuration.SnapshotPolicy.Every(int updates) -> Moongazing.OrionAudit.Configuration.SnapshotPolicy!
+static Moongazing.OrionAudit.Configuration.SnapshotPolicy.EveryDuration(System.TimeSpan elapsed) -> Moongazing.OrionAudit.Configuration.SnapshotPolicy!
+static Moongazing.OrionAudit.Configuration.SnapshotPolicy.Never.get -> Moongazing.OrionAudit.Configuration.SnapshotPolicy!
+static Moongazing.OrionAudit.Configuration.SnapshotPolicy.operator !=(Moongazing.OrionAudit.Configuration.SnapshotPolicy? left, Moongazing.OrionAudit.Configuration.SnapshotPolicy? right) -> bool
+static Moongazing.OrionAudit.Configuration.SnapshotPolicy.operator ==(Moongazing.OrionAudit.Configuration.SnapshotPolicy? left, Moongazing.OrionAudit.Configuration.SnapshotPolicy? right) -> bool
+static Moongazing.OrionAudit.DbContextOptionsBuilderExtensions.UseOrionAudit(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! builder, System.IServiceProvider! serviceProvider) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder!
+static Moongazing.OrionAudit.DbContextOptionsBuilderExtensions.UseOrionAudit<TContext>(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TContext!>! builder, System.IServiceProvider! serviceProvider) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TContext!>!
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.All(string? tenantId = null) -> Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest!
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.ForEntity(string! entityType, string! entityId, string? tenantId = null) -> Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest!
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.operator !=(Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest? left, Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest? right) -> bool
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest.operator ==(Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest? left, Moongazing.OrionAudit.Integrity.AuditChainVerificationRequest? right) -> bool
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.Broken(long verifiedRowCount, Moongazing.OrionAudit.AuditLog! brokenRow, Moongazing.OrionAudit.Integrity.AuditChainBreakReason reason, string! detail) -> Moongazing.OrionAudit.Integrity.AuditChainVerificationResult!
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.BrokenAt(long verifiedRowCount, string! entityType, string! entityId, Moongazing.OrionAudit.Integrity.AuditChainBreakReason reason, string! detail) -> Moongazing.OrionAudit.Integrity.AuditChainVerificationResult!
+static Moongazing.OrionAudit.Integrity.AuditChainVerificationResult.Valid(long verifiedRowCount) -> Moongazing.OrionAudit.Integrity.AuditChainVerificationResult!
+static Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.operator !=(Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext left, Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext right) -> bool
+static Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.operator ==(Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext left, Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext right) -> bool
+static Moongazing.OrionAudit.Integrity.AuditChainVerifier.VerifyStream(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! orderedRows, Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext context, long alreadyVerified = 0) -> Moongazing.OrionAudit.Integrity.AuditChainVerificationResult!
+static Moongazing.OrionAudit.Integrity.AuditEntryHasher.ComputeEntryHash(Moongazing.OrionAudit.AuditLog! entry, string? previousHash, System.ReadOnlySpan<byte> key) -> string!
+static Moongazing.OrionAudit.Integrity.AuditEntryHasher.ComputeEntryHash(Moongazing.OrionAudit.AuditLog! entry, string? previousHash, System.ReadOnlySpan<byte> key, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>! customColumns) -> string!
+static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.operator !=(Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey left, Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey right) -> bool
+static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.operator ==(Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey left, Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey right) -> bool
+static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.DistinctKeys(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! newRows, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope) -> System.Collections.Generic.IReadOnlyCollection<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey>!
+static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.KeyFor(Moongazing.OrionAudit.AuditLog! entry, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope) -> Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey
+static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.Stamp(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! newRows, System.Collections.Generic.IReadOnlyDictionary<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey, string?>! existingHeadHashes, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope, int keyId, System.ReadOnlyMemory<byte> key, System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! customColumnsFor, System.Collections.Generic.IReadOnlyDictionary<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey, long>? existingRowCounts = null) -> void
+static Moongazing.OrionAudit.Integrity.AuditHashChainStamper.SummarizeBatch(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! newRows, Moongazing.OrionAudit.Integrity.AuditHashChainScope scope) -> System.Collections.Generic.IReadOnlyDictionary<Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey, (string! EntryHash, int Added)>!
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordCaptureEntrySize(int bytes) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordCompactionError(string! exceptionType) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchBatchSize(int count) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchClaimDuration(double milliseconds) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchError(string! exceptionType) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchFlushDuration(double milliseconds) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchIdlePoll() -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordDispatchLagViolation() -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordEventsPerPublish(int count) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordPublishDuration(double milliseconds) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordReconstructEventsReplayed(int rows) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordRetentionError(string! exceptionType) -> void
+static Moongazing.OrionAudit.OrionAuditTelemetry.RecordRetriesBeforeSuccess(int retries) -> void
+static Moongazing.OrionAudit.Publishing.AuditLogEvent.operator !=(Moongazing.OrionAudit.Publishing.AuditLogEvent? left, Moongazing.OrionAudit.Publishing.AuditLogEvent? right) -> bool
+static Moongazing.OrionAudit.Publishing.AuditLogEvent.operator ==(Moongazing.OrionAudit.Publishing.AuditLogEvent? left, Moongazing.OrionAudit.Publishing.AuditLogEvent? right) -> bool
+static Moongazing.OrionAudit.Read.AuditViewRenderer.Render(Moongazing.OrionAudit.AuditLog! row) -> Moongazing.OrionAudit.Read.AuditEntryView!
+static Moongazing.OrionAudit.Read.AuditViewRenderer.Render(Moongazing.OrionAudit.AuditLog! row, Moongazing.OrionAudit.Configuration.IAuditConfiguration! configuration) -> Moongazing.OrionAudit.Read.AuditEntryView!
+static Moongazing.OrionAudit.Read.AuditViewRenderer.Render(Moongazing.OrionAudit.AuditLog! row, Moongazing.OrionAudit.Configuration.IAuditConfiguration! configuration, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! customColumns) -> Moongazing.OrionAudit.Read.AuditEntryView!
+static Moongazing.OrionAudit.Read.AuditViewRenderer.Render(Moongazing.OrionAudit.AuditLog! row, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! customColumns) -> Moongazing.OrionAudit.Read.AuditEntryView!
+static Moongazing.OrionAudit.Read.AuditViewRenderer.RenderMany(System.Collections.Generic.IEnumerable<Moongazing.OrionAudit.AuditLog!>! rows) -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Read.AuditEntryView!>!
+static Moongazing.OrionAudit.Store.AuditAggregationQuery.operator !=(Moongazing.OrionAudit.Store.AuditAggregationQuery? left, Moongazing.OrionAudit.Store.AuditAggregationQuery? right) -> bool
+static Moongazing.OrionAudit.Store.AuditAggregationQuery.operator ==(Moongazing.OrionAudit.Store.AuditAggregationQuery? left, Moongazing.OrionAudit.Store.AuditAggregationQuery? right) -> bool
+static Moongazing.OrionAudit.Store.AuditCompactionRequest.operator !=(Moongazing.OrionAudit.Store.AuditCompactionRequest? left, Moongazing.OrionAudit.Store.AuditCompactionRequest? right) -> bool
+static Moongazing.OrionAudit.Store.AuditCompactionRequest.operator ==(Moongazing.OrionAudit.Store.AuditCompactionRequest? left, Moongazing.OrionAudit.Store.AuditCompactionRequest? right) -> bool
+static Moongazing.OrionAudit.Store.AuditCompactionResult.NoOp(int rowCount) -> Moongazing.OrionAudit.Store.AuditCompactionResult!
+static Moongazing.OrionAudit.Store.AuditHistoryCompactor.Plan(System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>! history, int retainTail) -> Moongazing.OrionAudit.Store.AuditHistoryCompactor.CompactionPlan!
+static Moongazing.OrionAudit.Store.AuditHistoryPage.Empty(int skip, int take) -> Moongazing.OrionAudit.Store.AuditHistoryPage!
+static Moongazing.OrionAudit.Store.AuditHistoryQuery.operator !=(Moongazing.OrionAudit.Store.AuditHistoryQuery? left, Moongazing.OrionAudit.Store.AuditHistoryQuery? right) -> bool
+static Moongazing.OrionAudit.Store.AuditHistoryQuery.operator ==(Moongazing.OrionAudit.Store.AuditHistoryQuery? left, Moongazing.OrionAudit.Store.AuditHistoryQuery? right) -> bool
+static Moongazing.OrionAudit.Store.AuditNdjsonWriter.WriteRow(System.Text.Json.Utf8JsonWriter! writer, Moongazing.OrionAudit.AuditLog! row) -> void
+static Moongazing.OrionAudit.UserActivitySummary.operator !=(Moongazing.OrionAudit.UserActivitySummary? left, Moongazing.OrionAudit.UserActivitySummary? right) -> bool
+static Moongazing.OrionAudit.UserActivitySummary.operator ==(Moongazing.OrionAudit.UserActivitySummary? left, Moongazing.OrionAudit.UserActivitySummary? right) -> bool
+static readonly Moongazing.OrionAudit.Publishing.NullAuditEventPublisher.Instance -> Moongazing.OrionAudit.Publishing.NullAuditEventPublisher!
+virtual Moongazing.OrionAudit.Configuration.RetentionPolicy.EqualityContract.get -> System.Type!
+virtual Moongazing.OrionAudit.Configuration.RetentionPolicy.Equals(Moongazing.OrionAudit.Configuration.RetentionPolicy? other) -> bool
+virtual Moongazing.OrionAudit.Configuration.RetentionPolicy.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Moongazing.OrionAudit.Configuration.SnapshotPolicy.EqualityContract.get -> System.Type!
+virtual Moongazing.OrionAudit.Configuration.SnapshotPolicy.Equals(Moongazing.OrionAudit.Configuration.SnapshotPolicy? other) -> bool
+virtual Moongazing.OrionAudit.Configuration.SnapshotPolicy.PrintMembers(System.Text.StringBuilder! builder) -> bool
+virtual Moongazing.OrionAudit.Store.AuditHistoryStoreBase.AggregateAsync(Moongazing.OrionAudit.Store.AuditAggregationQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Store.AuditAggregateBucket!>!>!
+virtual Moongazing.OrionAudit.Store.AuditHistoryStoreBase.CompactAsync(Moongazing.OrionAudit.Store.AuditCompactionRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditCompactionResult!>!
+virtual Moongazing.OrionAudit.Store.AuditHistoryStoreBase.QueryAsync(Moongazing.OrionAudit.Store.AuditHistoryQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditHistoryPage!>!
+~override Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Equals(object obj) -> bool
+~override Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.ToString() -> string
+~override Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.Equals(object obj) -> bool
+~override Moongazing.OrionAudit.Integrity.AuditHashChainStamper.ChainKey.ToString() -> string

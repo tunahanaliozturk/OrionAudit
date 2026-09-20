@@ -1,0 +1,8 @@
+#nullable enable
+Moongazing.OrionAudit.Viewer.OrionAuditViewerEndpointExtensions
+Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions
+Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions.AllowAnonymous() -> Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions!
+Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions.OrionAuditViewerOptions() -> void
+Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions.RequireAuthorization(string! policyName) -> Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions!
+Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions.RequireAuthorization(System.Action<Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder!>! configurePolicy) -> Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions!
+static Moongazing.OrionAudit.Viewer.OrionAuditViewerEndpointExtensions.MapOrionAuditViewer<TDbContext>(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pathPrefix, System.Action<Moongazing.OrionAudit.Viewer.OrionAuditViewerOptions!>? configure = null) -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
