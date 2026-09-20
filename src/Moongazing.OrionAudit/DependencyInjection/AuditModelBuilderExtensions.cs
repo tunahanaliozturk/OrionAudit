@@ -16,17 +16,24 @@ public static class AuditModelBuilderExtensions
     /// their feature is not configured — they simply stay empty).
     /// </summary>
     /// <param name="modelBuilder">The EF Core model builder.</param>
+    /// <param name="context">
+    /// The owning <see cref="DbContext"/>. Optional; pass <c>this</c> from
+    /// <c>OnModelCreating</c> when using <c>AddColumn</c> and the <see cref="CustomColumn"/>s
+    /// registered via <c>AddOrionAudit</c> are picked up from DI automatically. That keeps
+    /// <c>OnModelCreating</c> bodies short and avoids the trap of registering a column on
+    /// <c>OrionAuditOptions</c> but forgetting to map it on the model.
+    /// </param>
     /// <param name="auditLogTableName">Override the default <c>OrionAudit_Log</c> table name.</param>
     /// <param name="snapshotCursorTableName">Override the default <c>OrionAudit_Snapshot_Cursors</c> table name.</param>
     /// <param name="columnHints">Provider-specific column-type hints for <c>Diff</c> and <c>Snapshot</c> (default: <see cref="OrionAuditColumnHints.Auto"/>).</param>
     /// <param name="captureQueueTableName">Override the default <c>OrionAudit_Capture_Queue</c> table name.</param>
     /// <param name="customColumns">
-    /// Custom columns to materialise as <see cref="AuditLog"/> shadow properties. When using
-    /// <c>AddOrionAudit</c>, prefer the <see cref="ApplyOrionAuditConfigurations(ModelBuilder, DbContext, string?, string?, OrionAuditColumnHints, string?)"/>
-    /// DbContext-aware overload which auto-picks-up registered columns from DI.
+    /// Custom columns to materialise as <see cref="AuditLog"/> shadow properties. Takes
+    /// precedence over anything discovered through <paramref name="context"/>.
     /// </param>
     public static ModelBuilder ApplyOrionAuditConfigurations(
         this ModelBuilder modelBuilder,
+        DbContext? context = null,
         string? auditLogTableName = null,
         string? snapshotCursorTableName = null,
         OrionAuditColumnHints columnHints = OrionAuditColumnHints.Auto,
@@ -35,10 +42,14 @@ public static class AuditModelBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
+        customColumns ??= context is null
+            ? Array.Empty<CustomColumn>()
+            : RegisteredCustomColumns(context);
+
         var auditLog = new AuditLogEntityTypeConfiguration(
             auditLogTableName ?? AuditLogEntityTypeConfiguration.DefaultTableName,
             columnHints,
-            customColumns ?? Array.Empty<CustomColumn>());
+            customColumns);
         modelBuilder.ApplyConfiguration(auditLog);
 
         var cursor = snapshotCursorTableName is null
@@ -58,35 +69,16 @@ public static class AuditModelBuilderExtensions
         return modelBuilder;
     }
 
-    /// <summary>
-    /// DbContext-aware overload that picks up <see cref="CustomColumn"/>s registered via
-    /// <c>AddOrionAudit</c>. Prefer this over the parameter-list overload when using
-    /// <c>AddColumn</c> — it keeps <c>OnModelCreating</c> bodies short and avoids the trap of
-    /// registering a column on <c>OrionAuditOptions</c> but forgetting to map it on the model.
-    /// </summary>
-    public static ModelBuilder ApplyOrionAuditConfigurations(
-        this ModelBuilder modelBuilder,
-        DbContext context,
-        string? auditLogTableName = null,
-        string? snapshotCursorTableName = null,
-        OrionAuditColumnHints columnHints = OrionAuditColumnHints.Auto,
-        string? captureQueueTableName = null)
+    // EF's context.GetService<T>() only sees the EF internal service provider.
+    // IAuditConfiguration is registered on the application service provider — reach it
+    // through the CoreOptionsExtension's ApplicationServiceProvider, which is plumbed in
+    // by the (sp, o) AddDbContext overload that wires UseOrionAudit.
+    private static IReadOnlyList<CustomColumn> RegisteredCustomColumns(DbContext context)
     {
-        ArgumentNullException.ThrowIfNull(modelBuilder);
-        ArgumentNullException.ThrowIfNull(context);
-
-        // EF's context.GetService<T>() only sees the EF internal service provider.
-        // IAuditConfiguration is registered on the application service provider — reach it
-        // through the CoreOptionsExtension's ApplicationServiceProvider, which is plumbed in
-        // by the (sp, o) AddDbContext overload that wires UseOrionAudit.
         var appServices = context.GetService<IDbContextOptions>()
             .FindExtension<CoreOptionsExtension>()?
             .ApplicationServiceProvider;
-        var customs = appServices?.GetService<IAuditConfiguration>()?.CustomColumns
+        return appServices?.GetService<IAuditConfiguration>()?.CustomColumns
             ?? Array.Empty<CustomColumn>();
-
-        return ApplyOrionAuditConfigurations(
-            modelBuilder, auditLogTableName, snapshotCursorTableName, columnHints,
-            captureQueueTableName, customs);
     }
 }

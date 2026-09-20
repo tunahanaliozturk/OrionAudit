@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Action.set -> void
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.AfterJson.set -> void
 *REMOVED*Moongazing.OrionAudit.AuditCaptureQueueEntry.Attempts.set -> void
@@ -45,3 +45,19 @@ Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor.RowCount.get -> lon
 Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Anchor.get -> Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor?
 Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.Deconstruct(out System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, out System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, out Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor? Anchor) -> void
 Moongazing.OrionAudit.Integrity.AuditChainVerifier.StreamVerificationContext.StreamVerificationContext(System.Func<int, System.ReadOnlyMemory<byte>?>! KeyResolver, System.Func<Moongazing.OrionAudit.AuditLog!, System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string!, string?>>!>! CustomColumnsResolver, Moongazing.OrionAudit.Integrity.AuditChainVerificationAnchor? Anchor) -> void
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.ClaimAuditUserResolverOptions() -> void
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.DefaultUserType.get -> string!
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.DefaultUserType.set -> void
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.DisplayNameClaimTypes.get -> System.Collections.Generic.IList<string!>!
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.IdClaimTypes.get -> System.Collections.Generic.IList<string!>!
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.RequireAuthenticated.get -> bool
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.RequireAuthenticated.set -> void
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.TypeClaimType.get -> string?
+*REMOVED*Moongazing.OrionAudit.ClaimAuditUserResolverOptions.TypeClaimType.set -> void
+*REMOVED*Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>? configure = null) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
+*REMOVED*static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext! context, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
+*REMOVED*static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>() -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
+Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder.Audit<T>(System.Action<Moongazing.OrionAudit.Configuration.AuditTypeBuilder<T!>!>! configure) -> Moongazing.OrionAudit.Configuration.AuditConfigurationBuilder!
+static Moongazing.OrionAudit.AuditModelBuilderExtensions.ApplyOrionAuditConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext? context = null, string? auditLogTableName = null, string? snapshotCursorTableName = null, Moongazing.OrionAudit.OrionAuditColumnHints columnHints = Moongazing.OrionAudit.OrionAuditColumnHints.Auto, string? captureQueueTableName = null, System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Configuration.CustomColumn!>? customColumns = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!

@@ -21,47 +21,50 @@ public sealed class AuditConfigurationBuilder
     internal void RegisterCustomColumns(IReadOnlyList<CustomColumn> columns)
         => customColumns = columns ?? Array.Empty<CustomColumn>();
 
-    /// <summary>Registers a type for audit with optional field-level overrides.</summary>
-    public AuditConfigurationBuilder Audit<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
+    /// <summary>Registers a type for audit using only attribute-based rules.</summary>
+    public AuditConfigurationBuilder Audit<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>() where T : class
+        => Audit(typeof(T));
+
+    /// <summary>Registers a type for audit with field-level overrides.</summary>
+    public AuditConfigurationBuilder Audit<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(Action<AuditTypeBuilder<T>> configure) where T : class
     {
+        ArgumentNullException.ThrowIfNull(configure);
+
         var entityType = typeof(T);
         var rules = GetOrCreateRules(entityType);
         ApplyAttributeRules(entityType, rules);
         ApplySoftDeleteAttribute(entityType);
         ApplyBaseTypeAttribute(entityType);
 
-        if (configure is not null)
+        var typeBuilder = new AuditTypeBuilder<T>();
+        configure(typeBuilder);
+        foreach (var (propName, rule) in typeBuilder.Rules)
         {
-            var typeBuilder = new AuditTypeBuilder<T>();
-            configure(typeBuilder);
-            foreach (var (propName, rule) in typeBuilder.Rules)
+            rules[propName] = rule;
+        }
+        if (typeBuilder.SoftDeleteProperty is not null)
+        {
+            softDeleteByType[entityType] = typeBuilder.SoftDeleteProperty;
+        }
+        if (typeBuilder.BaseType is not null)
+        {
+            baseTypeByType[entityType] = typeBuilder.BaseType;
+        }
+        if (typeBuilder.FieldLabels.Count > 0)
+        {
+            if (!fieldLabelsByType.TryGetValue(entityType, out var existing))
             {
-                rules[propName] = rule;
+                existing = new Dictionary<string, string>(StringComparer.Ordinal);
+                fieldLabelsByType[entityType] = existing;
             }
-            if (typeBuilder.SoftDeleteProperty is not null)
+            foreach (var (prop, label) in typeBuilder.FieldLabels)
             {
-                softDeleteByType[entityType] = typeBuilder.SoftDeleteProperty;
+                existing[prop] = label;
             }
-            if (typeBuilder.BaseType is not null)
-            {
-                baseTypeByType[entityType] = typeBuilder.BaseType;
-            }
-            if (typeBuilder.FieldLabels.Count > 0)
-            {
-                if (!fieldLabelsByType.TryGetValue(entityType, out var existing))
-                {
-                    existing = new Dictionary<string, string>(StringComparer.Ordinal);
-                    fieldLabelsByType[entityType] = existing;
-                }
-                foreach (var (prop, label) in typeBuilder.FieldLabels)
-                {
-                    existing[prop] = label;
-                }
-            }
-            if (typeBuilder.EntityLabel is not null)
-            {
-                entityLabelsByType[entityType] = typeBuilder.EntityLabel;
-            }
+        }
+        if (typeBuilder.EntityLabel is not null)
+        {
+            entityLabelsByType[entityType] = typeBuilder.EntityLabel;
         }
 
         return this;

@@ -63,7 +63,7 @@ public sealed class PolymorphicCaptureTests
     {
         // Memo has [Auditable(typeof(Document))] at the class level.
         var config = new AuditConfigurationBuilder()
-            .Audit(typeof(Memo))
+            .Audit<Memo>()
             .Build();
 
         var typeConfig = config.GetConfig(typeof(Memo));
