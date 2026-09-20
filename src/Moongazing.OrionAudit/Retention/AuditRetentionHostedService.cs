@@ -12,6 +12,17 @@ namespace Moongazing.OrionAudit.Retention;
 /// <see cref="RetentionPolicy"/>. Bounded by <see cref="RetentionSweepOptions.MaxRowsPerSweep"/>
 /// per cycle so each transaction stays short; the next cycle picks up the rest.
 /// </summary>
+/// <remarks>
+/// Every selection here orders by <c>(OccurredOnUtc, Id)</c> - the same canonical order the hash
+/// chain is stamped and verified in - rather than by timestamp alone. Rows sharing a timestamp are
+/// routine, not exotic: one timestamp is computed per <c>SaveChanges</c> and stamped on every row of
+/// that save, and column precision truncates further (MySQL <c>DATETIME(6)</c>, a consumer-chosen
+/// <c>datetime2(0)</c>). Under a bare timestamp ordering the provider is free to break those ties any
+/// way it likes, so a count- or age-bounded batch could remove an INTERIOR row of a stream instead of
+/// a contiguous head. Retention is only ever allowed to prune a chain's head - re-anchoring at the
+/// oldest survivor cannot repair a hole in the middle - so the tie-break is load-bearing, not
+/// cosmetic. "Keep the latest N" walks the same order backwards, hence the descending tie-break there.
+/// </remarks>
 public sealed partial class AuditRetentionHostedService<TDbContext> : BackgroundService
     where TDbContext : DbContext
 {
@@ -240,9 +251,9 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         }
         if (archiver is DeleteAuditArchiver)
         {
-            return await query.OrderBy(a => a.OccurredOnUtc).Take(batch).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+            return await query.OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id).Take(batch).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         }
-        var rows = await query.AsNoTracking().OrderBy(a => a.OccurredOnUtc).Take(batch).ToListAsync(ct).ConfigureAwait(false);
+        var rows = await query.AsNoTracking().OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id).Take(batch).ToListAsync(ct).ConfigureAwait(false);
         return await archiver.ArchiveAsync(ctx, rows, policy, ct).ConfigureAwait(false);
     }
 
@@ -286,7 +297,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                 // ship them to the archive store before they leave the live table.
                 var archivableRows = await trim
                     .AsNoTracking()
-                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id)
                     .Skip(keep)
                     .Take(remainingBudget - totalDeleted)
                     .ToListAsync(ct)
@@ -299,7 +310,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                 continue;
             }
             var idsToDelete = await trim
-                .OrderByDescending(a => a.OccurredOnUtc)
+                .OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id)
                 .Skip(keep)
                 .Take(remainingBudget - totalDeleted)
                 .Select(a => a.Id)
@@ -399,7 +410,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                 // counter and silently deleting rows during a dry-run sweep.
                 var archivableRows = await trim
                     .AsNoTracking()
-                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id)
                     .Skip(keep)
                     .Take(remainingBudget - totalDeleted)
                     .ToListAsync(ct)
@@ -412,7 +423,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                 continue;
             }
             var idsToDelete = await trim
-                .OrderByDescending(a => a.OccurredOnUtc)
+                .OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id)
                 .Skip(keep)
                 .Take(remainingBudget - totalDeleted)
                 .Select(a => a.Id)
@@ -443,7 +454,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         {
             return await ctx.Set<AuditLog>()
                 .Where(a => a.TenantId == tenantId && a.OccurredOnUtc < cutoff)
-                .OrderBy(a => a.OccurredOnUtc)
+                .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
                 .Take(batch)
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
@@ -451,7 +462,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         var rows = await ctx.Set<AuditLog>()
             .AsNoTracking()
             .Where(a => a.TenantId == tenantId && a.OccurredOnUtc < cutoff)
-            .OrderBy(a => a.OccurredOnUtc)
+            .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
             .Take(batch)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -469,7 +480,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         {
             return await ctx.Set<AuditLog>()
                 .Where(a => a.OccurredOnUtc < cutoff)
-                .OrderBy(a => a.OccurredOnUtc)
+                .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
                 .Take(options.MaxRowsPerSweep)
                 .ExecuteDeleteAsync(ct)
                 .ConfigureAwait(false);
@@ -478,7 +489,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
         var rows = await ctx.Set<AuditLog>()
             .AsNoTracking()
             .Where(a => a.OccurredOnUtc < cutoff)
-            .OrderBy(a => a.OccurredOnUtc)
+            .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
             .Take(options.MaxRowsPerSweep)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -517,7 +528,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                     .Where(a => a.EntityType == group.EntityType
                                 && a.EntityId == group.EntityId
                                 && a.TenantId == group.TenantId)
-                    .OrderByDescending(a => a.OccurredOnUtc)
+                    .OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id)
                     .Skip(keep)
                     .Take(options.MaxRowsPerSweep - totalDeleted)
                     .ToListAsync(ct)
@@ -534,7 +545,7 @@ public sealed partial class AuditRetentionHostedService<TDbContext> : Background
                 .Where(a => a.EntityType == group.EntityType
                             && a.EntityId == group.EntityId
                             && a.TenantId == group.TenantId)
-                .OrderByDescending(a => a.OccurredOnUtc)
+                .OrderByDescending(a => a.OccurredOnUtc).ThenByDescending(a => a.Id)
                 .Skip(keep)
                 .Take(options.MaxRowsPerSweep - totalDeleted)
                 .Select(a => a.Id)

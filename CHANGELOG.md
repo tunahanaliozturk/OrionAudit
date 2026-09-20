@@ -142,6 +142,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now writes only the columns it owns, so the two writers never contend and no lock or
   isolation-level assumption is needed.
 
+  The sweep also selects rows in the chain's canonical `(OccurredOnUtc, Id)` order rather than by
+  timestamp alone. Rows of one stream sharing a timestamp are routine - one timestamp is computed per
+  `SaveChanges` and stamped on every row of that save, and column precision truncates further - and
+  under a bare timestamp ordering the provider is free to break those ties any way it likes, so a
+  count- or age-bounded batch could remove an interior row instead of a contiguous head. Re-anchoring
+  at the oldest survivor repairs a pruned head; it cannot close a hole in the middle.
+
   **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
   using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
   its `ExecuteDelete` fast path and materialises each batch instead - the chain repair has to know
