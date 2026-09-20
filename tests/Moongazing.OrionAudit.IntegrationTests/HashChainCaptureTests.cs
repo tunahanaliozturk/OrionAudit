@@ -276,16 +276,18 @@ public class HashChainCaptureTests
     [Fact]
     public async Task ConcurrentSameStreamAppends_DoNotCorruptChain()
     {
-        // Two independent contexts on a SHARED-cache SQLite database append to the SAME entity stream
-        // concurrently. The per-stream anchor (plus SQLite's write serialization) must prevent both
-        // from stamping the same PreviousHash; under contention the loser sees SQLITE_BUSY, retries,
-        // and picks up the committed head. The end state must be a valid, gap-free chain.
-        var dbName = "concurrent_" + Guid.NewGuid().ToString("N");
-        var connectionString = $"DataSource=file:{dbName}?mode=memory&cache=shared";
-
-        // A keep-alive connection holds the shared in-memory DB alive for the whole test.
-        await using var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
+        // Two independent contexts append to the SAME entity stream concurrently. The per-stream
+        // anchor - read inside a transaction that already holds SQLite's write lock - must prevent
+        // both from stamping the same PreviousHash: the loser waits on the busy timeout and then
+        // chains onto the head the winner committed. The end state must be a valid, gap-free chain,
+        // reached by one SaveChangesAsync each.
+        //
+        // A file database, not the shared-cache in-memory form this test used to use: shared cache
+        // serialises with table locks reporting SQLITE_LOCKED, which SQLite's busy handler does not
+        // wait on, so writers there can only collide and the test needed a retry loop to survive its
+        // own fixture. See TempSqliteDatabase.
+        using var db = new TempSqliteDatabase();
+        var connectionString = db.ConnectionString;
 
         var services = new ServiceCollection();
         services.AddOrionAudit<TestContext>(o =>
@@ -294,7 +296,7 @@ public class HashChainCaptureTests
             o.UseHashChain(h => h.UseKey(1, KeyId1Base64));
         });
         // Each resolved context gets its OWN connection (not a shared singleton), so the two save
-        // tasks run on separate connections against the same shared-cache database - real concurrency.
+        // tasks run on separate connections against the same database - real concurrency.
         services.AddDbContext<TestContext>((sp, o) =>
             o.UseSqlite(connectionString).UseOrionAudit(sp), ServiceLifetime.Scoped);
         await using var provider = services.BuildServiceProvider();
@@ -310,28 +312,22 @@ public class HashChainCaptureTests
             accountId = account.Id;
         }
 
-        // Two concurrent updaters, each its own scope/context/connection, each a retry loop on BUSY.
+        // Two concurrent updaters, each its own scope/context/connection. One save each, no retry:
+        // contention has to resolve inside SaveChangesAsync, which is all a consumer calls.
         async Task UpdateAsync(int newBalance)
         {
-            for (var attempt = 0; ; attempt++)
-            {
-                try
-                {
-                    await using var scope = provider.CreateAsyncScope();
-                    var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
-                    var account = await ctx.Accounts.FirstAsync(a => a.Id == accountId);
-                    account.Balance = newBalance;
-                    await ctx.SaveChangesAsync();
-                    return;
-                }
-                catch (Exception ex) when (IsTransient(ex) && attempt < 50)
-                {
-                    await Task.Delay(10);
-                }
-            }
+            await using var scope = provider.CreateAsyncScope();
+            var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+            var account = await ctx.Accounts.FirstAsync(a => a.Id == accountId);
+            account.Balance = newBalance;
+            await ctx.SaveChangesAsync();
         }
 
-        await Task.WhenAll(UpdateAsync(100), UpdateAsync(200));
+        // Task.Run, not a bare call: SQLite's async methods complete synchronously, so invoking
+        // UpdateAsync directly ran the whole first save on this thread before the second was even
+        // started - the two updaters never actually overlapped, and this test was not testing
+        // concurrency at all.
+        await Task.WhenAll(Task.Run(() => UpdateAsync(100)), Task.Run(() => UpdateAsync(200)));
 
         await using (var scope = provider.CreateAsyncScope())
         {
@@ -361,13 +357,6 @@ public class HashChainCaptureTests
             Assert.Equal(3, result.VerifiedRowCount);
         }
     }
-
-    private static bool IsTransient(Exception ex)
-        => ex is SqliteException sqlite
-            && (sqlite.SqliteErrorCode == 5 /* SQLITE_BUSY */ || sqlite.SqliteErrorCode == 6 /* SQLITE_LOCKED */)
-            || ex.InnerException is SqliteException inner
-            && (inner.SqliteErrorCode == 5 || inner.SqliteErrorCode == 6)
-            || ex is DbUpdateException; // a concurrency-induced update failure is retryable here
 
     [Fact]
     public async Task AsyncCapture_DispatchedRows_AreChainedAndVerify()

@@ -111,6 +111,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   degradation `CopyToTableAuditArchiver` and `ChainPruneArchiver` already use. Consumers who never
   enable hash-chaining are untouched: no chain, no transaction, no schema change.
 
+  On SQLite a contending same-stream save **waits** rather than failing: EF's `BeginTransaction` maps
+  to Microsoft.Data.Sqlite's Serializable isolation, which emits `BEGIN IMMEDIATE`, so the second
+  writer blocks at its own `BEGIN` on the connection's busy timeout (30 seconds by default) and then
+  reads the head the first one committed. One `SaveChangesAsync` per writer is enough; no retry loop
+  is needed. The exception is a *shared-cache in-memory* database (`mode=memory&cache=shared`), which
+  serialises with table locks reporting `SQLITE_LOCKED` - something SQLite's busy handler does not
+  wait on - so concurrent writers there fail rather than queue. That is a test-fixture shape, not a
+  deployment one, and OrionAudit's own concurrency tests now use a file database accordingly.
+
   **If your `DbContext` uses a retrying execution strategy (`EnableRetryOnFailure()`), you must own
   the transaction yourself.** EF Core allows a transaction inside a retriable unit only from the code
   that owns the `SaveChanges` call, and an interceptor is not that code - so OrionAudit cannot open

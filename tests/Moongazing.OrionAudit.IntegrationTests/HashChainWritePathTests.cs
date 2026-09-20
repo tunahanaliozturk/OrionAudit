@@ -103,19 +103,25 @@ public class HashChainWritePathTests
     /// Defect 1. Two concurrent same-stream saves must not both chain onto the same head. The first
     /// capture to stamp is parked (by a capture observer) between reading the stream head and its
     /// SaveChanges; the second save runs in that window. With the anchor lock/read genuinely inside
-    /// the write transaction the second save cannot commit a row anchored on the head the parked one
-    /// already consumed - it contends, retries, and picks up the committed head. Without it both
-    /// rows commit carrying the SAME PreviousHash and the chain no longer verifies.
+    /// the write transaction, the second save <b>waits</b> on the first and then chains onto the head
+    /// it committed. Without it both rows commit carrying the SAME PreviousHash and the chain no
+    /// longer verifies.
     /// </summary>
+    /// <remarks>
+    /// Neither task retries. That is the assertion: an ordinary consumer calls <c>SaveChangesAsync</c>
+    /// once, and a chained save that contends has to block and succeed, not surface a
+    /// <c>SQLITE_BUSY</c> for the caller to handle. A retry loop here would pass either way and prove
+    /// nothing - it would just absorb the collisions the fix is supposed to remove.
+    /// </remarks>
     [Fact]
     public async Task ConcurrentSameStreamSaves_CannotBothAnchorOnTheSameHead()
     {
-        var dbName = "chainwrite_" + Guid.NewGuid().ToString("N");
-        var connectionString = $"DataSource=file:{dbName}?mode=memory&cache=shared";
-
-        // Keep-alive connection holds the shared in-memory database up for the whole test.
-        await using var keepAlive = new SqliteConnection(connectionString);
-        await keepAlive.OpenAsync();
+        // A real file, not a shared-cache in-memory database: shared cache serialises with
+        // table-level locks that report SQLITE_LOCKED, which SQLite's busy handler does not wait on,
+        // so no amount of correct locking would let a contending writer block-and-proceed there. A
+        // file database - what a SQLite consumer actually runs - uses the ordinary lock ladder and
+        // the connection's busy timeout, so contention becomes a wait.
+        using var db = new TempSqliteDatabase();
 
         var observer = new ParkFirstCaptureObserver();
         var services = new ServiceCollection();
@@ -128,7 +134,7 @@ public class HashChainWritePathTests
         // Each resolved context gets its OWN connection, so the two save tasks are real concurrency
         // against one shared-cache database.
         services.AddDbContext<TestContext>((sp, o) =>
-            o.UseSqlite(connectionString).UseOrionAudit(sp), ServiceLifetime.Scoped);
+            o.UseSqlite(db.ConnectionString).UseOrionAudit(sp), ServiceLifetime.Scoped);
         await using var provider = services.BuildServiceProvider();
 
         Guid ledgerId;
@@ -144,24 +150,14 @@ public class HashChainWritePathTests
 
         observer.Arm();
 
+        // One save, no retry - exactly what a consumer writes.
         async Task UpdateAsync(int newBalance)
         {
-            for (var attempt = 0; ; attempt++)
-            {
-                try
-                {
-                    await using var scope = provider.CreateAsyncScope();
-                    var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
-                    var ledger = await ctx.Ledgers.FirstAsync(l => l.Id == ledgerId);
-                    ledger.Balance = newBalance;
-                    await ctx.SaveChangesAsync();
-                    return;
-                }
-                catch (Exception ex) when (IsContention(ex) && attempt < 300)
-                {
-                    await Task.Delay(10);
-                }
-            }
+            await using var scope = provider.CreateAsyncScope();
+            var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
+            var ledger = await ctx.Ledgers.FirstAsync(l => l.Id == ledgerId);
+            ledger.Balance = newBalance;
+            await ctx.SaveChangesAsync();
         }
 
         // Task.Run, not a bare call: SQLite's async methods complete synchronously, so invoking
@@ -217,12 +213,46 @@ public class HashChainWritePathTests
         }
     }
 
-    private static bool IsContention(Exception ex)
-        => ex is SqliteException sqlite
-            && (sqlite.SqliteErrorCode == 5 /* SQLITE_BUSY */ || sqlite.SqliteErrorCode == 6 /* SQLITE_LOCKED */)
-            || ex.InnerException is SqliteException inner
-            && (inner.SqliteErrorCode == 5 || inner.SqliteErrorCode == 6)
-            || ex is DbUpdateException;
+    /// <summary>
+    /// The assumption the chain's serialization on SQLite rests on: EF's <c>BeginTransaction</c> takes
+    /// the write lock at BEGIN, not at the first write.
+    /// </summary>
+    /// <remarks>
+    /// SQLite has no row locks, so <c>AnchorLockDialect</c> issues no lock statement there and the
+    /// transaction itself is what serialises same-stream appends. That only works because
+    /// Microsoft.Data.Sqlite's default Serializable isolation emits <c>BEGIN IMMEDIATE</c>. Were it
+    /// ever to emit a plain (deferred) <c>BEGIN</c>, two concurrent saves could both open, both read
+    /// the same anchor head, and only collide on the way out - the silently forked chain this whole
+    /// mechanism exists to prevent - and nothing else in the suite would notice. This pins it.
+    /// </remarks>
+    [Fact]
+    public async Task EfSqliteTransaction_HoldsItsWriteLockFromBegin()
+    {
+        using var db = new TempSqliteDatabase();
+        var options = new DbContextOptionsBuilder<TestContext>().UseSqlite(db.ConnectionString).Options;
+        await using (var setup = new TestContext(options))
+        {
+            await setup.Database.EnsureCreatedAsync();
+        }
+
+        await using var holder = new TestContext(options);
+        await using var transaction = await holder.Database.BeginTransactionAsync();
+        // Deliberately nothing written yet: a deferred transaction would hold no write lock here.
+
+        // A second connection with a one-second busy timeout, so a genuine wait fails fast.
+        var connectionString = new SqliteConnectionStringBuilder(db.ConnectionString) { DefaultTimeout = 1 };
+        await using var other = new SqliteConnection(connectionString.ToString());
+        await other.OpenAsync();
+        var write = other.CreateCommand();
+        write.CommandText = "INSERT INTO OrionAudit_Chain_Anchor "
+            + "(EntityType, EntityId, TenantId, LatestEntryHash, RowCount, KeyId, PrunedRowCount) "
+            + "VALUES ('t', 'e', '', 'h', 1, 1, 0)";
+
+        var blocked = await Assert.ThrowsAsync<SqliteException>(() => write.ExecuteNonQueryAsync());
+        Assert.Equal(5, blocked.SqliteErrorCode); // SQLITE_BUSY: the holder's write lock is already taken
+
+        await transaction.RollbackAsync();
+    }
 
     private static async Task<(ServiceProvider provider, SqliteConnection conn)> BuildAsync(TimeProvider? clock = null)
     {
