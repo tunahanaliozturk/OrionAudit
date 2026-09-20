@@ -1,6 +1,7 @@
 namespace Moongazing.OrionAudit.Retention;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Moongazing.OrionAudit.Configuration;
 using Moongazing.OrionAudit.Integrity;
 
@@ -19,20 +20,22 @@ using Moongazing.OrionAudit.Integrity;
 /// wolf is a report nobody reads.
 /// </para>
 /// <para>
-/// The fix re-anchors the chain at the oldest surviving row. After the delete this reads back, per
-/// touched stream, how many hashed rows survive and what the new head links to, and writes both onto
-/// the anchor. Verification then expects <c>walked + PrunedRowCount == RowCount</c> and expects the
-/// surviving genesis to link to <see cref="AuditChainAnchor.PrunedThroughHash"/>. Nothing else is
-/// relaxed: <see cref="AuditChainAnchor.RowCount"/> and <see cref="AuditChainAnchor.LatestEntryHash"/>
-/// still pin the stream's lifetime total and its tail, a mutated row still fails its keyed MAC, and a
+/// The fix re-anchors the chain at the oldest surviving row: the removal and the checkpoint that
+/// explains it are written in ONE transaction, so the two can never disagree. Verification then
+/// expects <c>walked + PrunedRowCount == RowCount</c> and expects the surviving genesis to link to
+/// <see cref="AuditChainAnchor.PrunedThroughHash"/>. Nothing else is relaxed:
+/// <see cref="AuditChainAnchor.RowCount"/> and <see cref="AuditChainAnchor.LatestEntryHash"/> still
+/// pin the stream's lifetime total and its tail, a mutated row still fails its keyed MAC, and a
 /// deletion that no sweep recorded still breaks the walk.
 /// </para>
 /// <para>
-/// The counts are read back from the database rather than inferred from the batch, so re-presenting a
-/// row after a transient failure cannot double-count it, and the ordering used to find the new head is
-/// the same server-side <c>(OccurredOnUtc, Id)</c> ordering the verifier walks. The sweep does not take
-/// the anchor's write lock: an appender only ever extends the tail, which leaves both the pruned prefix
-/// and this checkpoint untouched.
+/// <b>Atomicity.</b> The delete and the checkpoint commit together. Without that, a cancellation, a
+/// transient database failure or a process exit between them would permanently pair deleted rows with
+/// a stale checkpoint - which is the same permanent false-tamper state this class exists to remove,
+/// just reached by a different route. A provider with no transaction support (the EF in-memory
+/// provider) raises <see cref="InvalidOperationException"/> on begin; that is caught and the work runs
+/// unwrapped, matching <see cref="CopyToTableAuditArchiver{TArchiveRow}"/>. That archiver in turn
+/// detects this transaction as ambient and joins it rather than starting its own.
 /// </para>
 /// </remarks>
 internal sealed class ChainPruneArchiver : IAuditArchiver
@@ -52,60 +55,113 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(rows);
 
-        var removed = await inner.ArchiveAsync(dbContext, rows, policy, cancellationToken).ConfigureAwait(false);
-        if (removed == 0)
+        // Only hashed rows ever counted toward an anchor; an unchained prefix is outside the chain.
+        var chained = rows.Where(r => r.EntryHash is not null).ToList();
+        if (chained.Count == 0)
         {
-            // Nothing left the live table, so no chain moved.
+            return await inner.ArchiveAsync(dbContext, rows, policy, cancellationToken).ConfigureAwait(false);
+        }
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // No-transaction providers (EF in-memory) raise this. Fall through unwrapped, exactly as
+            // CopyToTableAuditArchiver does, and rely on the provider's natural ordering.
+        }
+
+        try
+        {
+            // Read each touched stream's anchor BEFORE the rows leave, in the same order the chain
+            // writer touches anchor-then-rows, so retention and the append path never approach the
+            // two in opposite orders.
+            var anchors = await LoadAnchorsAsync(dbContext, chained, cancellationToken).ConfigureAwait(false);
+
+            var removed = await inner.ArchiveAsync(dbContext, rows, policy, cancellationToken).ConfigureAwait(false);
+            if (removed > 0 && anchors.Count > 0)
+            {
+                await RecordPrunesAsync(dbContext, chained, anchors, cancellationToken).ConfigureAwait(false);
+                await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
             return removed;
         }
-
-        // Only hashed rows ever counted toward an anchor; an unchained prefix is outside the chain.
-        var streams = rows
-            .Where(r => r.EntryHash is not null)
-            .Select(r => new StreamKey(r.EntityType, r.EntityId, AuditTenant.Canonical(r.TenantId)))
-            .Distinct()
-            .ToList();
-
-        var repaired = false;
-        foreach (var stream in streams)
+        catch
         {
-            repaired |= await RecordPruneAsync(dbContext, stream, cancellationToken).ConfigureAwait(false);
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            throw;
         }
-        if (repaired)
+        finally
         {
-            await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync().ConfigureAwait(false);
+            }
         }
-        return removed;
     }
 
-    private static async Task<bool> RecordPruneAsync(
-        DbContext dbContext, StreamKey stream, CancellationToken cancellationToken)
+    private static async Task<Dictionary<StreamKey, AuditChainAnchor>> LoadAnchorsAsync(
+        DbContext dbContext, List<AuditLog> chained, CancellationToken cancellationToken)
     {
-        var anchor = await LoadAnchorAsync(dbContext, stream, cancellationToken).ConfigureAwait(false);
-        if (anchor is null)
+        var result = new Dictionary<StreamKey, AuditChainAnchor>();
+        foreach (var stream in chained.Select(StreamOf).Distinct())
         {
-            // The stream was never anchored (chaining switched on after these rows were written), so
-            // there is no truncation guard to keep in step.
-            return false;
+            // Tracked: the checkpoint is written back through SaveChanges.
+            var query = dbContext.Set<AuditChainAnchor>()
+                .Where(a => a.EntityType == stream.EntityType && a.EntityId == stream.EntityId);
+            query = stream.TenantId.Length == 0
+                ? query.Where(a => a.TenantId == null || a.TenantId == "")
+                : query.Where(a => a.TenantId == stream.TenantId);
+
+            var anchor = await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+            if (anchor is not null)
+            {
+                // A stream with no anchor was never chained (chaining switched on after those rows
+                // were written), so there is no truncation guard to keep in step.
+                result[stream] = anchor;
+            }
         }
-
-        var surviving = ScopeToStream(dbContext.Set<AuditLog>().AsNoTracking(), stream)
-            .Where(a => a.EntryHash != null);
-
-        var survivingCount = await surviving.LongCountAsync(cancellationToken).ConfigureAwait(false);
-        // The oldest surviving row IS the chain's new genesis, and the hash it already carries is
-        // exactly the watermark verification needs. Ordered the same way the verifier walks the
-        // stream so the two agree on which row that is.
-        var genesis = await surviving
-            .OrderBy(a => a.OccurredOnUtc)
-            .ThenBy(a => a.Id)
-            .FirstOrDefaultAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        anchor.PrunedRowCount = anchor.RowCount - survivingCount;
-        anchor.PrunedThroughHash = genesis?.PreviousHash;
-        return true;
+        return result;
     }
+
+    private static async Task RecordPrunesAsync(
+        DbContext dbContext,
+        List<AuditLog> chained,
+        Dictionary<StreamKey, AuditChainAnchor> anchors,
+        CancellationToken cancellationToken)
+    {
+        foreach (var (stream, anchor) in anchors)
+        {
+            var surviving = ScopeToStream(dbContext.Set<AuditLog>().AsNoTracking(), stream)
+                .Where(a => a.EntryHash != null);
+
+            var survivingCount = await surviving.LongCountAsync(cancellationToken).ConfigureAwait(false);
+            // The oldest surviving row IS the chain's new genesis, and the hash it already carries is
+            // exactly the watermark verification needs. Ordered the same way the verifier walks the
+            // stream so the two agree on which row that is.
+            var genesis = await surviving
+                .OrderBy(a => a.OccurredOnUtc)
+                .ThenBy(a => a.Id)
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            anchor.PrunedRowCount = anchor.RowCount - survivingCount;
+            anchor.PrunedThroughHash = genesis?.PreviousHash;
+        }
+    }
+
+    private static StreamKey StreamOf(AuditLog row)
+        => new(row.EntityType, row.EntityId, AuditTenant.Canonical(row.TenantId));
 
     // Mirrors EfCoreAuditIntegrityVerifier: the no-tenant stream matches both a null and an
     // empty-string tenant, because rows written before the write-path normalization still store null.
@@ -115,18 +171,6 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
         return stream.TenantId.Length == 0
             ? query.Where(a => a.TenantId == null || a.TenantId == "")
             : query.Where(a => a.TenantId == stream.TenantId);
-    }
-
-    private static async Task<AuditChainAnchor?> LoadAnchorAsync(
-        DbContext dbContext, StreamKey stream, CancellationToken cancellationToken)
-    {
-        // Tracked: the checkpoint is written back through SaveChanges.
-        var query = dbContext.Set<AuditChainAnchor>()
-            .Where(a => a.EntityType == stream.EntityType && a.EntityId == stream.EntityId);
-        query = stream.TenantId.Length == 0
-            ? query.Where(a => a.TenantId == null || a.TenantId == "")
-            : query.Where(a => a.TenantId == stream.TenantId);
-        return await query.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private readonly record struct StreamKey(string EntityType, string EntityId, string TenantId);

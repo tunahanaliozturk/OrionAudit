@@ -124,6 +124,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BrokenLink`. Both anchor columns default to "never pruned" (`0` / `null`), so an anchor written
   before this verifies exactly as it did.
 
+  The removal and the checkpoint that explains it commit in one transaction, so a cancellation, a
+  transient database failure or a process exit between them cannot leave deleted rows paired with a
+  stale checkpoint - which would be the same permanent false-tamper state, reached by a crash instead
+  of by design. A provider without transaction support runs the work unwrapped, and
+  `CopyToTableAuditArchiver` joins the sweep's transaction rather than starting its own.
+
   **Consumer-visible changes:** the `OrionAudit_Chain_Anchor` table gains two columns, so a consumer
   using migrations needs a migration for them. With hash-chaining enabled the sweep also stops using
   its `ExecuteDelete` fast path and materialises each batch instead - the chain repair has to know

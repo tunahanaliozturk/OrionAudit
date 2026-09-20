@@ -48,7 +48,24 @@ public class RetentionHashChainTests
         public void Advance(TimeSpan by) => now = now.Add(by);
     }
 
-    private static async Task<(ServiceProvider sp, SqliteConnection conn, FrozenClock clock)> BuildAsync()
+    /// <summary>
+    /// Deletes the rows it is offered and then fails, standing in for the cancellation, transient
+    /// database error or process exit that can land between the delete and the checkpoint.
+    /// </summary>
+    private sealed class DeleteThenFailArchiver : IAuditArchiver
+    {
+        public async Task<int> ArchiveAsync(
+            DbContext dbContext, IReadOnlyList<AuditLog> rows, RetentionPolicy policy, CancellationToken ct)
+        {
+            var ids = rows.Select(r => r.Id).ToList();
+            await dbContext.Set<AuditLog>().Where(a => ids.Contains(a.Id)).ExecuteDeleteAsync(ct);
+            throw new InvalidOperationException("archiver failed after removing the rows");
+        }
+    }
+
+    private static async Task<(ServiceProvider sp, SqliteConnection conn, FrozenClock clock)> BuildAsync(
+        Action<OrionAuditOptions>? extraOptions = null,
+        Action<ServiceCollection>? extraServices = null)
     {
         var conn = new SqliteConnection("DataSource=:memory:");
         await conn.OpenAsync();
@@ -57,11 +74,13 @@ public class RetentionHashChainTests
         var services = new ServiceCollection();
         services.AddSingleton<TimeProvider>(clock);
         services.AddLogging();
+        extraServices?.Invoke(services);
         services.AddOrionAudit<ChainRetentionDb>(o =>
         {
             o.Audit<Note>();
             o.UseHashChain(h => h.UseKey(1, KeyId1Base64));
             o.RetainCount(3);
+            extraOptions?.Invoke(o);
         });
         services.AddSingleton(conn);
         services.AddDbContext<ChainRetentionDb>((sp, o) =>
@@ -219,5 +238,36 @@ public class RetentionHashChainTests
         var result = await VerifyAsync(sp, noteId);
         Assert.False(result.IsValid);
         Assert.Equal(AuditChainBreakReason.Truncated, result.Reason);
+    }
+
+    /// <summary>
+    /// The delete and the checkpoint that explains it must commit together. If the rows can go while
+    /// the checkpoint stays behind, the stream is left in exactly the permanent false-tamper state
+    /// this feature exists to remove - reached by a crash instead of by design.
+    /// </summary>
+    [Fact]
+    public async Task Sweep_ThatFailsAfterTheDelete_LeavesTheRowsAndTheChainIntact()
+    {
+        var (sp, conn, clock) = await BuildAsync(
+            extraServices: s => s.AddSingleton<IAuditArchiver, DeleteThenFailArchiver>());
+        await using var _conn = conn;
+        await using var _sp = sp;
+
+        var noteId = await SeedSixChainedRowsAsync(sp, clock);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => SweepAsync(sp));
+
+        await using (var scope = sp.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ChainRetentionDb>();
+            Assert.Equal(6, await ctx.AuditLogs.CountAsync());   // the delete rolled back with the failure
+            var anchor = await ctx.Anchors.SingleAsync();
+            Assert.Equal(0, anchor.PrunedRowCount);
+            Assert.Null(anchor.PrunedThroughHash);
+        }
+
+        var result = await VerifyAsync(sp, noteId);
+        Assert.True(result.IsValid,
+            $"a failed sweep must leave the chain exactly as it was, but got {result.Reason}: {result.Detail}");
     }
 }
