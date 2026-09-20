@@ -4,6 +4,14 @@ namespace Moongazing.OrionAudit;
 /// Reconstructs entity state at a historical point in time by replaying audit-log diffs. Single
 /// and batch overloads are provided. See documentation for performance characteristics.
 /// </summary>
+/// <remarks>
+/// Reads are tenant-scoped on exactly the terms <see cref="AuditQueryExtensions.AuditFor{T}"/>
+/// uses: rows outside the calling tenant are never replayed, and an <see cref="IAuditTenantResolver"/>
+/// that cannot name a tenant scopes the replay to the no-tenant stream rather than widening it.
+/// There is no cross-tenant reconstruction: replaying one tenant's diff on top of another's
+/// snapshot yields an object that never existed, so cross-tenant reads stay on the query DSL
+/// (<c>AuditFor&lt;T&gt;(crossTenant: true)</c>), which returns rows rather than a merged entity.
+/// </remarks>
 public interface IAuditReconstructor
 {
     /// <summary>
