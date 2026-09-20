@@ -26,9 +26,16 @@ public class SnapshotPolicyCaptureTests
         }
     }
 
-    private static TestContext NewWithPolicy(Action<OrionAuditOptions> configure)
+    private static TestContext NewWithPolicy(Action<OrionAuditOptions> configure, TimeProvider? clock = null)
     {
         var services = new ServiceCollection();
+        // AddOrionAudit registers TimeProvider.System with TryAddSingleton, so a clock registered
+        // first wins and the interceptor stamps OccurredOnUtc from it.
+        if (clock is not null)
+        {
+            services.AddSingleton(clock);
+        }
+
         services.AddOrionAudit<TestContext>(o =>
         {
             o.Audit<Counter>();
@@ -83,13 +90,22 @@ public class SnapshotPolicyCaptureTests
     [Fact]
     public async Task SnapshotEveryDuration_WritesOnFirstThenAfterElapsed()
     {
-        await using var ctx = NewWithPolicy(o => o.SnapshotEvery(TimeSpan.FromMilliseconds(100)));
+        // Drive the interceptor's TimeProvider seam rather than the wall clock. Written against
+        // the real clock, "immediately after" meant "within 100ms of the previous save", which is
+        // not something two consecutive SaveChangesAsync calls can promise on a loaded machine -
+        // when they took longer, the second update snapshotted too and the test failed. The clock
+        // still advances by 1ms per save so OccurredOnUtc stays strictly increasing and the
+        // OrderBy below has a total order to work with.
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        await using var ctx = NewWithPolicy(o => o.SnapshotEvery(TimeSpan.FromMilliseconds(100)), clock);
         var c = new Counter { Value = 0 };
         ctx.Counters.Add(c);
         await ctx.SaveChangesAsync();
 
+        clock.Advance(TimeSpan.FromMilliseconds(1));
         c.Value = 1; await ctx.SaveChangesAsync();   // first Update — LastSnapshotUtc=null → snapshot
-        c.Value = 2; await ctx.SaveChangesAsync();   // immediately after — should not snapshot
+        clock.Advance(TimeSpan.FromMilliseconds(1)); // 1ms later, still inside the 100ms window
+        c.Value = 2; await ctx.SaveChangesAsync();   // should not snapshot
 
         var updates = await ctx.AuditLogs
             .Where(a => a.Action == AuditAction.Updated)
@@ -97,13 +113,20 @@ public class SnapshotPolicyCaptureTests
         Assert.NotNull(updates[0].Snapshot);
         Assert.Null(updates[1].Snapshot);
 
-        await Task.Delay(120);
+        clock.Advance(TimeSpan.FromMilliseconds(120));
         c.Value = 3; await ctx.SaveChangesAsync();   // after the elapsed window → snapshot again
 
         var refreshed = await ctx.AuditLogs
             .Where(a => a.Action == AuditAction.Updated)
             .OrderBy(a => a.OccurredOnUtc).ToListAsync();
         Assert.NotNull(refreshed[2].Snapshot);
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+        public override DateTimeOffset GetUtcNow() => now;
+        public void Advance(TimeSpan delta) => now = now.Add(delta);
     }
 
     [Fact]
