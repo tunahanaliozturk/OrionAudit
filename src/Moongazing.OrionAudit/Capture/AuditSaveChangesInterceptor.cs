@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -59,6 +59,63 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(eventData);
+        await CaptureAsync(eventData, cancellationToken).ConfigureAwait(false);
+        return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Runs the exact same <see cref="CaptureAsync"/> pipeline as the async overload — there is one
+    /// capture implementation, so the two entry points cannot drift apart (before v0.11.4 this
+    /// override did not exist at all and <c>SaveChanges()</c> silently audited nothing).
+    /// <para>
+    /// Two legs of that pipeline are genuinely async and have no synchronous counterpart: the hash
+    /// chain's anchor lock/read (<c>EfCoreAuditHashChainWriter.StampAsync</c>) and the consumer's
+    /// <see cref="IAuditEventPublisher.PublishAsync"/>. Both are opt-in, so with neither wired the
+    /// task below completes synchronously and <c>GetResult</c> never blocks. When one is wired we
+    /// block here rather than duplicating either leg.
+    /// </para>
+    /// <para>
+    /// The ambient <see cref="SynchronizationContext"/> is cleared for the duration of the call.
+    /// Our own <c>await</c>s all use <c>ConfigureAwait(false)</c>, but the publisher is consumer
+    /// code and may not: an <c>await</c> inside it captures whatever context is current, and on a
+    /// single-threaded one (WPF, WinForms, legacy ASP.NET) it would post its continuation back to
+    /// the very thread blocked on <c>GetResult</c> below — a deadlocked save. With no current
+    /// context there is nothing for it to capture, so the continuation runs on the thread pool and
+    /// the blocked thread is released. Clearing costs nothing when the task completes
+    /// synchronously, unlike offloading the whole pipeline to <see cref="Task.Run(Action)"/>,
+    /// which would pay a thread hop on every synchronous save to defend the same case.
+    /// </para>
+    /// <para>
+    /// The residual case this does not cover is a caller executing on a custom
+    /// <see cref="TaskScheduler"/> with a degree of parallelism of one, since an <c>await</c>
+    /// captures that too. Blocking a scheduler like that on any async work deadlocks it whoever
+    /// owns the code, so that caller wants <c>SaveChangesAsync</c>.
+    /// </para>
+    /// </remarks>
+    public override InterceptionResult<int> SavingChanges(
+        DbContextEventData eventData,
+        InterceptionResult<int> result)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+
+        var ambient = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
+        try
+        {
+            CaptureAsync(eventData, CancellationToken.None).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(ambient);
+        }
+
+        return base.SavingChanges(eventData, result);
+    }
+
+    // The single capture implementation shared by both SaveChanges entry points.
+    private async Task CaptureAsync(DbContextEventData eventData, CancellationToken cancellationToken)
+    {
         var ctx = eventData.Context!;
         var configuration = serviceProvider.GetRequiredService<IAuditConfiguration>();
         var clock = serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
@@ -66,15 +123,27 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         // State check is a struct compare; IsAudited is a FrozenDictionary lookup. Both are cheap,
         // but state-first lets us skip the dictionary lookup for entities that aren't being saved.
+        //
+        // Metadata.ClrType, never Entity.GetType(): under UseLazyLoadingProxies() the runtime type
+        // of a materialized entity is a Castle proxy (OrderProxy : Order) that no audit
+        // registration knows about, so GetType() made every audited entity look un-audited. EF's
+        // metadata always reports the declared type. See ResolveClrType.
         var auditedEntries = ctx.ChangeTracker.Entries()
             .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted
-                        && configuration.IsAudited(e.Entity.GetType()))
+                        && configuration.IsAudited(ResolveClrType(e)))
             .ToList();
 
         if (auditedEntries.Count == 0)
         {
-            return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+            return;
         }
+
+        // Read the caller's ambient trace BEFORE starting OrionAudit's own span. StartActivity
+        // reassigns Activity.Current to the OrionAudit.Capture span, so reading it afterwards
+        // stamped every row with OrionAudit's internal span id instead of the caller's trace,
+        // which made the correlation column useless for joining audit rows back to the request
+        // that produced them.
+        var correlationId = AuditScope.Current ?? Activity.Current?.Id;
 
         using var activity = OrionAuditTelemetry.ActivitySource.StartActivity("OrionAudit.Capture", ActivityKind.Internal);
         activity?.SetTag("orionaudit.entry_count", auditedEntries.Count);
@@ -82,7 +151,6 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         var stopwatch = Stopwatch.StartNew();
         var user = serviceProvider.GetService<IAuditUserResolver>()?.Resolve(serviceProvider);
         var tenantId = serviceProvider.GetService<IAuditTenantResolver>()?.Resolve(serviceProvider);
-        var correlationId = AuditScope.Current ?? Activity.Current?.Id;
         var occurredOn = clock.GetUtcNow().UtcDateTime;
 
         if (tenantId is not null)
@@ -118,7 +186,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             // v0.7.26: notify the optional capture observer (async-capture path).
             NotifyCaptureObserver(auditedEntries.Count, isAsyncCapture: true);
             activity?.SetStatus(ActivityStatusCode.Ok);
-            return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         var snapshotsTaken = 0;
@@ -211,9 +279,21 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         // Status is set only once everything (capture + publish) has succeeded so a publisher
         // exception is correctly reflected as a failure span.
         activity?.SetStatus(ActivityStatusCode.Ok);
-
-        return await base.SavingChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The audited entity's declared CLR type, as EF's model knows it.
+    /// </summary>
+    /// <remarks>
+    /// The single place capture resolves an entity's type. <c>entry.Entity.GetType()</c> must never
+    /// be used for this: with <c>UseLazyLoadingProxies()</c> (or change-tracking proxies) the
+    /// runtime type is a Castle subclass — <c>OrderProxy</c>, not <c>Order</c> — which is not the
+    /// key anything is registered under. Every lookup then missed: <c>IsAudited</c> returned false
+    /// so no row was written at all, and where one was, <c>GetConfig</c> returned null so the field
+    /// rules came back empty and <c>[RedactedAudit]</c> properties were persisted in the clear.
+    /// <c>IEntityType.ClrType</c> is the declared type whether or not proxies are in play.
+    /// </remarks>
+    private static Type ResolveClrType(EntityEntry entry) => entry.Metadata.ClrType;
 
     // Mirrors AuditLog to AuditLogEvent. Centralised so the dispatcher's call-site projects the
     // same shape. DateTimeOffset is constructed from the UTC DateTime + TimeSpan.Zero so the
@@ -273,7 +353,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         DateTime occurredOn,
         JsonSerializerContext? jsonContext)
     {
-        var entityType = entry.Entity.GetType();
+        var entityType = ResolveClrType(entry);
         var primaryKey = ExtractPrimaryKey(entry);
         var typeConfig = configuration.GetConfig(entityType);
 
@@ -378,7 +458,7 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         DateTime occurredOn,
         JsonSerializerContext? jsonContext)
     {
-        var entityType = entry.Entity.GetType();
+        var entityType = ResolveClrType(entry);
         var typeConfig = configuration.GetConfig(entityType);
 
         var action = entry.State switch

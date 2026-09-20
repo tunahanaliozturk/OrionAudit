@@ -1,11 +1,16 @@
-namespace Moongazing.OrionAudit;
+﻿namespace Moongazing.OrionAudit;
 
 /// <summary>
 /// Tracks how many updates have occurred since the last snapshot for an audited entity, plus the
 /// last snapshot's UTC timestamp. Read and written inside the interceptor's transaction so the
 /// snapshot policy decision is consistent with the audit rows it produces.
 /// </summary>
-public sealed class SnapshotCursor
+/// <remarks>
+/// Deliberately not <c>sealed</c>: EF Core's proxy plugin rejects <em>every</em> sealed entity
+/// type in the model, so sealing this would make <c>UseLazyLoadingProxies()</c> throw at model
+/// build for any consumer that maps OrionAudit's tables.
+/// </remarks>
+public class SnapshotCursor
 {
     /// <summary>Assembly-qualified name of the audited entity type.</summary>
     public string EntityType { get; set; } = default!;

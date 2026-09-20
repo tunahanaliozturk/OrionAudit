@@ -1,4 +1,4 @@
-namespace Moongazing.OrionAudit.Integrity;
+﻿namespace Moongazing.OrionAudit.Integrity;
 
 /// <summary>
 /// Persisted head of one tamper-evident chain stream: the latest <see cref="AuditLog.EntryHash"/> and
@@ -26,7 +26,12 @@ namespace Moongazing.OrionAudit.Integrity;
 /// </item>
 /// </list>
 /// </remarks>
-public sealed class AuditChainAnchor
+/// <remarks>
+/// Deliberately not <c>sealed</c>: EF Core's proxy plugin rejects <em>every</em> sealed entity
+/// type in the model, so sealing this would make <c>UseLazyLoadingProxies()</c> throw at model
+/// build for any consumer that maps OrionAudit's tables.
+/// </remarks>
+public class AuditChainAnchor
 {
     /// <summary>Assembly-qualified entity type of the stream (matches <see cref="AuditLog.EntityType"/>).</summary>
     public string EntityType { get; set; } = default!;

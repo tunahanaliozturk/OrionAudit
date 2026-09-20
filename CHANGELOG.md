@@ -17,6 +17,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dotnet test` ran nothing; with the suites actually running it fails under load. It now drives
   the interceptor's existing `TimeProvider` seam, so it is deterministic and no longer sleeps.
   Test-only; the snapshot policy itself was correct and is unchanged.
+- **Synchronous `SaveChanges()` is audited again.** `AuditSaveChangesInterceptor` implemented only
+  `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
+  audit rows — silently, with no error raised. The capture pipeline is now a single private
+  `CaptureAsync` shared by both entry points, with `SavingChanges` added as a thin sync wrapper, so
+  the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
+  chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
+  rather than duplicated; with neither wired the pipeline completes synchronously and the sync
+  override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
+  duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
+  otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
+  ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
+- **Capture works under `UseLazyLoadingProxies()`.** Capture resolved the audited entity's CLR type
+  with `entry.Entity.GetType()`, which under lazy-loading (or change-tracking) proxies is the Castle
+  subclass — `OrderProxy`, not `Order` — and is not the key anything is registered under. Every
+  lookup missed: `IsAudited` returned false so entities loaded from the database produced no audit
+  rows at all, and where a row was produced its field rules resolved to nothing, so
+  `[RedactedAudit]` properties were persisted **in plaintext**. All three lookups now go through a
+  single `ResolveClrType` helper backed by `entry.Metadata.ClrType`, which is the declared type
+  whether or not proxies are in play.
+- **OrionAudit's own entity types are no longer `sealed`.** EF Core's proxy plugin rejects *every*
+  sealed entity type in the model, so mapping `AuditLog`, `SnapshotCursor`,
+  `AuditCaptureQueueEntry`, or `AuditChainAnchor` made `UseLazyLoadingProxies()` throw at model
+  build. Unsealing them is source- and binary-compatible for consumers.
+- **`CorrelationId` records the caller's trace, not OrionAudit's own span.** The ambient
+  `Activity.Current` was read *after* the interceptor had already started its `OrionAudit.Capture`
+  span, so every row was stamped with OrionAudit's internal span id and could not be joined back to
+  the request that produced it. The read now happens before any OrionAudit span is started. Nothing
+  changes when no tracing listener is attached (`StartActivity` returns null and there was no span
+  to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
+  failed intermittently — whenever a listener happened to be live in parallel.
 
 ## [0.11.3] - 2026-07-28
 
