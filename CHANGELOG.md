@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sealed entity type in the model, so mapping `AuditLog`, `SnapshotCursor`,
   `AuditCaptureQueueEntry`, or `AuditChainAnchor` made `UseLazyLoadingProxies()` throw at model
   build. Unsealing them is source- and binary-compatible for consumers.
+- **`CorrelationId` records the caller's trace, not OrionAudit's own span.** The ambient
+  `Activity.Current` was read *after* the interceptor had already started its `OrionAudit.Capture`
+  span, so every row was stamped with OrionAudit's internal span id and could not be joined back to
+  the request that produced it. The read now happens before any OrionAudit span is started. Nothing
+  changes when no tracing listener is attached (`StartActivity` returns null and there was no span
+  to shadow the caller's), which is why the existing `NoScope_FallsBackToActivityOrNull` test only
+  failed intermittently — whenever a listener happened to be live in parallel.
 
 ## [0.11.3] - 2026-07-28
 

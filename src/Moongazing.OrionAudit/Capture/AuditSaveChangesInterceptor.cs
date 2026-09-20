@@ -114,13 +114,19 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
             return;
         }
 
+        // Read the caller's ambient trace BEFORE starting OrionAudit's own span. StartActivity
+        // reassigns Activity.Current to the OrionAudit.Capture span, so reading it afterwards
+        // stamped every row with OrionAudit's internal span id instead of the caller's trace,
+        // which made the correlation column useless for joining audit rows back to the request
+        // that produced them.
+        var correlationId = AuditScope.Current ?? Activity.Current?.Id;
+
         using var activity = OrionAuditTelemetry.ActivitySource.StartActivity("OrionAudit.Capture", ActivityKind.Internal);
         activity?.SetTag("orionaudit.entry_count", auditedEntries.Count);
 
         var stopwatch = Stopwatch.StartNew();
         var user = serviceProvider.GetService<IAuditUserResolver>()?.Resolve(serviceProvider);
         var tenantId = serviceProvider.GetService<IAuditTenantResolver>()?.Resolve(serviceProvider);
-        var correlationId = AuditScope.Current ?? Activity.Current?.Id;
         var occurredOn = clock.GetUtcNow().UtcDateTime;
 
         if (tenantId is not null)
