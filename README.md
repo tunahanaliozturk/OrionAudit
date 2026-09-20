@@ -19,7 +19,13 @@
 
 ---
 
-> **Current release: v0.11.3.** Recent milestones: v0.11.0 richer history filters + aggregations, v0.10.0 background compaction + history export, and v0.9.0 tamper-evident hash-chaining — opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable and unforgeable without the MAC key, which lives outside the audit database. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive. Earlier: v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
+> **Current release: v1.0.0 — the API is stable; any breaking change from here requires 2.0.0.**
+> v1.0.0 is a correctness release: synchronous `SaveChanges()` is captured, capture and redaction
+> work under `UseLazyLoadingProxies()`, pooled/factory contexts no longer misattribute rows, the
+> viewer demands an explicit access decision and HTML-encodes what it renders, the tenant filter
+> scopes to the no-tenant stream instead of failing open when the tenant cannot be resolved, and the hash chain's anchor
+> lock is actually held. It has **breaking changes and a schema migration** — read the
+> [1.0.0 changelog entry](CHANGELOG.md) before upgrading. Recent milestones: v0.11.0 richer history filters + aggregations, v0.10.0 background compaction + history export, and v0.9.0 tamper-evident hash-chaining — opt in with `o.UseHashChain(h => h.UseKey(...))` and every captured `AuditLog` row gains a keyed HMAC-SHA256 `EntryHash` that chains it to the row before it (per entity stream, per tenant), so a later edit, deletion (including tail/whole-stream truncation), or reordering of any row is detectable and unforgeable without the MAC key, which lives outside the audit database. `IAuditIntegrityVerifier.VerifyChainAsync` walks the chain and reports the first broken row plus the reason. It is off by default and fully additive. Earlier: v0.8.0 queryable history + compaction, v0.7.0 publisher hook, v0.6.0 developer experience, v0.5.0 async staging-capture + viewer, v0.4.0 AOT-clean diff, v0.3.0 source-gen, v0.2.0 scale, v0.1.0 capture.
 > [See the changelog](CHANGELOG.md) and [what's next](ROADMAP.md).
 
 ---
@@ -150,7 +156,9 @@ Opt in with `o.UseHashChain(...)`. Each captured `AuditLog` row then gets a **ke
 `EntryHash` that binds its content (including any registered custom columns) to the row before it in
 the same chain scope (per entity stream, per tenant), plus a `PreviousHash` column and a `HashKeyId`.
 A later edit, deletion (including deleting the tail or an entire stream), reordering, or out-of-band
-insertion of any row is detected by the verifier.
+insertion of any row is detected by the verifier. The one deletion that is *not* reported is one the
+retention sweep performed and recorded on the anchor — see
+[Retention and the chain](#retention-and-the-chain) below.
 
 The chain is a **keyed MAC**, not a bare hash: the key comes from an `IAuditChainKeyProvider` that
 lives outside the audit database. That is what makes the chain unforgeable - with a plain SHA-256
@@ -173,6 +181,22 @@ one OrionAudit opens around the stamp and commits together with the audit rows) 
 tail/whole-stream deletion detectable (the anchor remembers the true tail hash and row count). The
 key id is stored per row, so you can rotate keys later without invalidating rows written under an
 older (still-registered) key.
+
+Two things worth knowing about those locks before you reason about your own:
+
+- **They are pessimistic row locks taken inside the write transaction** (`SELECT ... FOR UPDATE` /
+  `WITH (UPDLOCK, HOLDLOCK)`), one per stream the save touches, and a save spanning several streams
+  **holds** each while it goes after the next. They are therefore taken in one global order across
+  all callers, so two batches touching the same streams in opposite orders cannot deadlock each
+  other. Budget lock-wait time accordingly on a hot entity.
+- **On SQLite a contending same-stream save waits rather than fails.** There is no row-lock
+  statement; serialization comes from `BEGIN IMMEDIATE`, so the second writer blocks at its own
+  `BEGIN` on the connection's busy timeout (30 seconds by default) and then reads the head the first
+  one committed. One `SaveChangesAsync` per writer is enough — no retry loop. The exception is a
+  *shared-cache in-memory* database (`mode=memory&cache=shared`), which serializes with table locks
+  reporting `SQLITE_LOCKED`; SQLite's busy handler does not wait on those, so concurrent chained
+  writers there fail instead of queueing. That is a test-fixture shape, not a deployment one — use a
+  file database if your tests write one stream concurrently.
 
 If your `DbContext` uses a **retrying execution strategy** (`EnableRetryOnFailure()`), you have to own
 that transaction yourself — EF Core only lets the code that owns the `SaveChanges` call open one
@@ -200,6 +224,53 @@ after enabling it:
 ```bash
 dotnet ef migrations add AddOrionAuditHashChain
 ```
+
+**Upgrading to v1.0.0 with chaining already enabled needs a migration too**, not just a fresh
+opt-in: `ChainSequence` is new on the audit table, and `OrionAudit_Chain_Anchor` gains
+`PrunedRowCount` (non-nullable, defaults to `0`) and `PrunedThroughHash` (nullable). One migration
+covers all three, and **no backfill is needed** — the defaults mean "not known" / "never pruned",
+which is exactly how the walk and the verification treat pre-upgrade rows. The migration is
+backward compatible, so a v0.11.3 process runs against the migrated schema unchanged; apply it
+before the cutover below rather than during it.
+
+> **Drain before you cut over — do not roll v0.11.3 and v1.0.0 writers side by side.**
+> v0.11.3's anchor lock was never actually held (it was released before the anchor head was read —
+> one of the defects v1.0.0 fixes). A v1.0.0 writer holds that lock correctly but cannot serialize
+> against an old writer that is not honouring it, so during an overlap an old and a new process
+> writing the **same stream** can both read head `H` and both stamp `PreviousHash = H`. That is a
+> **fork**, not a mis-ordering: `ChainSequence` orders a chain, it cannot repair one that branched,
+> and `VerifyChainAsync` will report `BrokenLink` on a trail nobody tampered with, permanently.
+> Let the v0.11.3 instances finish their in-flight saves and stop taking audited work, then start
+> the v1.0.0 ones. A blue/green cutover works if the old side is drained first; an
+> instance-by-instance rolling restart does not, because it is defined by both versions serving at
+> once.
+>
+> **This applies only if you enable `UseHashChain`.** Without chaining there is no anchor, no lock
+> and nothing stamped — roll normally. It also does not apply if your streams are already
+> partitioned so one stream is only ever written by one process; the hazard is two versions writing
+> *one* stream, not the two versions coexisting.
+
+### Retention and the chain
+
+Retention and hash-chaining work together; until v1.0.0 they did not. The sweep deletes the oldest
+rows of a stream, which the chain could not tell apart from an attacker deleting them, so from the
+first purge onward every `VerifyChainAsync` on a pruned stream returned `BrokenLink` or `Truncated`
+— permanently. Now the sweep records what it removed on the anchor (`PrunedRowCount`,
+`PrunedThroughHash`) in the same transaction as the delete, and the verifier checks
+`walked + PrunedRowCount == RowCount` and expects the surviving genesis to link to
+`PrunedThroughHash`. A deletion **no sweep recorded** still fails, as does a mutated row.
+
+Two operational consequences when chaining is on:
+
+- **A sweep may delete fewer rows than the policy selected.** Retention is only ever allowed to
+  prune a chain's *head*, because re-anchoring at the oldest survivor repairs a pruned head but
+  cannot close a hole in the middle. Each batch is narrowed to the longest contiguous run starting
+  at the stream's current head; anything after the first gap stays for a later sweep and goes as
+  soon as the row that blocked it ages out too. Under-deletion on one cycle is expected, not a bug.
+- **The `ExecuteDelete` fast path is off.** The chain repair has to know which streams lost which
+  rows, which a bare `ExecuteDelete` never reveals, so the sweep materialises each batch instead.
+  The batch is already bounded by `MaxRowsPerSweep`. Consumers without hash-chaining keep the fast
+  path unchanged, and dry-run still deletes nothing and writes no checkpoint.
 
 Verify the chain through the DI-registered `IAuditIntegrityVerifier`:
 
@@ -404,8 +475,15 @@ app.MapOrionAuditViewer<AppDbContext>("/audit", o => o.RequireAuthorization("Aud
 ```
 
 That single registration mounts a JSON API (`GET /audit/api/log`, `/audit/api/{type}/{key}`,
-`/audit/api/meta`) plus a built-in vanilla-JS single-page UI served from `/audit`. No Blazor
-dependency, no build step — drops into any ASP.NET Core host.
+`/audit/api/meta`) plus a built-in UI served from `/audit`. No Blazor dependency, no build step —
+drops into any ASP.NET Core host.
+
+The page itself is **rendered server-side and HTML-encoded**. It used to build its markup in the
+browser by concatenating audit values into `innerHTML`, so any value an attacker could write into
+an audited entity executed as script in the session of whoever reviewed the log — an administrator,
+by definition. Every audit value now passes through `HtmlEncoder.Default` on the way out, and the
+one script left in the page only writes `textContent`. The JSON API is unchanged and still returns
+raw values.
 
 **The access decision is mandatory.** The viewer exposes every recorded change of every audited
 entity — other users' actions included, and values that redaction exists to protect — so it will
@@ -531,6 +609,19 @@ var rows = await context.AuditFor<Order>().ToListAsync();
 var allRows = await context.AuditFor<Order>(crossTenant: true).ToListAsync();
 ```
 
+**An unresolved tenant narrows, it does not widen.** If the resolver is registered but returns
+`null` — a dropped header, a claim the gateway did not forward, a background thread with no ambient
+context — the read is scoped to the no-tenant stream (`TenantId` null or `""`), which in any
+tenant-stamped deployment is the empty set. Before v1.0.0 the filter fell through *unfiltered* and
+handed back every tenant's rows at exactly the moment the caller's identity was unknown. If you
+upgrade and a query that used to return rows now returns none, that is this: your resolver is
+returning `null` on that path and previously nobody noticed. A genuinely single-tenant deployment
+whose resolver returns `null` by design still reads its own history unchanged, and an application
+with no resolver registered at all is unaffected. Note that this is a narrowed read, not a refusal:
+it yields an empty result rather than a throw — these extensions sit on request paths — and rows
+that were never tenant-stamped are still returned. Do not rely on it to deny; rely on it not to
+leak. `crossTenant: true` remains the explicit, auditable way to read across tenants.
+
 ### Time-travel reconstruction
 
 `IAuditReconstructor` replays the audit history of an entity up to any timestamp.
@@ -550,6 +641,18 @@ var manyAsOf = await reconstructor.ReconstructManyAsync<Order>(
 ```
 
 Returns `null` if the entity didn't exist or was deleted at that timestamp.
+
+Reconstruction is **tenant-scoped**, through the same filter `AuditFor<T>()` uses, so it also
+returns `null` for an id whose rows belong to another tenant. When a registered resolver cannot
+name a tenant, the replay is scoped to the no-tenant stream like any other read — so it still
+reconstructs entities from rows that were never tenant-stamped (a single-tenant deployment
+reconstructs its history unchanged), and returns `null` only for entities whose rows *are*
+tenant-stamped. It is a scoped read, not a blanket denial; do not rely on it to refuse.
+Before v1.0.0 it read the audit table directly and replayed *every* tenant's history for
+the requested id into one object — which handed tenant A's values to tenant B and produced an
+entity that had existed in no tenant. There is deliberately no `crossTenant` escape hatch here: a
+cross-tenant replay is not a wider read but an incorrect entity. Read across tenants with
+`AuditFor<T>(crossTenant: true)`, which returns rows rather than merging them.
 
 ### User attribution via ASP.NET Core
 
@@ -604,7 +707,11 @@ unit of work — push the scope you created for it.
 
 If you use pooling, register a resolver, and push nothing, OrionAudit **refuses**: the first
 audited save throws `OrionAuditConfigurationException` naming these fixes, rather than write a
-trail that looks healthy and names the wrong person. Non-pooled `AddDbContextFactory` cannot be
+trail that looks healthy and names the wrong person. **The read path refuses from the same guard**:
+a tenant-scoped read (`AuditFor<T>()`, `AuditLog()`, reconstruction, the viewer's API) throws the
+same exception under the same wiring, so a pooled registration cannot mean one thing to a write and
+another to a read. `crossTenant: true` is an explicit opt-out of tenant scoping and is unaffected,
+as is a single-tenant app with no resolver registered. Non-pooled `AddDbContextFactory` cannot be
 detected this way (Microsoft DI does not let a library tell its root provider apart from a scope),
 so run with `ValidateScopes` enabled in Development — it is what makes that case fail loudly.
 
