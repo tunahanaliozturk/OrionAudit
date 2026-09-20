@@ -74,7 +74,14 @@ public sealed class OrionAuditOptions
     /// <summary>Registers a type for audit with optional field-level overrides.</summary>
     public OrionAuditOptions Audit<T>(Action<AuditTypeBuilder<T>>? configure = null) where T : class
     {
-        ConfigurationBuilder.Audit(configure);
+        if (configure is null)
+        {
+            ConfigurationBuilder.Audit<T>();
+        }
+        else
+        {
+            ConfigurationBuilder.Audit(configure);
+        }
         return this;
     }
 

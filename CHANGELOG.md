@@ -76,6 +76,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all: the lambda parameter's type is inferred, and anyone calling it already references
   `OrionAudit.AspNetCore`. Property names and defaults are untouched.
 
+- Two public signatures reshaped to satisfy the backcompat rules the API analyzer enforces:
+  RS0026 (*do not add multiple overloads with optional parameters*) and RS0027 (*API with
+  optional parameter(s) should have the most parameters amongst its public overloads*). Both
+  fired while the surface sat in `PublicAPI.Unshipped.txt` and went quiet the moment 1.0.0
+  promoted it into `PublicAPI.Shipped.txt` — those rules only run against unshipped API — so
+  they shipped in 1.0.0 with nothing left to flag them.
+
+  - `AuditModelBuilderExtensions.ApplyOrionAuditConfigurations` had two overloads that *both*
+    carried optional parameters (RS0026), the exact shape that turns adding a parameter later
+    into a source-breaking ambiguity the compiler cannot resolve. They are now one method whose
+    second parameter is an optional `DbContext? context = null`. Passing it still auto-discovers
+    the `CustomColumn`s registered via `AddOrionAudit`; an explicit `customColumns` argument
+    still wins over discovery. Both common call sites are unchanged —
+    `modelBuilder.ApplyOrionAuditConfigurations()` and
+    `modelBuilder.ApplyOrionAuditConfigurations(this)` — as are named arguments such as
+    `columnHints:` and `customColumns:`. The one shape that breaks is a table name passed
+    positionally with no context: `ApplyOrionAuditConfigurations("MyLog")` becomes
+    `ApplyOrionAuditConfigurations(auditLogTableName: "MyLog")`. Nothing in this repository, its
+    samples or its docs used it.
+
+  - `AuditConfigurationBuilder.Audit<T>(Action<AuditTypeBuilder<T>>? configure = null)` carried
+    an optional parameter without being the widest overload, because the non-generic
+    `Audit(Type)` ties it on parameter count (RS0027). It is now two overloads with no optional
+    parameters at all: `Audit<T>()` and `Audit<T>(Action<AuditTypeBuilder<T>> configure)`. Both
+    `o.Audit<Order>()` and `o.Audit<Order>(b => ...)` compile exactly as before; the only change
+    is `Audit<T>(null)`, which now binds to the callback overload and throws
+    `ArgumentNullException` rather than silently registering nothing.
+    `OrionAuditOptions.Audit<T>(configure = null)` — the surface almost every consumer actually
+    calls — is untouched.
+
 ### Added
 
 - **`AuditChainVerificationAnchor`** — the stream head `AuditChainVerifier.VerifyStream` checks a
