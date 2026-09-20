@@ -9,9 +9,9 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
-    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <!--
       Security pin: GHSA-2m69-gcr7-jv3q (High) in the bundled SQLite native library.

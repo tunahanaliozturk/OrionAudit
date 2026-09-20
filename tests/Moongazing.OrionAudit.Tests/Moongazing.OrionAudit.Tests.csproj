@@ -6,7 +6,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <!-- Drives OrionAuditModuleGenerator directly (CSharpGeneratorDriver) in the generator tests,
          so they can assert on the emitted source, its diagnostics, and that it compiles. Pinned to
