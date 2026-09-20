@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The benchmarks project builds warning-free, and its warnings are errors again.** It was
+  the one project with `TreatWarningsAsErrors=false`, which is why three warnings sat there
+  unnoticed. `CA1305` is fixed (`ToString(CultureInfo.InvariantCulture)`); `CA1707` is
+  suppressed with a reason, because a benchmark method name is a label in the results table
+  and the underscore separates the scenario from what is measured. The whole solution now
+  builds with zero warnings, so a new one is a signal rather than noise.
 - **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
   races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
   100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while
