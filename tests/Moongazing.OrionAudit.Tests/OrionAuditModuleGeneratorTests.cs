@@ -206,6 +206,104 @@ public class OrionAuditModuleGeneratorTests
             result.GeneratedSources.Select(s => s.HintName).Distinct(StringComparer.Ordinal).Count());
     }
 
+    [Fact]
+    public void UnreachableAuditableType_ReportsOA0003AtItsDeclaration()
+    {
+        const string source = """
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            [OrionAuditModule]
+            public partial class Registry { }
+
+            public class Host
+            {
+                [Auditable]
+                private sealed class Hidden { public int Id { get; set; } }
+            }
+            """;
+
+        var (_, run) = Run(source);
+
+        // Dropped in silence before: the consumer believes Hidden is audited and only finds out
+        // when no audit row is ever written for it.
+        var diagnostic = SingleDiagnostic(run, "OA0003");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal("Hidden", TextAt(source, diagnostic));
+        Assert.DoesNotContain("Hidden", SingleSource(run), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AbstractAuditableType_ReportsOA0002AtItsDeclaration()
+    {
+        const string source = """
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            [OrionAuditModule]
+            public partial class Registry { }
+
+            [Auditable]
+            public abstract class EntityBase { public int Id { get; set; } }
+            """;
+
+        var (_, run) = Run(source);
+
+        var diagnostic = SingleDiagnostic(run, "OA0002");
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Equal("EntityBase", TextAt(source, diagnostic));
+    }
+
+    [Fact]
+    public void ReachableAuditableTypes_AreRegisteredWithoutADiagnostic()
+    {
+        const string source = """
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            [OrionAuditModule]
+            public partial class Registry { }
+
+            [Auditable]
+            public sealed class Widget { public int Id { get; set; } }
+
+            internal partial class Host
+            {
+                [Auditable]
+                internal sealed class Nested { public int Id { get; set; } }
+            }
+            """;
+
+        var run = RunAndAssertConsumerCompiles(source);
+
+        Assert.Empty(run.Diagnostics);
+        Assert.Contains("typeof(global::Consumer.Widget)", SingleSource(run), StringComparison.Ordinal);
+        Assert.Contains("typeof(global::Consumer.Host.Nested)", SingleSource(run), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutAnyModule_AnUnregisterableAuditableTypeIsNotReported()
+    {
+        const string source = """
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            public class Host
+            {
+                [Auditable]
+                private sealed class Hidden { public int Id { get; set; } }
+            }
+            """;
+
+        // Nothing is generated at all, so the consumer is on the reflective path and there is
+        // nothing to warn about. TreatWarningsAsErrors makes a spurious warning a build break.
+        Assert.Empty(Run(source).Run.Diagnostics);
+    }
+
     private static (Compilation Output, GeneratorDriverRunResult Run) Run(string source)
     {
         // Every assembly the test host has loaded, plus OrionAudit itself: enough for a consumer

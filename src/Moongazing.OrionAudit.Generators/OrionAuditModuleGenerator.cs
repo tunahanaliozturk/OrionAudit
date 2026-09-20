@@ -16,6 +16,9 @@ namespace Moongazing.OrionAudit.Generators;
 ///   <item><c>RegisterAuditedTypes(AuditConfigurationBuilder)</c> — replaces the reflective scan.</item>
 ///   <item><c>AuditedTypeNames</c> — the names discovered, for wiring a manual JSON context.</item>
 /// </list>
+/// Anything the generator cannot register is reported as a diagnostic (OA0001-OA0003) rather than
+/// dropped in silence: a consumer who asked for a type to be audited must never have to discover
+/// from a missing method or a missing audit row that the generator skipped it.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
@@ -38,6 +41,34 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
         description: "The generator adds RegisterAuditedTypes and AuditedTypeNames to the annotated type through a second partial declaration. The annotated type and every type it is nested in must therefore be declared 'partial'.",
         helpLinkUri: HelpLink);
 
+    /// <summary>
+    /// OA0002: an <c>[Auditable]</c> type is abstract. Capture matches on the runtime CLR type of a
+    /// tracked entity, which is never an abstract type, so registering it would audit nothing.
+    /// </summary>
+    internal static readonly DiagnosticDescriptor AuditableTypeIsAbstract = new DiagnosticDescriptor(
+        id: "OA0002",
+        title: "[Auditable] type is abstract and is not registered",
+        messageFormat: "'{0}' carries [Auditable] but is abstract, so the generated module does not register it; mark the concrete derived types instead",
+        category: "Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Audit capture matches on the runtime CLR type of a tracked entity, which is never an abstract type. Move [Auditable] onto the concrete derived types, or register the base explicitly with AuditConfigurationBuilder.Audit.",
+        helpLinkUri: HelpLink);
+
+    /// <summary>
+    /// OA0003: an <c>[Auditable]</c> type is not reachable from the generated module, because it or
+    /// one of the types it is nested in is more restricted than <c>internal</c>.
+    /// </summary>
+    internal static readonly DiagnosticDescriptor AuditableTypeNotReachable = new DiagnosticDescriptor(
+        id: "OA0003",
+        title: "[Auditable] type is not reachable from the generated module and is not registered",
+        messageFormat: "'{0}' carries [Auditable] but '{1}' is not public or internal, so the generated module cannot name it and does not register it",
+        category: "Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The generated registration uses typeof(...) from the module's own declaration, which can only name a type whose whole containing chain is public or internal. Widen the accessibility, or register the type at runtime with AuditConfigurationBuilder.Audit (which carries a trim warning).",
+        helpLinkUri: HelpLink);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // A module or an entity may be declared as a class or a record; a record is a
@@ -56,39 +87,69 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
                 AuditableAttributeFqn,
                 predicate: static (node, _) => node is TypeDeclarationSyntax,
                 transform: static (ctx, _) => (INamedTypeSymbol?)ctx.TargetSymbol)
-            .Where(static sym => sym is not null
-                                 && !sym.IsAbstract
-                                 // The generated registration call uses the type via typeof(...) from the
-                                 // emitted partial class. That requires the type to be reachable from
-                                 // somewhere in the compilation — private/protected nested types
-                                 // declared inside test classes etc. would not be. Skip them; the
-                                 // reflective AuditConfigurationBuilder.Audit<T>() path still works for
-                                 // those cases (with a trim warning).
-                                 && IsReachable(sym!))
+            .Where(static sym => sym is not null)
             .Select(static (sym, _) => sym!)
             .Collect();
 
         context.RegisterSourceOutput(modules.Combine(auditableTypes), Emit);
     }
 
-    private static bool IsReachable(INamedTypeSymbol type)
+    /// <summary>
+    /// The generated registration names the type via <c>typeof(...)</c> from the module's own
+    /// declaration, so every type it is nested in must be at least internal. Returns the container
+    /// that fails, or <see langword="null"/> when the type is reachable.
+    /// </summary>
+    private static INamedTypeSymbol? FirstUnreachable(INamedTypeSymbol type)
     {
-        // Walk outward through nested types — every container must be at least Internal.
         for (var current = type; current is not null; current = current.ContainingType)
         {
             if (current.DeclaredAccessibility != Accessibility.Public
                 && current.DeclaredAccessibility != Accessibility.Internal)
             {
-                return false;
+                return current;
             }
         }
-        return true;
+
+        return null;
     }
 
     private static void Emit(
         SourceProductionContext spc,
         (ImmutableArray<INamedTypeSymbol> Modules, ImmutableArray<INamedTypeSymbol> Types) input)
     {
+        // Without a module nothing is generated at all, so an unregisterable [Auditable] type is not
+        // yet a problem — the consumer is still on the reflective path. Stay quiet.
+        if (input.Modules.IsDefaultOrEmpty)
+        {
+            return;
+        }
+
+        // Anything dropped here is a type the consumer asked to audit. Say so; a missing audit row
+        // months later is a far worse way to find out.
+        var types = new List<INamedTypeSymbol>(input.Types.Length);
+        foreach (var type in input.Types)
+        {
+            if (type.IsAbstract)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    AuditableTypeIsAbstract, DeclarationLocation(type), type.ToDisplayString()));
+                continue;
+            }
+
+            var unreachable = FirstUnreachable(type);
+            if (unreachable is not null)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    AuditableTypeNotReachable,
+                    DeclarationLocation(type),
+                    type.ToDisplayString(),
+                    unreachable.ToDisplayString()));
+                continue;
+            }
+
+            types.Add(type);
+        }
+
         foreach (var module in input.Modules)
         {
             // Outermost first: every enclosing type has to be re-declared around the module, or the
@@ -130,7 +191,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 
             spc.AddSource(
                 HintNames.ForType(module) + ".OrionAuditModule.g.cs",
-                EmitModule(module, chain, declarations, input.Types));
+                EmitModule(module, chain, declarations, types));
         }
     }
 
@@ -154,7 +215,7 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
         INamedTypeSymbol module,
         List<INamedTypeSymbol> chain,
         List<TypeDeclarationSyntax> declarations,
-        ImmutableArray<INamedTypeSymbol> types)
+        List<INamedTypeSymbol> types)
     {
         var ns = module.ContainingNamespace.IsGlobalNamespace
             ? null

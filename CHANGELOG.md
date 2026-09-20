@@ -258,6 +258,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nested modules (which took only their namespace) and `Module` vs `Module<T>` collided the same
   way. The hint now comes from the type's full metadata name — namespace, every enclosing type,
   generic arity — through an injective escape, in a new `HintNames` helper that mirrors OrionGuard's.
+- **An `[Auditable]` type the generator cannot register is now reported, not dropped in silence.**
+  A type whose accessibility chain was not public/internal, and an abstract one, were filtered out
+  of the pipeline with nothing said: the consumer believed the type was audited and could only find
+  out when no audit row was ever written for it. Both now report at the type's own declaration —
+  **OA0003** for the accessibility chain (naming the container that fails) and **OA0002** for
+  abstract. Neither fires when the compilation declares no `[OrionAuditModule]` at all, since
+  nothing is generated then and the consumer is still on the reflective path.
+
+  The three diagnostics are `Usage` warnings and follow OrionGuard's `OG00xx` numbering. A fixture
+  that is deliberately unregisterable (private nested, abstract) suppresses them at the
+  declaration with `#pragma warning disable`.
 
 ## [0.11.3] - 2026-07-28
 

@@ -17,11 +17,14 @@ public sealed class PolymorphicCaptureTests
         public decimal Amount { get; set; }
     }
 
+    // Private nested on purpose: used only through the reflective path, so OA0003 is expected.
+#pragma warning disable OA0003 // [Auditable] type is not reachable from the generated module
     [Auditable(typeof(Document))]
     private sealed class Memo : Document
     {
         public string Body { get; set; } = "";
     }
+#pragma warning restore OA0003
 
     [Fact]
     public void AuditableAttribute_default_ctor_has_null_base_type()
