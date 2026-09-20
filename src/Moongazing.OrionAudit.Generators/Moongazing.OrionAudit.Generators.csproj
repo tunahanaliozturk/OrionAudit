@@ -11,6 +11,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      DO NOT BUMP. The outdated-package report will keep offering Microsoft.CodeAnalysis.CSharp
+      5.9.0; 4.10.0 is deliberate and is a compatibility floor, not neglect.
+
+      A source generator runs inside the consumer's compiler, so the Roslyn version it is COMPILED
+      against is the minimum Roslyn version that can LOAD it. Building this generator against 5.9
+      would refuse to load on any SDK older than 10.0.400 and take every OrionAudit consumer with
+      it. A generator built against 4.10 loads fine on every newer Roslyn, including 5.x, because
+      the IIncrementalGenerator surface it uses is backward compatible.
+
+      So the floor is a consumer-support decision: 4.10.0 is the oldest Roslyn we are willing to
+      require. Raise it only when we consciously decide to drop the SDKs below it - never because
+      a version report called it outdated.
+    -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
   </ItemGroup>
 

@@ -6,22 +6,29 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.2" />
-    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />
-    <!-- Castle lazy-loading proxies: cover for capture under UseLazyLoadingProxies(). -->
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Proxies" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.12" />
+    <!-- Castle lazy-loading proxies: cover for capture under UseLazyLoadingProxies().
+         Must track the EF Core version this project resolves: Proxies hooks EF Core through
+         internal extension points, so a 9.0.x Proxies on an EF Core 10 runtime restores
+         without complaint (its net8.0 asset is TFM-compatible with net10.0) and then breaks
+         at materialization time instead. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Proxies" Version="10.0.12" />
     <!--
       Security pin: GHSA-2m69-gcr7-jv3q (High) in the bundled SQLite native library.
-      Microsoft.EntityFrameworkCore.Sqlite resolves SQLitePCLRaw 2.1.10 transitively; this
-      lifts the whole bundle to the patched 2.1.12. Drop this line once the EF Core reference
-      resolves 2.1.12 on its own.
+      As of EF Core 10.0.12, Microsoft.EntityFrameworkCore.Sqlite depends on the patched 2.1.12
+      itself, so this no longer lifts anything - it is kept as an explicit floor so the advisory
+      stays documented at the reference and a future EF Core patch cannot quietly drop back.
+      It deliberately does NOT move to 3.0.x: that is a restructured major (no lib/ folder, a new
+      SQLitePCLRaw.config.e_sqlite3 + SQLite native package pair) that Microsoft.Data.Sqlite does
+      not reference, so forcing it would override what EF Core is built and tested against.
     -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <ProjectReference Include="..\..\src\Moongazing.OrionAudit\Moongazing.OrionAudit.csproj" />
