@@ -103,15 +103,15 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The generated registration names the type via <c>typeof(...)</c> from the module's own
-    /// declaration, so every type it is nested in must be at least internal. Returns the container
-    /// that fails, or <see langword="null"/> when the type is reachable.
+    /// declaration, so the type and every type it is nested in must be nameable from an unrelated
+    /// type in this compilation. Returns the link that fails, or <see langword="null"/> when the
+    /// whole chain is reachable.
     /// </summary>
     private static INamedTypeSymbol? FirstUnreachable(INamedTypeSymbol type)
     {
         for (var current = type; current is not null; current = current.ContainingType)
         {
-            if (current.DeclaredAccessibility != Accessibility.Public
-                && current.DeclaredAccessibility != Accessibility.Internal)
+            if (!IsNameableFromThisCompilation(current.DeclaredAccessibility))
             {
                 return current;
             }
@@ -119,6 +119,37 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 
         return null;
     }
+
+    /// <summary>
+    /// Whether an unrelated type in the same compilation — which is all the generated module is —
+    /// can name something with this accessibility. These diagnostics are the first this library
+    /// emits, so a false positive here is a build break for a consumer with
+    /// <c>TreatWarningsAsErrors</c> on a type that was always fine; it costs more than the silent
+    /// drop it replaced. Every member is answered on purpose.
+    /// </summary>
+    private static bool IsNameableFromThisCompilation(Accessibility accessibility) => accessibility switch
+    {
+        Accessibility.Public => true,
+        Accessibility.Internal => true,
+
+        // 'protected internal' is protected OR internal. The internal half alone lets every type in
+        // this compilation name it, so the module can, whether or not it derives from the container.
+        Accessibility.ProtectedOrInternal => true,
+
+        // 'private protected' is protected AND internal. Same assembly is not enough — the caller
+        // must also derive from the container, and the generated module never does.
+        Accessibility.ProtectedAndInternal => false,
+
+        // Only a derived type can name it, and the module is not one.
+        Accessibility.Protected => false,
+        Accessibility.Private => false,
+
+        // NotApplicable, and anything a later language version adds. A source type declaration does
+        // not produce it, so this is unreachable in practice; if it ever is reached, emitting
+        // typeof(...) and letting the compiler object is a louder, more accurate failure than a
+        // warning we cannot justify.
+        _ => true,
+    };
 
     private static void Emit(
         SourceProductionContext spc,

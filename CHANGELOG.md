@@ -275,6 +275,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   abstract. Neither fires when the compilation declares no `[OrionAuditModule]` at all, since
   nothing is generated then and the consumer is still on the reflective path.
 
+  Reachability answers every `Accessibility` member deliberately. `public`, `internal` and
+  `protected internal` are reachable — `protected internal` is protected *or* internal, and the
+  internal half alone lets any type in the compilation name it. `private protected` (protected
+  *and* internal), `protected` and `private` are not: same assembly is not enough, the caller must
+  also derive from the container, and a generated module never does.
+
   The three diagnostics are `Usage` warnings and follow OrionGuard's `OG00xx` numbering. A fixture
   that is deliberately unregisterable (private nested, abstract) suppresses them at the
   declaration with `#pragma warning disable`.

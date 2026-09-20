@@ -256,6 +256,66 @@ public class OrionAuditModuleGeneratorTests
         Assert.Equal("EntityBase", TextAt(source, diagnostic));
     }
 
+    [Theory]
+    // 'protected internal' is protected OR internal — the internal half alone lets every type in
+    // this compilation name it, so the generated module can, and OA0003 would be a false warning
+    // that a consumer with TreatWarningsAsErrors reads as a build break.
+    [InlineData("protected internal")]
+    [InlineData("public")]
+    [InlineData("internal")]
+    public void AuditableTypeAccessibleToTheWholeAssembly_IsRegisteredWithoutADiagnostic(string accessibility)
+    {
+        var source = $$"""
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            [OrionAuditModule]
+            public partial class Registry { }
+
+            public partial class Host
+            {
+                [Auditable]
+                {{accessibility}} sealed class Nested { public int Id { get; set; } }
+            }
+            """;
+
+        var run = RunAndAssertConsumerCompiles(source);
+
+        Assert.Empty(run.Diagnostics);
+        Assert.Contains("typeof(global::Consumer.Host.Nested)", SingleSource(run), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // 'private protected' is protected AND internal: same assembly is not enough, the caller must
+    // also derive from Host, and the generated module does not.
+    [InlineData("private protected")]
+    [InlineData("protected")]
+    [InlineData("private")]
+    public void AuditableTypeTheModuleCannotName_ReportsOA0003(string accessibility)
+    {
+        var source = $$"""
+            using Moongazing.OrionAudit;
+
+            namespace Consumer;
+
+            [OrionAuditModule]
+            public partial class Registry { }
+
+            public partial class Host
+            {
+                [Auditable]
+                {{accessibility}} sealed class Nested { public int Id { get; set; } }
+            }
+            """;
+
+        var (_, run) = Run(source);
+
+        var diagnostic = SingleDiagnostic(run, "OA0003");
+        Assert.Equal("Nested", TextAt(source, diagnostic));
+        Assert.DoesNotContain("Nested", SingleSource(run), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ReachableAuditableTypes_AreRegisteredWithoutADiagnostic()
     {
