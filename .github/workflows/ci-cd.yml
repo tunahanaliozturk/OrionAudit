@@ -26,7 +26,11 @@ jobs:
             10.0.x
       - run: dotnet restore ${{ env.SOLUTION_PATH }}
       - run: dotnet build ${{ env.SOLUTION_PATH }} --no-restore --configuration Release
-      - run: dotnet test ${{ env.SOLUTION_PATH }} --no-build --configuration Release
+      # --minimum-expected-tests is the gate on the gate: this step used to exit 0 without running
+      # a single test, and nothing in the log said so. Each test app must now report at least one
+      # test or the run fails. The `--` also fails loudly if TestingPlatformDotnetTestSupport is
+      # ever dropped, because plain `dotnet test` rejects the argument instead of ignoring it.
+      - run: dotnet test ${{ env.SOLUTION_PATH }} --no-build --configuration Release -- --minimum-expected-tests 1
 
   aot-publish-check:
     needs: build-and-test
