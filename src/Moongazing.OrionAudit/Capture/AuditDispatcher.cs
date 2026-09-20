@@ -226,65 +226,84 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
             }
         }
 
-        // Tamper-evidence: stamp the hash chain across the rows built this cycle, chaining each onto
-        // its entity stream's persisted anchor (locked + advanced in this same transaction), before
-        // publish + SaveChanges so the hashes commit in the same transaction as the AuditLog inserts.
-        // Dead-lettered rows were never added to hashableRows, so a poisoned queue row does not enter
-        // (or break) the chain.
-        if (hashChain is not null && hashableRows is { Count: > 0 })
+        // The chain's anchor lock only serializes same-stream appends while it is HELD, and a
+        // statement that joins no transaction releases it before the anchor is even read. This
+        // method never opened one (EF's own SaveChanges transaction starts long after the stamp), so
+        // the lock protected nothing and two dispatch cycles could stamp the same predecessor hash.
+        // One transaction now spans the stamp, the publish and the flush. See ChainWriteTransaction;
+        // a provider with no transaction support comes back null and the work runs unwrapped.
+        var chainTransaction = hashChain is null || hashableRows is not { Count: > 0 }
+            ? null
+            : await Integrity.ChainWriteTransaction.BeginOrNullAsync(ctx, cancellationToken).ConfigureAwait(false);
+        try
         {
-            var keyProvider = scope.ServiceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
-            await Integrity.EfCoreAuditHashChainWriter
-                .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
-                    configuration.CustomColumns, cancellationToken)
-                .ConfigureAwait(false);
-        }
+            // Tamper-evidence: stamp the hash chain across the rows built this cycle, chaining each onto
+            // its entity stream's persisted anchor (locked + advanced in this same transaction), before
+            // publish + SaveChanges so the hashes commit in the same transaction as the AuditLog inserts.
+            // Dead-lettered rows were never added to hashableRows, so a poisoned queue row does not enter
+            // (or break) the chain.
+            if (hashChain is not null && hashableRows is { Count: > 0 })
+            {
+                var keyProvider = scope.ServiceProvider.GetRequiredService<Integrity.IAuditChainKeyProvider>();
+                await Integrity.EfCoreAuditHashChainWriter
+                    .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
+                        configuration.CustomColumns, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
-        // Publish BEFORE the dispatcher's SaveChanges so a publisher exception aborts the same
-        // transaction that holds the AuditLog insert + queue-row delete. Keeps the v0.5 dispatch
-        // contract: either the AuditLog row exists AND the publisher was called, or neither.
-        //
-        // Edge case: if PublishAsync succeeds and SaveChanges later fails (rare commit failures
-        // such as network partition mid-commit), downstream may observe an event whose AuditLog
-        // row was never persisted. The queue row remains and the next dispatch cycle generates a
-        // new AuditLog Guid and re-publishes. Consumers MUST treat AuditLogEvent as an
-        // at-least-once notification and reconcile against the AuditLog table when authoritative
-        // state matters. Strict transactional outbox semantics are tracked in the v0.7.x roadmap.
-        if (publisher is not null && publishEvents is { Count: > 0 })
-        {
-            // v0.7.21: time the PublishAsync round-trip so a slow Kafka/RabbitMQ tail
-            // surfaces independently of the database commit. Records on BOTH success
-            // and failure (try/finally) so a publisher that times out is the most
-            // visible part of the histogram tail - exactly what operators need to
-            // diagnose broker incidents.
-            // v0.7.22: per-publish event count for batch-shape visibility.
-            OrionAuditTelemetry.RecordEventsPerPublish(publishEvents.Count);
-            var publishSw = Stopwatch.StartNew();
+            // Publish BEFORE the dispatcher's SaveChanges so a publisher exception aborts the same
+            // transaction that holds the AuditLog insert + queue-row delete. Keeps the v0.5 dispatch
+            // contract: either the AuditLog row exists AND the publisher was called, or neither.
+            //
+            // Edge case: if PublishAsync succeeds and SaveChanges later fails (rare commit failures
+            // such as network partition mid-commit), downstream may observe an event whose AuditLog
+            // row was never persisted. The queue row remains and the next dispatch cycle generates a
+            // new AuditLog Guid and re-publishes. Consumers MUST treat AuditLogEvent as an
+            // at-least-once notification and reconcile against the AuditLog table when authoritative
+            // state matters. Strict transactional outbox semantics are tracked in the v0.7.x roadmap.
+            if (publisher is not null && publishEvents is { Count: > 0 })
+            {
+                // v0.7.21: time the PublishAsync round-trip so a slow Kafka/RabbitMQ tail
+                // surfaces independently of the database commit. Records on BOTH success
+                // and failure (try/finally) so a publisher that times out is the most
+                // visible part of the histogram tail - exactly what operators need to
+                // diagnose broker incidents.
+                // v0.7.22: per-publish event count for batch-shape visibility.
+                OrionAuditTelemetry.RecordEventsPerPublish(publishEvents.Count);
+                var publishSw = Stopwatch.StartNew();
+                try
+                {
+                    await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    publishSw.Stop();
+                    OrionAuditTelemetry.RecordPublishDuration(publishSw.Elapsed.TotalMilliseconds);
+                }
+            }
+
+            // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.
+            // v0.7.24: time the SaveChangesAsync wall-clock so operators see the EF write
+            // cost isolated from publish + housekeeping. try/finally so a commit failure
+            // still emits the sample - slow failing commits are the most operator-relevant
+            // tail (deadlocks, transient backend pressure).
+            var flushSw = Stopwatch.StartNew();
             try
             {
-                await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+                await ctx.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
-                publishSw.Stop();
-                OrionAuditTelemetry.RecordPublishDuration(publishSw.Elapsed.TotalMilliseconds);
+                flushSw.Stop();
+                OrionAuditTelemetry.RecordDispatchFlushDuration(flushSw.Elapsed.TotalMilliseconds);
             }
-        }
 
-        // Inserts (AuditLog) + deletes (queue rows) + failure updates commit together.
-        // v0.7.24: time the SaveChangesAsync wall-clock so operators see the EF write
-        // cost isolated from publish + housekeeping. try/finally so a commit failure
-        // still emits the sample - slow failing commits are the most operator-relevant
-        // tail (deadlocks, transient backend pressure).
-        var flushSw = Stopwatch.StartNew();
-        try
-        {
-            await ctx.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await Integrity.ChainWriteTransaction.ReleaseAsync(chainTransaction, commit: true).ConfigureAwait(false);
         }
-        finally
+        catch
         {
-            flushSw.Stop();
-            OrionAuditTelemetry.RecordDispatchFlushDuration(flushSw.Elapsed.TotalMilliseconds);
+            await Integrity.ChainWriteTransaction.ReleaseAsync(chainTransaction, commit: false).ConfigureAwait(false);
+            throw;
         }
 
         // v0.7.20: emit AFTER SaveChangesAsync confirms persistence so a publish or

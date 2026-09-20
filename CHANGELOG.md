@@ -87,6 +87,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same way (Microsoft DI hands out the same scope type for the root container and every child scope,
   and `IsRootScope` is internal), so it is covered by `AuditScope.PushServices`, the documentation,
   and `ValidateScopes`.
+- **`UseHashChain`'s anchor lock is actually held now, so concurrent same-stream writes really do
+  serialize.** `EfCoreAuditHashChainWriter` issues its pessimistic anchor lock
+  (`SELECT ... FOR UPDATE` / `WITH (UPDLOCK, HOLDLOCK)`) through `Database.ExecuteSqlRawAsync`,
+  which joins the context's current transaction *only if one exists* - and on the default path none
+  did. At interceptor time a plain `SaveChangesAsync` has no transaction (EF opens its own **after**
+  the interceptor runs), and the async dispatcher never opened one at all. The lock was therefore
+  acquired and released before the anchor was even read, so two concurrent same-stream saves both
+  read head `H`, both stamped `PreviousHash = H`, and both committed; `AuditChainAnchor` carries no
+  concurrency token, so the lost anchor update went unnoticed too, and verification then reported
+  `BrokenLink` on a trail nobody had touched. The README's promise that same-stream writes
+  "serialize on the anchor row inside your transaction" only held for consumers who happened to open
+  a transaction by hand.
+
+  Both write paths now open one around the stamp when the consumer has none
+  (`ChainWriteTransaction`), so the lock, the head read, the stamped rows and the advanced anchor
+  commit as one unit: the interceptor commits it in `SavedChanges` / `SavedChangesAsync` and releases
+  it in `SaveChangesFailed(Async)` / `SaveChangesCanceled(Async)`, covering the synchronous and
+  asynchronous entry points alike, and the dispatcher wraps its materialise-and-insert region. A
+  transaction the consumer opened themselves is left alone - it already spans the stamp, and
+  committing someone else's transaction is not ours to do. A provider without transaction support
+  (the EF in-memory provider) raises on begin; that is caught and the work runs unwrapped, the same
+  degradation `CopyToTableAuditArchiver` and `ChainPruneArchiver` already use. Consumers who never
+  enable hash-chaining are untouched: no chain, no transaction, no schema change.
 - **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
   races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
   100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while

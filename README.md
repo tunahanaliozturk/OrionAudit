@@ -168,9 +168,11 @@ services.AddOrionAudit<AppDbContext>(o =>
 ```
 
 A persisted per-stream anchor (`OrionAudit_Chain_Anchor`) makes concurrent same-stream writes safe
-(they serialize on the anchor row inside your transaction) and makes tail/whole-stream deletion
-detectable (the anchor remembers the true tail hash and row count). The key id is stored per row, so
-you can rotate keys later without invalidating rows written under an older (still-registered) key.
+(they serialize on the anchor row inside the write transaction — yours if you opened one, otherwise
+one OrionAudit opens around the stamp and commits together with the audit rows) and makes
+tail/whole-stream deletion detectable (the anchor remembers the true tail hash and row count). The
+key id is stored per row, so you can rotate keys later without invalidating rows written under an
+older (still-registered) key.
 
 `UseHashChain()` adds three nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`) to the audit
 table plus the `OrionAudit_Chain_Anchor` table, so add a migration after enabling it:

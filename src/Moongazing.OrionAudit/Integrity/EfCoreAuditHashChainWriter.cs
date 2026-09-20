@@ -12,11 +12,14 @@ namespace Moongazing.OrionAudit.Integrity;
 /// <para>
 /// <b>Concurrency.</b> The stream's <see cref="AuditChainAnchor"/> is the single point two concurrent
 /// appenders contend on. Before reading a stream's head this writer takes a pessimistic row lock on
-/// that stream's anchor (provider-appropriate) <em>within the consumer's transaction</em>, stamps
+/// that stream's anchor (provider-appropriate) <em>within the write transaction</em>, stamps
 /// <see cref="AuditLog.PreviousHash"/> from the anchor, then updates the anchor's latest hash + count
 /// in the same transaction. Same-stream appends therefore serialize on the anchor row, so two
 /// transactions cannot stamp the same predecessor hash and corrupt the chain; different streams lock
-/// different anchor rows and stay parallel.
+/// different anchor rows and stay parallel. That transaction is the consumer's when they opened one,
+/// and otherwise one <see cref="ChainWriteTransaction"/> opens around the stamp - without it the lock
+/// statement joined no transaction and released before the head was even read, which made the whole
+/// guarantee vacuous on the default path.
 /// </para>
 /// <para>
 /// <b>Provider behaviour.</b> On SQL Server the lock is <c>WITH (UPDLOCK, HOLDLOCK)</c>; on

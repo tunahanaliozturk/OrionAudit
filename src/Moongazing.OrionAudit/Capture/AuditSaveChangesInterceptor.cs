@@ -1,10 +1,12 @@
 ﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Moongazing.Orion.Abstractions.Observers;
 using Moongazing.OrionAudit.Configuration;
@@ -20,6 +22,15 @@ namespace Moongazing.OrionAudit.Capture;
 public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 {
     private readonly IServiceProvider serviceProvider;
+
+    // The hash chain's write transaction, keyed by the context it was opened on. It is opened while
+    // capturing (so the anchor lock and head read are inside it) and released by that same context's
+    // SavedChanges / SaveChangesFailed / SaveChangesCanceled callback. Keyed per context rather than
+    // held in a field because nothing guarantees one interceptor instance per DbContext - the wiring
+    // creates one per context today, but a consumer registering a shared instance must not make two
+    // contexts share one transaction. Weak keys so a context that is dropped without saving cannot
+    // keep an entry alive.
+    private readonly ConditionalWeakTable<DbContext, IDbContextTransaction> chainTransactions = new();
 
     /// <param name="serviceProvider">
     /// The service provider captured at options-build time by the
@@ -270,13 +281,32 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         // and before publish/SaveChanges so the hashes commit atomically with the rows. Every captured
         // row is chained, including ones that recorded a diff Error, so an error row cannot silently
         // create a gap.
+        //
+        // The stamp runs inside an explicit transaction opened here when the consumer has none of
+        // their own, and committed in SavedChanges. Without it the writer's anchor row lock was
+        // acquired and released before the head was even read - EF does not open its SaveChanges
+        // transaction until after this interceptor returns - so the lock serialized nothing. See
+        // Integrity.ChainWriteTransaction.
         if (hashChain is not null && hashableRows is { Count: > 0 })
         {
-            var keyProvider = services.GetRequiredService<Integrity.IAuditChainKeyProvider>();
-            await Integrity.EfCoreAuditHashChainWriter
-                .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
-                    configuration.CustomColumns, cancellationToken)
-                .ConfigureAwait(false);
+            await BeginChainTransactionAsync(ctx, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // `services`, not the captured provider: under AddDbContextPool the captured one is
+                // the root provider, and the key provider may be scoped like the resolvers are.
+                var keyProvider = services.GetRequiredService<Integrity.IAuditChainKeyProvider>();
+                await Integrity.EfCoreAuditHashChainWriter
+                    .StampAsync(ctx, hashableRows, hashChain.Scope, keyProvider,
+                        configuration.CustomColumns, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // A throw here aborts the save before EF ever runs it, so SaveChangesFailed never
+                // fires to release what we just opened.
+                await ReleaseChainTransactionAsync(ctx, commit: false).ConfigureAwait(false);
+                throw;
+            }
         }
 
         OrionAuditTelemetry.EntriesWritten.Add(writtenCount);
@@ -300,12 +330,125 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
         // at-least-once notification and dedupe on AuditLogId.
         if (publisher is not null && publishEvents is { Count: > 0 })
         {
-            await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await publisher.PublishAsync(publishEvents, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Same reason as the stamp above: the save never reaches EF, so nothing else will
+                // release the chain transaction.
+                await ReleaseChainTransactionAsync(ctx, commit: false).ConfigureAwait(false);
+                throw;
+            }
         }
 
         // Status is set only once everything (capture + publish) has succeeded so a publisher
         // exception is correctly reflected as a failure span.
         activity?.SetStatus(ActivityStatusCode.Ok);
+    }
+
+    // Opens the chain's write transaction for this context and remembers it, unless the consumer
+    // already owns one (theirs already spans the stamp) or the provider has none. Both cases come
+    // back null from the helper and simply record nothing, so the release callbacks are no-ops.
+    private async Task BeginChainTransactionAsync(DbContext ctx, CancellationToken cancellationToken)
+    {
+        var transaction = await Integrity.ChainWriteTransaction
+            .BeginOrNullAsync(ctx, cancellationToken).ConfigureAwait(false);
+        if (transaction is not null)
+        {
+            chainTransactions.AddOrUpdate(ctx, transaction);
+        }
+    }
+
+    // Commits or rolls back the transaction opened for this context, if any. Removing the entry
+    // first makes the release idempotent, so an extra callback (or a rollback already done on the
+    // capture path) cannot release twice.
+    private async Task ReleaseChainTransactionAsync(DbContext ctx, bool commit)
+    {
+        if (!chainTransactions.TryGetValue(ctx, out var transaction))
+        {
+            return;
+        }
+        chainTransactions.Remove(ctx);
+        await Integrity.ChainWriteTransaction.ReleaseAsync(transaction, commit).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override int SavedChanges(SaveChangesCompletedEventData eventData, int result)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (eventData.Context is { } ctx)
+        {
+            ReleaseChainTransactionAsync(ctx, commit: true).GetAwaiter().GetResult();
+        }
+        return base.SavedChanges(eventData, result);
+    }
+
+    /// <inheritdoc />
+    public override async ValueTask<int> SavedChangesAsync(
+        SaveChangesCompletedEventData eventData,
+        int result,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (eventData.Context is { } ctx)
+        {
+            await ReleaseChainTransactionAsync(ctx, commit: true).ConfigureAwait(false);
+        }
+        return await base.SavedChangesAsync(eventData, result, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public override void SaveChangesFailed(DbContextErrorEventData eventData)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (eventData.Context is { } ctx)
+        {
+            ReleaseChainTransactionAsync(ctx, commit: false).GetAwaiter().GetResult();
+        }
+        base.SaveChangesFailed(eventData);
+    }
+
+    /// <inheritdoc />
+    public override async Task SaveChangesFailedAsync(
+        DbContextErrorEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (eventData.Context is { } ctx)
+        {
+            await ReleaseChainTransactionAsync(ctx, commit: false).ConfigureAwait(false);
+        }
+        await base.SaveChangesFailedAsync(eventData, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// EF routes a cancelled save here rather than to <see cref="SaveChangesFailed"/>, so without
+    /// this override a cancellation would leave the chain transaction open on the connection.
+    /// </remarks>
+    public override void SaveChangesCanceled(DbContextEventData eventData)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (eventData.Context is { } ctx)
+        {
+            ReleaseChainTransactionAsync(ctx, commit: false).GetAwaiter().GetResult();
+        }
+        base.SaveChangesCanceled(eventData);
+    }
+
+    /// <inheritdoc />
+    public override async Task SaveChangesCanceledAsync(
+        DbContextEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventData);
+        if (eventData.Context is { } ctx)
+        {
+            await ReleaseChainTransactionAsync(ctx, commit: false).ConfigureAwait(false);
+        }
+        await base.SaveChangesCanceledAsync(eventData, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
