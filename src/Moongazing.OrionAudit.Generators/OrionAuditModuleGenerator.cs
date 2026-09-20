@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Moongazing.OrionAudit.Generators;
@@ -12,7 +14,7 @@ namespace Moongazing.OrionAudit.Generators;
 /// <c>[Auditable]</c> types and produces, on each module:
 /// <list type="bullet">
 ///   <item><c>RegisterAuditedTypes(AuditConfigurationBuilder)</c> — replaces the reflective scan.</item>
-///   <item><c>SerializerContext</c> — static property returning a source-generated System.Text.Json context.</item>
+///   <item><c>AuditedTypeNames</c> — the names discovered, for wiring a manual JSON context.</item>
 /// </list>
 /// </summary>
 [Generator(LanguageNames.CSharp)]
@@ -20,6 +22,21 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
 {
     private const string ModuleAttributeFqn = "Moongazing.OrionAudit.OrionAuditModuleAttribute";
     private const string AuditableAttributeFqn = "Moongazing.OrionAudit.AuditableAttribute";
+    private const string HelpLink = "https://github.com/tunahanaliozturk/OrionAudit#source-generated-registration-aot-aware";
+
+    /// <summary>
+    /// OA0001: an <c>[OrionAuditModule]</c> type, or one of the types it is nested in, is not
+    /// declared <c>partial</c>, so the generator has nothing it can add members to.
+    /// </summary>
+    internal static readonly DiagnosticDescriptor ModuleNotPartial = new DiagnosticDescriptor(
+        id: "OA0001",
+        title: "[OrionAuditModule] type is not partial",
+        messageFormat: "'{0}' carries [OrionAuditModule] but '{1}' is not declared 'partial', so no RegisterAuditedTypes method is generated",
+        category: "Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The generator adds RegisterAuditedTypes and AuditedTypeNames to the annotated type through a second partial declaration. The annotated type and every type it is nested in must therefore be declared 'partial'.",
+        helpLinkUri: HelpLink);
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -72,23 +89,70 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
     {
         foreach (var module in input.Modules)
         {
-            var source = EmitModule(module, input.Types);
+            // Outermost first: every enclosing type has to be re-declared around the module, or the
+            // emitted members land on an unrelated top-level type that happens to share its name and
+            // the consumer's Outer.Module.RegisterAuditedTypes(...) call does not resolve.
+            var chain = new List<INamedTypeSymbol>();
+            for (var current = module; current is not null; current = current.ContainingType)
+            {
+                chain.Add(current);
+            }
+
+            chain.Reverse();
+
+            INamedTypeSymbol? blocker = null;
+            foreach (var link in chain)
+            {
+                var declaration = FirstDeclaration(link);
+                if (declaration is null || !declaration.Modifiers.Any(SyntaxKind.PartialKeyword))
+                {
+                    blocker = link;
+                    break;
+                }
+            }
+
+            // Emitting a second, non-matching declaration would only turn a clear miss into an
+            // opaque CS0260 on the consumer's own type. Say what is wrong instead.
+            if (blocker is not null)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    ModuleNotPartial,
+                    DeclarationLocation(module),
+                    module.ToDisplayString(),
+                    blocker.ToDisplayString()));
+                continue;
+            }
+
+            var source = EmitModule(module, chain, input.Types);
             var hint = $"{module.ContainingNamespace.ToDisplayString().Replace('.', '_')}_{module.Name}.OrionAuditModule.g.cs";
             spc.AddSource(hint, source);
         }
     }
 
-    private static string EmitModule(INamedTypeSymbol module, ImmutableArray<INamedTypeSymbol> types)
+    private static TypeDeclarationSyntax? FirstDeclaration(INamedTypeSymbol type)
+    {
+        foreach (var reference in type.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is TypeDeclarationSyntax declaration)
+            {
+                return declaration;
+            }
+        }
+
+        return null;
+    }
+
+    private static Location DeclarationLocation(INamedTypeSymbol type) =>
+        type.Locations.FirstOrDefault(static l => l.IsInSource) ?? Location.None;
+
+    private static string EmitModule(
+        INamedTypeSymbol module,
+        List<INamedTypeSymbol> chain,
+        ImmutableArray<INamedTypeSymbol> types)
     {
         var ns = module.ContainingNamespace.IsGlobalNamespace
             ? null
             : module.ContainingNamespace.ToDisplayString();
-        var accessibility = module.DeclaredAccessibility switch
-        {
-            Accessibility.Public => "public",
-            Accessibility.Internal => "internal",
-            _ => "internal",
-        };
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
@@ -104,41 +168,68 @@ public sealed class OrionAuditModuleGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        sb.Append(accessibility).Append(" partial class ").AppendLine(module.Name);
-        sb.AppendLine("{");
-        sb.AppendLine("    /// <summary>Registers every <c>[Auditable]</c> type discovered at compile time on the supplied builder. Source-generated; no runtime reflection.</summary>");
-        sb.AppendLine("    public static void RegisterAuditedTypes(AuditConfigurationBuilder builder)");
-        sb.AppendLine("    {");
-        sb.AppendLine("        if (builder is null)");
-        sb.AppendLine("        {");
-        sb.AppendLine("            throw new global::System.ArgumentNullException(nameof(builder));");
-        sb.AppendLine("        }");
+        for (var i = 0; i < chain.Count; i++)
+        {
+            var indent = new string(' ', i * 4);
+            sb.Append(indent).Append(AccessModifier(chain[i])).Append(" partial class ").AppendLine(chain[i].Name);
+            sb.Append(indent).AppendLine("{");
+        }
+
+        var body = new string(' ', chain.Count * 4);
+        sb.Append(body).AppendLine("/// <summary>Registers every <c>[Auditable]</c> type discovered at compile time on the supplied builder. Source-generated; no runtime reflection.</summary>");
+        sb.Append(body).AppendLine("public static void RegisterAuditedTypes(AuditConfigurationBuilder builder)");
+        sb.Append(body).AppendLine("{");
+        sb.Append(body).AppendLine("    if (builder is null)");
+        sb.Append(body).AppendLine("    {");
+        sb.Append(body).AppendLine("        throw new global::System.ArgumentNullException(nameof(builder));");
+        sb.Append(body).AppendLine("    }");
         foreach (var t in types)
         {
             // FullyQualifiedFormat already emits "global::Namespace.Type" — pass it straight through.
-            sb.Append("        builder.Audit(typeof(")
+            sb.Append(body).Append("    builder.Audit(typeof(")
               .Append(t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
               .AppendLine("));");
         }
-        sb.AppendLine("    }");
+
+        sb.Append(body).AppendLine("}");
         sb.AppendLine();
-        sb.AppendLine("    /// <summary>");
-        sb.AppendLine("    /// The fully-qualified names of every <c>[Auditable]</c> type the generator discovered.");
-        sb.AppendLine("    /// Useful as a sanity check or to wire a manual <c>JsonSerializerContext</c> (see");
-        sb.AppendLine("    /// <c>OrionAuditOptions.UseJsonContext</c>): each name here should have a matching");
-        sb.AppendLine("    /// <c>[JsonSerializable(typeof(...))]</c> attribute on the consumer's context.");
-        sb.AppendLine("    /// </summary>");
-        sb.AppendLine("    public static global::System.Collections.Generic.IReadOnlyList<string> AuditedTypeNames { get; } = new string[]");
-        sb.AppendLine("    {");
+        sb.Append(body).AppendLine("/// <summary>");
+        sb.Append(body).AppendLine("/// The fully-qualified names of every <c>[Auditable]</c> type the generator discovered.");
+        sb.Append(body).AppendLine("/// Useful as a sanity check or to wire a manual <c>JsonSerializerContext</c> (see");
+        sb.Append(body).AppendLine("/// <c>OrionAuditOptions.UseJsonContext</c>): each name here should have a matching");
+        sb.Append(body).AppendLine("/// <c>[JsonSerializable(typeof(...))]</c> attribute on the consumer's context.");
+        sb.Append(body).AppendLine("/// </summary>");
+        sb.Append(body).AppendLine("public static global::System.Collections.Generic.IReadOnlyList<string> AuditedTypeNames { get; } = new string[]");
+        sb.Append(body).AppendLine("{");
         foreach (var t in types)
         {
-            sb.Append("        \"")
+            sb.Append(body).Append("    \"")
               .Append(t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
               .AppendLine("\",");
         }
-        sb.AppendLine("    };");
-        sb.AppendLine("}");
+
+        sb.Append(body).AppendLine("};");
+
+        for (var i = chain.Count - 1; i >= 0; i--)
+        {
+            sb.Append(new string(' ', i * 4)).AppendLine("}");
+        }
 
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Partial declarations of the same type must agree on accessibility, so each link of the chain
+    /// is re-declared with the one the consumer wrote — including the nested-only modifiers.
+    /// </summary>
+    private static string AccessModifier(INamedTypeSymbol type) => type.DeclaredAccessibility switch
+    {
+        Accessibility.Public => "public",
+        Accessibility.Internal => "internal",
+        Accessibility.Private => "private",
+        Accessibility.Protected => "protected",
+        Accessibility.ProtectedOrInternal => "protected internal",
+        Accessibility.ProtectedAndInternal => "private protected",
+        _ => "internal",
+    };
 }

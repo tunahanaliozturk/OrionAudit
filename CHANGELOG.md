@@ -230,6 +230,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the stale writer matches none. Monotonicity alone would not restore a lower bound anyway —
   two savers reading `n - 1` both snapshot however the write is performed. There is **no schema
   change**.
+### Fixed
+
+- **A nested `[OrionAuditModule]` type no longer emits at the wrong nesting level.** The generator
+  ignored `ContainingType`, so `[OrionAuditModule] partial class Registry` nested inside
+  `class Startup` produced a *top-level* `partial class Registry` in the namespace: the consumer's
+  `Startup.Registry.RegisterAuditedTypes(builder)` did not exist (CS0117) and an unrelated
+  `Registry` type was quietly declared next to it. The whole containing chain is now re-declared
+  around the emitted members, with each link's own accessibility. A module whose chain is not
+  `partial` all the way out is reported as **OA0001** at the module's declaration instead of
+  emitting a second declaration that cannot merge.
 
 ## [0.11.3] - 2026-07-28
 
