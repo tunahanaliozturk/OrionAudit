@@ -180,43 +180,25 @@ internal sealed class ChainPruneArchiver : IAuditArchiver
             // isolation-level assumption.
             anchor.PrunedRowCount += group.LongCount();
 
-            // The oldest surviving row IS the chain's new genesis, and the hash it already carries is
-            // exactly the watermark verification needs. Ordered the same way the verifier walks the
-            // stream so the two agree on which row that is. This read is race-tolerant by nature: an
-            // append lands at the tail, so it cannot change which row is the head - except when the
-            // stream was emptied, where the appended row IS the head and its PreviousHash is the
-            // retained tail, which is the same watermark the fallback below would pick.
-            var genesis = await ScopeToStream(dbContext.Set<AuditLog>().AsNoTracking(), stream)
-                .Where(a => a.EntryHash != null)
-                .OldestFirst()
-                .FirstOrDefaultAsync(cancellationToken)
-                .ConfigureAwait(false);
-
-            // Nothing survives: the whole chain up to the anchored tail was pruned, so the tail IS
-            // the last pruned hash. Clearing the watermark here would strand the stream - the anchor
-            // deliberately keeps the deleted tail in LatestEntryHash, so the next append to this
-            // entity chains onto it, and verification would then expect that new row's PreviousHash
-            // to be null and report a broken link on a chain nobody touched.
+            // The watermark is the hash of the NEWEST row this sweep removed - equivalently, the
+            // PreviousHash the oldest survivor already carries. Taken from the removed rows rather
+            // than by asking the table for the oldest survivor: "oldest" would have to be decided by
+            // an ORDER BY, and no SQL ordering is the chain's order (AuditLog.OccurredOnUtc inverts
+            // against it whenever two concurrent writers race for the anchor lock). The rows are in
+            // hand here and AuditChainOrder.ForWalk puts them in the same order the verifier walks,
+            // so the two cannot disagree about which row that is - and it costs a query less.
             //
-            // The explicit null test rather than ??: a surviving genesis whose PreviousHash is
-            // legitimately null (only an unchained prefix was pruned, the true genesis remains) must
-            // keep that null, not inherit the tail.
-            anchor.PrunedThroughHash = genesis is not null ? genesis.PreviousHash : anchor.LatestEntryHash;
+            // When the sweep empties the stream this is the retained tail, which is what the anchor
+            // must keep: it deliberately leaves the deleted tail in LatestEntryHash so the next
+            // append to this entity chains onto it, and a cleared watermark would make verification
+            // expect that new row's PreviousHash to be null and report a break on a chain nobody
+            // touched.
+            anchor.PrunedThroughHash = AuditChainOrder.ForWalk(group.ToList())[^1].EntryHash;
         }
     }
 
     private static StreamKey StreamOf(AuditLog row)
         => new(row.EntityType, row.EntityId, AuditTenant.Canonical(row.TenantId));
-
-    // Mirrors EfCoreAuditIntegrityVerifier: the no-tenant stream matches both a null and an
-    // empty-string tenant, because rows written before the write-path normalization still store null.
-    private static IQueryable<AuditLog> ScopeToStream(IQueryable<AuditLog> query, StreamKey stream)
-    {
-        query = query.Where(a => a.EntityType == stream.EntityType && a.EntityId == stream.EntityId);
-        return stream.TenantId.Length == 0
-            ? query.Where(a => a.TenantId == null || a.TenantId == "")
-            : query.Where(a => a.TenantId == stream.TenantId);
-    }
 
     private readonly record struct StreamKey(string EntityType, string EntityId, string TenantId);
 }

@@ -4,7 +4,8 @@ namespace Moongazing.OrionAudit.Integrity;
 /// Pure, backend-agnostic verification of a single entity stream's tamper-evident keyed-MAC chain.
 /// Reflection-free and side-effect-free so it is shared by every store backend and trivially
 /// unit-testable. The database read lives in <see cref="EfCoreAuditIntegrityVerifier"/>; this engine
-/// only walks an already-ordered row list and (optionally) checks it against the stream's anchor.
+/// puts one stream's rows into chain order, walks them, and (optionally) checks them against the
+/// stream's anchor.
 /// </summary>
 public static class AuditChainVerifier
 {
@@ -19,16 +20,19 @@ public static class AuditChainVerifier
         AuditChainAnchor? Anchor);
 
     /// <summary>
-    /// Verifies one stream's chain. <paramref name="orderedRows"/> MUST be the stream's rows in
-    /// canonical chain order - ascending <see cref="AuditLog.OccurredOnUtc"/>, ties settled by
-    /// ascending <see cref="AuditLog.ChainSequence"/> (unsequenced last) and then
-    /// <see cref="AuditLog.Id"/>; see <see cref="AuditChainOrder.OldestFirst"/>, which is what the EF
-    /// Core verifier applies. That is the order the stamper chained them in. When
+    /// Verifies one stream's chain. <paramref name="orderedRows"/> is the stream's rows; this method
+    /// puts them into chain order itself (see <see cref="AuditChainOrder.ForWalk"/>), so a caller
+    /// cannot get the walk wrong by handing them over sorted the wrong way - which is not a
+    /// theoretical risk, since the obvious sort, by <see cref="AuditLog.OccurredOnUtc"/>, reads a
+    /// stream backwards whenever two concurrent writers inverted. Passing them in
+    /// <see cref="AuditChainOrder.OldestFirst"/> order, as the EF Core verifier does, additionally
+    /// gives any rows predating <see cref="AuditLog.ChainSequence"/> the database's own ordering. When
     /// <paramref name="context"/>.<see cref="StreamVerificationContext.Anchor"/> is supplied, the walked
     /// tail hash and hashed-row count are checked against it so deleting the tail row(s) - or the whole
     /// stream - is detected even though the surviving prefix links intact.
     /// </summary>
-    /// <param name="orderedRows">The stream's rows, oldest first.</param>
+    /// <param name="orderedRows">The stream's rows. Best supplied in
+    /// <see cref="AuditChainOrder.OldestFirst"/> order; the chain order is derived from them here.</param>
     /// <param name="context">Key/custom-column resolvers and the optional anchor.</param>
     /// <param name="alreadyVerified">Running count of rows verified in prior streams, folded into the
     /// returned result's <see cref="AuditChainVerificationResult.VerifiedRowCount"/> so a whole-table
@@ -43,13 +47,17 @@ public static class AuditChainVerifier
         ArgumentNullException.ThrowIfNull(context.KeyResolver);
         ArgumentNullException.ThrowIfNull(context.CustomColumnsResolver);
 
+        // Chain order is derived here rather than trusted from the caller: it is the one thing a
+        // walk cannot get wrong and still mean anything, and no SQL ORDER BY can produce it.
+        var rows = AuditChainOrder.ForWalk(orderedRows);
+
         long verified = alreadyVerified;
         long thisStream = 0;
         var chainStarted = false;
         string? expectedPreviousHash = null;
         AuditLog? lastHashedRow = null;
 
-        foreach (var row in orderedRows)
+        foreach (var row in rows)
         {
             if (!chainStarted)
             {
