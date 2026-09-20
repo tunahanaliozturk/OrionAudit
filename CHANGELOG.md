@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Microsoft.CodeAnalysis.PublicApiAnalyzers` on all five packable projects (`OrionAudit`,
+  `OrionAudit.AspNetCore`, `OrionAudit.MySql`, `OrionAudit.Viewer`, `OrionAudit.Testing`), each with
+  a `PublicAPI.Shipped.txt` baseline and a `PublicAPI.Unshipped.txt` holding only `#nullable enable`.
+  The baselines record the surface exactly as 1.0.0 shipped it — 938 / 9 / 2 / 7 / 34 entries
+  respectively — so the stability promise 1.0.0 made is now enforced by the compiler instead of by
+  memory. With `TreatWarningsAsErrors` on, adding public API without recording it fails the build
+  (RS0016) and removing or changing recorded API fails the build (RS0017), on every one of
+  `net8.0`, `net9.0` and `net10.0`. No code changed; this is a guard, not a behaviour change.
+  Adding public API now means adding a line to `PublicAPI.Unshipped.txt`; the release cut promotes
+  those lines into `PublicAPI.Shipped.txt`. See [CONTRIBUTING.md](CONTRIBUTING.md#public-api).
+
 ## [1.0.0] - 2026-09-20
 
 The public API is stable from here. Any breaking change after this release requires 2.0.0.

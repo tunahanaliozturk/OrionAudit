@@ -1,0 +1,35 @@
+#nullable enable
+Moongazing.OrionAudit.Testing.AuditAssertions
+Moongazing.OrionAudit.Testing.AuditAssertions.CountAssertion
+Moongazing.OrionAudit.Testing.AuditAssertions.CountAssertion.Of<T>() -> Moongazing.OrionAudit.Testing.AuditAssertions!
+Moongazing.OrionAudit.Testing.AuditAssertions.HaveLogged<T>(Moongazing.OrionAudit.AuditAction action) -> Moongazing.OrionAudit.Testing.AuditAssertions!
+Moongazing.OrionAudit.Testing.AuditAssertions.HaveLogged<T>(Moongazing.OrionAudit.AuditAction action, System.Func<Moongazing.OrionAudit.AuditLog!, bool>! predicate) -> Moongazing.OrionAudit.Testing.AuditAssertions!
+Moongazing.OrionAudit.Testing.AuditAssertions.HaveLoggedExactly(int expected) -> Moongazing.OrionAudit.Testing.AuditAssertions.CountAssertion!
+Moongazing.OrionAudit.Testing.AuditAssertions.NotHaveLogged<T>() -> Moongazing.OrionAudit.Testing.AuditAssertions!
+Moongazing.OrionAudit.Testing.AuditCapture
+Moongazing.OrionAudit.Testing.AuditCapture.All.get -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>!
+Moongazing.OrionAudit.Testing.AuditCapture.For<T>() -> System.Collections.Generic.IEnumerable<Moongazing.OrionAudit.AuditLog!>!
+Moongazing.OrionAudit.Testing.AuditCapture.Should() -> Moongazing.OrionAudit.Testing.AuditAssertions!
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.Add(Moongazing.OrionAudit.AuditLog! row) -> Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore!
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.AddRange(System.Collections.Generic.IEnumerable<Moongazing.OrionAudit.AuditLog!>! batch) -> Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore!
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.Count.get -> int
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.InMemoryAuditHistoryStore() -> void
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.InMemoryAuditHistoryStore(System.Collections.Generic.IEnumerable<Moongazing.OrionAudit.AuditLog!>! seed) -> void
+Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.Snapshot() -> System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.AuditLog!>!
+Moongazing.OrionAudit.Testing.InMemoryAuditTenantResolver
+Moongazing.OrionAudit.Testing.InMemoryAuditTenantResolver.InMemoryAuditTenantResolver(string? tenantId = null) -> void
+Moongazing.OrionAudit.Testing.InMemoryAuditTenantResolver.Resolve(System.IServiceProvider! serviceProvider) -> string?
+Moongazing.OrionAudit.Testing.InMemoryAuditTenantResolver.TenantId.get -> string?
+Moongazing.OrionAudit.Testing.InMemoryAuditTenantResolver.TenantId.set -> void
+Moongazing.OrionAudit.Testing.InMemoryAuditUserResolver
+Moongazing.OrionAudit.Testing.InMemoryAuditUserResolver.InMemoryAuditUserResolver(Moongazing.OrionAudit.AuditUser? user = null) -> void
+Moongazing.OrionAudit.Testing.InMemoryAuditUserResolver.Resolve(System.IServiceProvider! serviceProvider) -> Moongazing.OrionAudit.AuditUser?
+Moongazing.OrionAudit.Testing.InMemoryAuditUserResolver.User.get -> Moongazing.OrionAudit.AuditUser?
+Moongazing.OrionAudit.Testing.InMemoryAuditUserResolver.User.set -> void
+Moongazing.OrionAudit.Testing.OrionAuditAssertionException
+Moongazing.OrionAudit.Testing.OrionAuditAssertionException.OrionAuditAssertionException(string! message) -> void
+override Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.AggregateAsync(Moongazing.OrionAudit.Store.AuditAggregationQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Moongazing.OrionAudit.Store.AuditAggregateBucket!>!>!
+override Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.CompactAsync(Moongazing.OrionAudit.Store.AuditCompactionRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditCompactionResult!>!
+override Moongazing.OrionAudit.Testing.InMemoryAuditHistoryStore.QueryAsync(Moongazing.OrionAudit.Store.AuditHistoryQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Moongazing.OrionAudit.Store.AuditHistoryPage!>!
+static Moongazing.OrionAudit.Testing.AuditCapture.From(Microsoft.EntityFrameworkCore.DbContext! context) -> Moongazing.OrionAudit.Testing.AuditCapture!

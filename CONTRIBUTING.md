@@ -31,7 +31,7 @@ Branch from `master`. Name the branch after intent: `feat/...`, `fix/...`, `docs
 - One conceptual change per PR. Refactors and behaviour changes go in separate PRs even if the diff feels small.
 - Conventional Commits style commit subject (`feat:`, `fix:`, `docs:`, etc.).
 - New behaviour comes with tests. Bug fixes come with a failing-before, passing-after test.
-- Public API additions need XML doc comments. Breaking changes need a CHANGELOG entry.
+- Public API additions need XML doc comments and a `PublicAPI.Unshipped.txt` entry (see [Public API](#public-api)). Breaking changes need a CHANGELOG entry.
 - No `Co-Authored-By` trailers. The author of the PR is the author of the work.
 
 ## Coding style
@@ -40,6 +40,31 @@ Branch from `master`. Name the branch after intent: `feat/...`, `fix/...`, `docs
 - Match the surrounding code style. The repo does not have a separate STYLE.md; if the existing code does X, do X.
 - Names are spelled out. No `mgr`, `svc`, `ctx`. The exceptions are well-known abbreviations (`Id`, `Db`, `Url`, `Json`).
 - Comments explain why, not what. The code already says what.
+
+## Public API
+
+OrionAudit 1.0.0 froze the public surface: every breaking change from here requires a major
+version. `Microsoft.CodeAnalysis.PublicApiAnalyzers` enforces that. Each of the five packable
+projects carries two files next to its `.csproj`:
+
+- `PublicAPI.Shipped.txt` — the surface as the last release shipped it. **Do not hand-edit this
+  file.** It changes only at a release cut.
+- `PublicAPI.Unshipped.txt` — public API added since that release. Starts at `#nullable enable`.
+
+Because warnings are errors, the build tells you when the files are wrong:
+
+- **RS0016** — you made something public that is in neither file. Add it to `PublicAPI.Unshipped.txt`.
+- **RS0017** — a file names something the code no longer has. You removed or changed public API,
+  which is a breaking change; if that is deliberate, it belongs in a major-version PR.
+
+Let the analyzer write the entries rather than typing them — the format and sort order are exact:
+
+```bash
+dotnet format analyzers src/Moongazing.OrionAudit/Moongazing.OrionAudit.csproj --diagnostics RS0016
+```
+
+At a release cut, the `Unshipped` entries move into `Shipped` and `Unshipped` goes back to a lone
+`#nullable enable`.
 
 ## Tests
 

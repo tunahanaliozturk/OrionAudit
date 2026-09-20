@@ -1,0 +1,3 @@
+#nullable enable
+Moongazing.OrionAudit.MySql.OrionAuditMySqlModelBuilderExtensions
+static Moongazing.OrionAudit.MySql.OrionAuditMySqlModelBuilderExtensions.ApplyOrionAuditMySqlConfigurations(this Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, Microsoft.EntityFrameworkCore.DbContext! dbContext, bool useLongText = false, string? auditLogTableName = null, string? captureQueueTableName = null, string? snapshotCursorTableName = null) -> Microsoft.EntityFrameworkCore.ModelBuilder!
