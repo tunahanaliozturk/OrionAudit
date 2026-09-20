@@ -547,6 +547,45 @@ builder.Services
 `NameIdentifier` / `sub` claim and populates `AuditLog.UserId` / `UserDisplay`. Anonymous
 requests leave those columns null without breaking the capture.
 
+### Attribution and `AddDbContextPool` / `AddDbContextFactory`
+
+`UseOrionAudit(sp)` keeps the provider EF Core hands the options lambda, and **EF Core builds
+those options with a different lifetime per registration**. That decides whether your resolvers
+can see the request:
+
+| Registration | `DbContextOptions` lifetime | What `sp` is | What you do |
+| ------------ | --------------------------- | ------------ | ----------- |
+| `AddDbContext<T>((sp, o) => …)` | scoped | the request scope | nothing — attribution just works |
+| `AddDbContextPool<T>` / `AddPooledDbContextFactory<T>` | **singleton** | the **root** provider | push the request scope (below) |
+| `AddDbContextFactory<T>` | **singleton** by default | the **root** provider | push the request scope, or pass `optionsLifetime: ServiceLifetime.Scoped` |
+| `AddDbContext<T>(o => …)` (no `sp`) | — | — | not supported; there is no provider to hand in |
+
+With the singleton rows, the lambda runs **once**, so a scoped `IAuditUserResolver` /
+`IAuditTenantResolver` resolved from that captured provider is the *first* request's instance for
+the life of the process — every audit row would name the first request's user and tenant, while the
+diffs stayed correct. Make the request scope ambient and capture uses it instead:
+
+```csharp
+// once, before the endpoints
+app.Use(async (http, next) =>
+{
+    using (AuditScope.PushServices(http.RequestServices))
+    {
+        await next();
+    }
+});
+```
+
+`AuditScope.PushServices` flows on `AsyncLocal`, wins over the captured provider on both the write
+path and the read-side tenant filter, and works the same way around a background job or console
+unit of work — push the scope you created for it.
+
+If you use pooling, register a resolver, and push nothing, OrionAudit **refuses**: the first
+audited save throws `OrionAuditConfigurationException` naming these fixes, rather than write a
+trail that looks healthy and names the wrong person. Non-pooled `AddDbContextFactory` cannot be
+detected this way (Microsoft DI does not let a library tell its root provider apart from a scope),
+so run with `ValidateScopes` enabled in Development — it is what makes that case fail loudly.
+
 ### OpenTelemetry instrumentation
 
 Spans and metrics are emitted under the `OrionAudit` `ActivitySource` and `Meter`.
