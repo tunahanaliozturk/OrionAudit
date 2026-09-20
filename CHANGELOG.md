@@ -87,6 +87,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same way (Microsoft DI hands out the same scope type for the root container and every child scope,
   and `IsRootScope` is internal), so it is covered by `AuditScope.PushServices`, the documentation,
   and `ValidateScopes`.
+- **`UseHashChain`'s anchor lock is actually held now, so concurrent same-stream writes really do
+  serialize.** `EfCoreAuditHashChainWriter` issues its pessimistic anchor lock
+  (`SELECT ... FOR UPDATE` / `WITH (UPDLOCK, HOLDLOCK)`) through `Database.ExecuteSqlRawAsync`,
+  which joins the context's current transaction *only if one exists* - and on the default path none
+  did. At interceptor time a plain `SaveChangesAsync` has no transaction (EF opens its own **after**
+  the interceptor runs), and the async dispatcher never opened one at all. The lock was therefore
+  acquired and released before the anchor was even read, so two concurrent same-stream saves both
+  read head `H`, both stamped `PreviousHash = H`, and both committed; `AuditChainAnchor` carries no
+  concurrency token, so the lost anchor update went unnoticed too, and verification then reported
+  `BrokenLink` on a trail nobody had touched. The README's promise that same-stream writes
+  "serialize on the anchor row inside your transaction" only held for consumers who happened to open
+  a transaction by hand.
+
+  Both write paths now open one around the stamp when the consumer has none
+  (`ChainWriteTransaction`), so the lock, the head read, the stamped rows and the advanced anchor
+  commit as one unit: the interceptor commits it in `SavedChanges` / `SavedChangesAsync` and releases
+  it in `SaveChangesFailed(Async)` / `SaveChangesCanceled(Async)`, covering the synchronous and
+  asynchronous entry points alike, and the dispatcher wraps its materialise-and-insert region. A
+  transaction the consumer opened themselves is left alone - it already spans the stamp, and
+  committing someone else's transaction is not ours to do. A provider without transaction support
+  (the EF in-memory provider) raises on begin; that is caught and the work runs unwrapped, the same
+  degradation `CopyToTableAuditArchiver` and `ChainPruneArchiver` already use. Consumers who never
+  enable hash-chaining are untouched: no chain, no transaction, no schema change.
+
+  On SQLite a contending same-stream save **waits** rather than failing: EF's `BeginTransaction` maps
+  to Microsoft.Data.Sqlite's Serializable isolation, which emits `BEGIN IMMEDIATE`, so the second
+  writer blocks at its own `BEGIN` on the connection's busy timeout (30 seconds by default) and then
+  reads the head the first one committed. One `SaveChangesAsync` per writer is enough; no retry loop
+  is needed. The exception is a *shared-cache in-memory* database (`mode=memory&cache=shared`), which
+  serialises with table locks reporting `SQLITE_LOCKED` - something SQLite's busy handler does not
+  wait on - so concurrent writers there fail rather than queue. That is a test-fixture shape, not a
+  deployment one, and OrionAudit's own concurrency tests now use a file database accordingly.
+
+  A save or dispatch batch touching **several** streams also takes their anchor locks in a fixed
+  global order now (ordinal over the whole stream key), instead of whatever order the rows were
+  captured in. A multi-stream batch holds each lock while it goes after the next, so two concurrent
+  batches that both touched streams A and B and approached them in opposite orders held one each and
+  waited on the other - a deadlock the database can only resolve by killing one of them. EF's own
+  command ordering cannot prevent it, because these locks are raw statements issued before any of the
+  batch's commands.
+
+  **If your `DbContext` uses a retrying execution strategy (`EnableRetryOnFailure()`), you must own
+  the transaction yourself.** EF Core allows a transaction inside a retriable unit only from the code
+  that owns the `SaveChanges` call, and an interceptor is not that code - so OrionAudit cannot open
+  one for you there, and cannot make your save retriable on your behalf either. Wrap your saves once:
+
+  ```csharp
+  var strategy = db.Database.CreateExecutionStrategy();
+  await strategy.ExecuteAsync(async () =>
+  {
+      await using var transaction = await db.Database.BeginTransactionAsync();
+      await db.SaveChangesAsync();
+      await transaction.CommitAsync();
+  });
+  ```
+
+  The chain then stamps inside your transaction and the guarantee is unchanged. Until you do, the
+  first hash-chained save throws `OrionAuditConfigurationException` carrying that snippet, rather than
+  EF's own message about user-initiated transactions, which never mentions OrionAudit. The refusal
+  fires on that first save rather than at registration because whether a strategy *retries* can only
+  be answered from a live `DbContext` (`Database.CreateExecutionStrategy().RetriesOnFailure`) - at
+  registration all that is visible is that some strategy factory was supplied, which is equally true
+  of a non-retrying custom strategy that works fine. The async-capture dispatcher needs nothing from
+  you: it owns its own save, so it now runs the whole begin/stamp/save/commit unit through your
+  strategy.
+- **The chain is verified in the order it was written, not in an order that merely correlates with
+  it.** A chain's real order is *insertion* order - each save chains its rows onto the anchor's
+  current head - but the verifier walked `(OccurredOnUtc, Id)`. One timestamp is computed per
+  `SaveChanges` and stamped on every row of that save, and MySQL `DATETIME(6)` / PostgreSQL
+  `timestamp` truncate further, so two saves on one entity landing on the same stored timestamp is
+  routine rather than exotic; the tie then fell to a random `Guid`, which bears no relation to the
+  order the rows were chained in. Measured on SQLite: two saves on one entity under a frozen clock,
+  40 trials, **23 spurious `BrokenLink` results on a completely intact chain** - a coin flip.
+
+  `AuditLog` now carries `ChainSequence`, a per-stream sequence the writer assigns by continuing the
+  anchor's `RowCount` under the anchor lock - which is why this and the lock fix are one change and
+  not two - and the verifier, `ChainPruneArchiver` and every retention selection order by it. It is
+  deliberately **not** bound into the row's MAC, so no existing chain's hashes change. Nothing is
+  made lenient either: a mutated row still fails as `ContentMismatch`, a hand-deleted tail still
+  fails as `Truncated`, and a deletion no retention sweep recorded still breaks the walk.
+
+  **Consumer-visible changes:** the `OrionAudit_Log` table gains a nullable `ChainSequence`
+  (`bigint`) column, so a consumer using migrations needs a migration for it -
+  `dotnet ef migrations add AddOrionAuditChainSequence`, emitted by `AuditLogEntityTypeConfiguration`
+  like every other audit column. **No backfill is needed and none should be attempted, and a rolling
+  deployment is safe.** The walk orders by `OccurredOnUtc` first and uses the sequence only to settle
+  ties, so a row written before the column existed - or written *during* a rollout by an instance
+  still on the old build, after a new instance has already appended a sequenced row to the same
+  stream - keeps its place in write order instead of being dragged to the front of its stream. (An
+  earlier draft of this change ordered all unsequenced rows first, which reported `BrokenLink` on an
+  intact chain for exactly that mixed-version case, permanently.) The one tie the ordering cannot
+  settle is two builds appending to the *same* stream within a single tick of the timestamp column -
+  100ns on SQL Server and SQLite, a microsecond on PostgreSQL and MySQL - so a deliberately coarse
+  column such as `datetime2(0)` is worth avoiding on a chained audit table. The unsequenced group is
+  selected with an explicit sort key rather than relying on `ORDER BY` null placement, which differs
+  between SQL Server/SQLite and PostgreSQL. `AuditHashChainStamper.Stamp` gained an optional trailing
+  parameter carrying each stream's persisted row count; omitting it leaves `ChainSequence` unassigned,
+  so an existing call site compiles and behaves as before.
 - **`SnapshotPolicyCaptureTests.SnapshotEveryDuration_WritesOnFirstThenAfterElapsed` no longer
   races the wall clock.** It asserted that two consecutive `SaveChangesAsync` calls land inside a
   100 ms snapshot window, which a loaded machine does not guarantee. It went unnoticed while

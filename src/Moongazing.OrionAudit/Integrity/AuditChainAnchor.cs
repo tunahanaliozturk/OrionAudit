@@ -15,8 +15,10 @@
 /// <b>Concurrency.</b> Two transactions appending to the same stream both read the stream head before
 /// either commits; without serialization they would stamp the same <see cref="LatestEntryHash"/> as
 /// <see cref="AuditLog.PreviousHash"/> and corrupt the chain under normal concurrent writes. The
-/// writer takes a row lock on this anchor inside the consumer's <c>SaveChanges</c> transaction, so
-/// same-stream appends serialize on it while different streams stay parallel.
+/// writer takes a row lock on this anchor inside the write transaction - the consumer's when they
+/// opened one, otherwise one the write path opens around the stamp and commits with the rows (see
+/// <see cref="ChainWriteTransaction"/>) - so same-stream appends serialize on it while different
+/// streams stay parallel.
 /// </item>
 /// <item>
 /// <b>Truncation / deletion.</b> A consistent prefix of a chain still verifies, so deleting the tail

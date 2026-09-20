@@ -3,11 +3,16 @@ using Microsoft.EntityFrameworkCore;
 namespace Moongazing.OrionAudit.Integrity;
 
 /// <summary>
-/// Builds the provider-specific SQL that takes a pessimistic row lock on one stream's
-/// <see cref="AuditChainAnchor"/> before the chain writer reads its head. Returns <see langword="null"/>
-/// for providers that do not need (or do not support) an explicit lock - notably SQLite, which already
-/// serializes write transactions database-wide.
+/// Builds the provider-specific SQL that takes a pessimistic lock on one stream's
+/// <see cref="AuditChainAnchor"/> before the chain writer reads its head, so the head it stamps from
+/// is one no concurrent same-stream transaction can move until this one commits. Returns
+/// <see langword="null"/> for providers with no SQL surface (the EF in-memory provider) and for
+/// unrecognised ones.
 /// </summary>
+/// <remarks>
+/// The statement runs as the first thing in the chain's write transaction, before the head is read,
+/// which is the whole point: a lock taken after the read protects nothing.
+/// </remarks>
 internal sealed class AnchorLockDialect
 {
     /// <summary>The parameterised lock statement (positional <c>{0}/{1}/{2}</c> placeholders).</summary>
@@ -18,7 +23,8 @@ internal sealed class AnchorLockDialect
 
     /// <summary>
     /// Returns the lock dialect for <paramref name="context"/>'s provider, or <see langword="null"/>
-    /// when no explicit lock is issued (SQLite / in-memory / unrecognised providers).
+    /// when no explicit statement is needed (SQLite, whose transactions are already write
+    /// transactions) or none can be issued (in-memory / unrecognised providers).
     /// </summary>
     public static AnchorLockDialect? For(DbContext context)
     {
@@ -65,8 +71,22 @@ internal sealed class AnchorLockDialect
             };
         }
 
-        // SQLite serialises writes DB-wide; the EF in-memory provider has no SQL surface. No explicit
-        // lock - the surrounding transaction (SQLite) or the anchor PK (genesis races) is sufficient.
+        // SQLite issues no lock statement, and that is not an omission. EF's BeginTransaction maps to
+        // Microsoft.Data.Sqlite's default Serializable isolation, which emits BEGIN IMMEDIATE: the
+        // transaction holds the database-wide write lock from the moment it starts, before the anchor
+        // is read. A second same-stream save therefore blocks at its own BEGIN - on the connection's
+        // busy timeout, 30 seconds by default - and then reads the head the first one committed. That
+        // is the same serialization the row locks above buy, just coarser, and it is why a chained
+        // save on SQLite waits rather than failing. (Measured, not assumed: with a transaction open
+        // and nothing yet written, a second connection's INSERT comes back SQLITE_BUSY. A caller who
+        // deliberately begins at ReadUncommitted gets BEGIN - and owns that transaction itself, which
+        // ChainWriteTransaction leaves alone. A shared-cache in-memory database, which is a test
+        // fixture rather than a deployment, serialises with table locks that report SQLITE_LOCKED
+        // instead, and the busy handler does not wait on those.)
+        //
+        // The EF in-memory provider has no SQL surface, and an unrecognised provider gets no
+        // statement it might not understand: both rely on the surrounding transaction, and the anchor
+        // table's primary key still prevents two genesis anchors for one stream.
         return null;
     }
 

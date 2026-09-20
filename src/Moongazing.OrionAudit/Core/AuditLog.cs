@@ -101,4 +101,32 @@ public class AuditLog
     /// rotated (newer rows stamped with a new id) without invalidating rows written under an older key.
     /// </summary>
     public int? HashKeyId { get; set; }
+
+    /// <summary>
+    /// This row's zero-based position in its chain stream, assigned by the chain writer under the
+    /// stream's anchor lock, or <see langword="null"/> when the row is unchained (or was written
+    /// before this column existed).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The chain's real order is <em>insertion</em> order: each save chains its rows onto the
+    /// anchor's current head. <see cref="OccurredOnUtc"/> is only a proxy for it, and a poor one -
+    /// one timestamp is computed per <c>SaveChanges</c> and stamped on every row of that save, and
+    /// MySQL <c>DATETIME(6)</c> / PostgreSQL <c>timestamp</c> truncate further, so two saves on one
+    /// entity routinely land on the same stored value. Ordering those by <c>(OccurredOnUtc, Id)</c>
+    /// broke the tie on a random Guid, which bears no relation to the order they were chained in, so
+    /// verification reported <c>BrokenLink</c> on perfectly intact chains about half the time.
+    /// </para>
+    /// <para>
+    /// The value continues <see cref="Integrity.AuditChainAnchor.RowCount"/>, the per-stream count
+    /// the writer already maintains under the anchor lock, so it is unique and gap-free per stream.
+    /// It is deliberately <b>not</b> bound into the row's MAC: binding it would change every
+    /// existing chain's hashes. Rows written before this column keep <see langword="null"/>; the walk
+    /// orders by <see cref="OccurredOnUtc"/> first and uses the sequence only to settle ties (see
+    /// <see cref="Integrity.AuditChainOrder"/>), so a chain written earlier verifies exactly as it
+    /// did, and an old build still appending unsequenced rows during a rolling deployment stays in
+    /// its right place instead of jumping to the front of the stream.
+    /// </para>
+    /// </remarks>
+    public long? ChainSequence { get; set; }
 }

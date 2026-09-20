@@ -12,11 +12,14 @@ namespace Moongazing.OrionAudit.Integrity;
 /// <para>
 /// <b>Concurrency.</b> The stream's <see cref="AuditChainAnchor"/> is the single point two concurrent
 /// appenders contend on. Before reading a stream's head this writer takes a pessimistic row lock on
-/// that stream's anchor (provider-appropriate) <em>within the consumer's transaction</em>, stamps
+/// that stream's anchor (provider-appropriate) <em>within the write transaction</em>, stamps
 /// <see cref="AuditLog.PreviousHash"/> from the anchor, then updates the anchor's latest hash + count
 /// in the same transaction. Same-stream appends therefore serialize on the anchor row, so two
 /// transactions cannot stamp the same predecessor hash and corrupt the chain; different streams lock
-/// different anchor rows and stay parallel.
+/// different anchor rows and stay parallel. That transaction is the consumer's when they opened one,
+/// and otherwise one <see cref="ChainWriteTransaction"/> opens around the stamp - without it the lock
+/// statement joined no transaction and released before the head was even read, which made the whole
+/// guarantee vacuous on the default path.
 /// </para>
 /// <para>
 /// <b>Provider behaviour.</b> On SQL Server the lock is <c>WITH (UPDLOCK, HOLDLOCK)</c>; on
@@ -78,9 +81,17 @@ internal static class EfCoreAuditHashChainWriter
         var anchors = await LockAndLoadAnchorsAsync(context, keys, cancellationToken).ConfigureAwait(false);
 
         var heads = new Dictionary<AuditHashChainStamper.ChainKey, string?>(keys.Count);
+        // Where each stream's ChainSequence resumes. RowCount is the stream's LIFETIME hashed-row
+        // total - retention records its deletions in PrunedRowCount and never decrements it - so
+        // continuing from it keeps sequence numbers unique and monotonic even across a pruned head.
+        // Reading it here is only sound because the anchor is locked inside this transaction; that is
+        // why the sequence and the lock fix are one change, not two.
+        var rowCounts = new Dictionary<AuditHashChainStamper.ChainKey, long>(keys.Count);
         foreach (var chainKey in keys)
         {
-            heads[chainKey] = anchors.TryGetValue(chainKey, out var anchor) ? anchor.LatestEntryHash : null;
+            var hasAnchor = anchors.TryGetValue(chainKey, out var anchor);
+            heads[chainKey] = hasAnchor ? anchor!.LatestEntryHash : null;
+            rowCounts[chainKey] = hasAnchor ? anchor!.RowCount : 0;
         }
 
         // Resolve each row's registered custom-column values from the tracked entity's shadow
@@ -88,7 +99,7 @@ internal static class EfCoreAuditHashChainWriter
         IReadOnlyList<KeyValuePair<string, string?>> CustomColumnsFor(AuditLog row)
             => ReadCustomColumns(context, row, customColumns);
 
-        AuditHashChainStamper.Stamp(newRows, heads, scope, keyId, key, CustomColumnsFor);
+        AuditHashChainStamper.Stamp(newRows, heads, scope, keyId, key, CustomColumnsFor, rowCounts);
 
         // Advance each stream's anchor to the batch's new tail (latest hash + added count + key id).
         var summaries = AuditHashChainStamper.SummarizeBatch(newRows, scope);
@@ -139,6 +150,11 @@ internal static class EfCoreAuditHashChainWriter
 
     // Loads the anchors for the touched streams, taking a pessimistic row lock on each existing anchor
     // (provider-appropriate) so a concurrent same-stream append blocks until this transaction commits.
+    //
+    // The keys arrive in AuditHashChainStamper.DistinctKeys' sorted order and are locked in it. That
+    // is load-bearing, not incidental: a multi-stream batch holds every lock it has taken while it
+    // goes after the next, so two batches approaching the same two streams in opposite orders would
+    // deadlock on each other. One global order across all callers removes the cycle.
     private static async Task<Dictionary<AuditHashChainStamper.ChainKey, AuditChainAnchor>> LockAndLoadAnchorsAsync(
         DbContext context,
         IReadOnlyCollection<AuditHashChainStamper.ChainKey> keys,

@@ -200,7 +200,10 @@ public sealed class EfCoreAuditIntegrityVerifier : IAuditIntegrityVerifier
             ? query.Where(a => a.TenantId == null || a.TenantId == "")
             : query.Where(a => a.TenantId == stream.TenantId);
 
-        var ordered = query.OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id);
+        // Chain order: timestamp, then the per-stream sequence. Timestamp alone is not chain order
+        // whenever a stream has rows sharing one - which every entity touched twice by the same save,
+        // or twice under a coarse-precision column, has. See AuditChainOrder.
+        var ordered = query.OldestFirst();
 
         // With custom columns the MAC binds shadow-property values, which are only reachable through a
         // tracked entry, so load tracked in that case (the tracker is cleared per stream by the

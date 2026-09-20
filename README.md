@@ -168,12 +168,34 @@ services.AddOrionAudit<AppDbContext>(o =>
 ```
 
 A persisted per-stream anchor (`OrionAudit_Chain_Anchor`) makes concurrent same-stream writes safe
-(they serialize on the anchor row inside your transaction) and makes tail/whole-stream deletion
-detectable (the anchor remembers the true tail hash and row count). The key id is stored per row, so
-you can rotate keys later without invalidating rows written under an older (still-registered) key.
+(they serialize on the anchor row inside the write transaction — yours if you opened one, otherwise
+one OrionAudit opens around the stamp and commits together with the audit rows) and makes
+tail/whole-stream deletion detectable (the anchor remembers the true tail hash and row count). The
+key id is stored per row, so you can rotate keys later without invalidating rows written under an
+older (still-registered) key.
 
-`UseHashChain()` adds three nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`) to the audit
-table plus the `OrionAudit_Chain_Anchor` table, so add a migration after enabling it:
+If your `DbContext` uses a **retrying execution strategy** (`EnableRetryOnFailure()`), you have to own
+that transaction yourself — EF Core only lets the code that owns the `SaveChanges` call open one
+inside a retriable unit, and an interceptor is not that code. Wrap your saves once and the chain
+stamps inside your transaction:
+
+```csharp
+var strategy = db.Database.CreateExecutionStrategy();
+await strategy.ExecuteAsync(async () =>
+{
+    await using var transaction = await db.Database.BeginTransactionAsync();
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
+});
+```
+
+Without it the first hash-chained save throws `OrionAuditConfigurationException` carrying exactly that
+snippet. The async-capture dispatcher needs nothing from you — it owns its own save and already runs
+the whole unit through your strategy.
+
+`UseHashChain()` adds four nullable columns (`EntryHash`, `PreviousHash`, `HashKeyId`,
+`ChainSequence`) to the audit table plus the `OrionAudit_Chain_Anchor` table, so add a migration
+after enabling it:
 
 ```bash
 dotnet ef migrations add AddOrionAuditHashChain
