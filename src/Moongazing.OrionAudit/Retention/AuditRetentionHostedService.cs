@@ -20,11 +20,19 @@ namespace Moongazing.OrionAudit.Retention;
 /// every row of that save, and column precision truncates further (MySQL <c>DATETIME(6)</c>, a
 /// consumer-chosen <c>datetime2(0)</c>). Under a bare timestamp ordering the provider is free to break
 /// those ties any way it likes, so a count- or age-bounded batch could remove an INTERIOR row of a
-/// stream instead of a contiguous head. Retention is only ever allowed to prune a chain's head -
-/// re-anchoring at the oldest survivor cannot repair a hole in the middle - so the tie-break is
-/// load-bearing, not cosmetic. It breaks ties on <see cref="AuditLog.ChainSequence"/>, the chain's
-/// real order, because <see cref="AuditLog.Id"/> is a random Guid and orders tied rows in a way
-/// unrelated to the order they were chained in. "Keep the latest N" walks the same order backwards.
+/// stream instead of a contiguous head. The tie-break settles those on
+/// <see cref="AuditLog.ChainSequence"/>, the chain's real order, because <see cref="AuditLog.Id"/> is
+/// a random Guid and orders tied rows in a way unrelated to how they were chained. "Keep the latest N"
+/// walks the same order backwards.
+/// <para>
+/// Ordering alone cannot make the prune contiguous, though, and is not asked to. Age and chain order
+/// can disagree outright - <see cref="AuditLog.OccurredOnUtc"/> is stamped near the start of capture
+/// while the chain's order is settled later, by which writer wins the anchor lock - so a boundary can
+/// fall between two rows two concurrent writers inverted. Retention is only ever allowed to prune a
+/// chain's head, because re-anchoring at the oldest survivor cannot repair a hole in the middle, and
+/// what enforces that is <see cref="ChainPruneArchiver"/> narrowing each batch to the run it can
+/// safely remove. These selections decide what has aged out; that decides where the cut falls.
+/// </para>
 /// </remarks>
 public sealed partial class AuditRetentionHostedService<TDbContext> : BackgroundService
     where TDbContext : DbContext

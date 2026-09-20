@@ -83,10 +83,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OccurredOnUtc` is deliberately unchanged: it still records when the change was captured, not when
   the audit row reached the front of the queue. Stamping it after the anchor lock would have made it
   agree with chain order at the cost of changing what the column means for every consumer, including
-  those not using the chain, and once the walk uses the sequence there is nothing to gain by it. The
-  sweep's own selections stay age-ordered for the same reason; a bounded batch can still in principle
-  split an inverted pair, which needs the cutoff or the batch boundary to fall in the few milliseconds
-  between two concurrent writes on one stream.
+  those not using the chain, and once the walk uses the sequence there is nothing to gain by it.
+
+- **The retention sweep can no longer prune a hole into a chain.** The sweep selects by age — which is
+  what a retention policy means, and is not going to change — but age is not chain order, for the
+  reason above. A "keep the newest N" boundary, or a batch bounded by `MaxRowsPerSweep`, could
+  therefore fall between two rows that two concurrent writers had inverted and take the chain-*later*
+  one while keeping the chain-earlier one. That is a deletion from the middle, and re-anchoring cannot
+  repair it: the anchor records one watermark, not a set of holes. The next verification then reported
+  a break on a trail retention itself had pruned.
+
+  The selection is untouched, including its cross-stream age semantics. Instead the prune is narrowed
+  to what can leave safely: per stream, the longest run that starts at the stream's current head and
+  follows its `PreviousHash` links unbroken. Anything after the first gap stays for a later sweep, and
+  goes as soon as the row that blocked it ages out too, so the two leave together as a contiguous
+  head. Nothing is deleted that the policy did not ask for — the blocking row is by definition still
+  inside the retention window, so extending the prune over it was never an option. The check is the
+  chain itself rather than a column standing in for it, so it costs no query, needs no
+  `ChainSequence`, and holds for streams written before that column existed.
+
+  Detection is unchanged in both directions: a mutated row still fails as `ContentMismatch`, and a
+  deletion no sweep recorded still fails as `Truncated`. Holding rows back only ever removes *fewer*
+  rows, so nothing about the truncation guard is relaxed.
 
 - **Pooled and factory-registered contexts no longer attribute every audit row to the first
   request's user.** `UseOrionAudit(sp)` captures whatever provider EF Core hands the options lambda.

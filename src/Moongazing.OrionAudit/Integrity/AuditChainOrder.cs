@@ -126,10 +126,11 @@ internal static class AuditChainOrder
 
     /// <summary>
     /// Oldest first, for retention's "delete what has aged out" selections and as the load order
-    /// <see cref="ForWalk"/> refines. Age leads because that is what a retention policy is about; the
-    /// sequence tie-break is what keeps a bounded batch removing a contiguous head of each stream
-    /// rather than an interior row, because retention may only ever prune a chain's head -
-    /// re-anchoring at the oldest survivor cannot repair a hole in the middle.
+    /// <see cref="ForWalk"/> refines. Age leads because that is what a retention policy is about, and
+    /// the sequence tie-break keeps rows of one stream that share a timestamp in the order they were
+    /// chained. It is deliberately <em>not</em> what guarantees a sweep prunes a contiguous head -
+    /// age and chain order can disagree outright when two concurrent writers invert, which no
+    /// ordering can reconcile. <see cref="Retention.ChainPruneArchiver"/> narrows the batch instead.
     /// </summary>
     public static IOrderedQueryable<AuditLog> OldestFirst(this IQueryable<AuditLog> query)
     {
