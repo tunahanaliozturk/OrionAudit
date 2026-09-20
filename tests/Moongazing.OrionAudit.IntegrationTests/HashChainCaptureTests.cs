@@ -334,26 +334,34 @@ public class HashChainCaptureTests
             var ctx = scope.ServiceProvider.GetRequiredService<TestContext>();
             var rows = await ctx.AuditLogs
                 .Where(a => a.EntityId == accountId.ToString())
-                .OrderBy(a => a.OccurredOnUtc).ThenBy(a => a.Id)
                 .ToListAsync();
 
             // Genesis + two concurrent updates = 3 rows, each chained to a distinct predecessor.
             Assert.Equal(3, rows.Count);
             Assert.All(rows, r => Assert.NotNull(r.EntryHash));
-            Assert.Null(rows[0].PreviousHash);
+            Assert.Single(rows, r => r.PreviousHash is null);   // exactly one genesis
 
             // No two rows share the same PreviousHash (the corruption symptom the anchor prevents).
-            var previousHashes = rows.Skip(1).Select(r => r.PreviousHash).ToList();
+            var previousHashes = rows.Where(r => r.PreviousHash is not null).Select(r => r.PreviousHash).ToList();
             Assert.Equal(previousHashes.Count, previousHashes.Distinct(StringComparer.Ordinal).Count());
+
+            // The head is the row no other row links back to - a definition, not a proxy. Ordering by
+            // OccurredOnUtc and taking the last used to stand in for it, and that inverts: the
+            // timestamp is stamped near the start of capture while the chain's order is settled later
+            // by whoever wins the anchor lock, so the writer holding the earlier timestamp can land
+            // second. Single() rather than Last() because a forked chain would leave two rows that
+            // nothing links back to, and that must fail rather than silently pick one.
+            var linkedFrom = rows.Select(r => r.PreviousHash).Where(h => h is not null).ToHashSet(StringComparer.Ordinal);
+            var head = Assert.Single(rows, r => !linkedFrom.Contains(r.EntryHash!));
 
             var anchor = await ctx.Anchors.SingleAsync(a => a.EntityId == accountId.ToString());
             Assert.Equal(3, anchor.RowCount);
-            Assert.Equal(rows[^1].EntryHash, anchor.LatestEntryHash);
+            Assert.Equal(head.EntryHash, anchor.LatestEntryHash);
 
             var verifier = scope.ServiceProvider.GetRequiredService<IAuditIntegrityVerifier>();
             var result = await verifier.VerifyChainAsync(
                 AuditChainVerificationRequest.ForEntity(rows[0].EntityType, accountId.ToString()));
-            Assert.True(result.IsValid);
+            Assert.True(result.IsValid, $"intact chain reported {result.Reason}: {result.Detail}");
             Assert.Equal(3, result.VerifiedRowCount);
         }
     }

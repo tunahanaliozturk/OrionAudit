@@ -54,6 +54,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`VerifyChainAsync` no longer reports `BrokenLink` when two concurrent writers touch one entity.**
+  A stream's chain order is decided by which writer wins the anchor lock, but `OccurredOnUtc` is
+  stamped near the *start* of capture, long before that. For two concurrent same-stream writers the
+  two orders can therefore invert: the writer holding the earlier timestamp loses the race and lands
+  second in the chain. The walk ordered by `OccurredOnUtc` first, so it read that stream backwards
+  and reported tampering on a chain nobody had touched — two requests hitting one entity at the same
+  moment was enough. Reproduced deterministically, 12 runs out of 12, and it also surfaced as an
+  intermittent failure in the suite's own concurrency test.
+
+  The walk now derives the order from `ChainSequence`, which the writer assigns under the anchor lock
+  and which therefore *is* the chain's order, with no timestamp comparison able to distort it. The
+  ordering moved out of SQL and into `AuditChainVerifier.VerifyStream` itself, so the walk cannot be
+  got wrong by a caller sorting the rows the obvious way, and rows written before `ChainSequence`
+  existed are still handled: a stream with no sequenced rows comes back exactly as the database
+  returned it (so a pre-upgrade chain verifies bit for bit as before, including the database's own
+  tie-breaking on `Id`), a stream with no unsequenced rows is ordered purely by sequence, and a
+  stream holding both — a rolling deployment, where an old build keeps appending unsequenced rows
+  after new ones — is merged by timestamp, which is the only comparison two builds' rows share. Each
+  side keeps its own exact order through that merge whatever the timestamps say.
+
+  The retention sweep's prune watermark had the same dependency and is fixed with it:
+  `PrunedThroughHash` is now taken from the newest row the sweep actually removed, in the same chain
+  order the verifier walks, instead of asking the table for the "oldest surviving row" — an ordering
+  question no `ORDER BY` can answer correctly. That is one query fewer, and the two can no longer
+  disagree about which row the chain's head is.
+
+  `OccurredOnUtc` is deliberately unchanged: it still records when the change was captured, not when
+  the audit row reached the front of the queue. Stamping it after the anchor lock would have made it
+  agree with chain order at the cost of changing what the column means for every consumer, including
+  those not using the chain, and once the walk uses the sequence there is nothing to gain by it. The
+  sweep's own selections stay age-ordered for the same reason; a bounded batch can still in principle
+  split an inverted pair, which needs the cutoff or the batch boundary to fall in the few milliseconds
+  between two concurrent writes on one stream.
+
 - **Pooled and factory-registered contexts no longer attribute every audit row to the first
   request's user.** `UseOrionAudit(sp)` captures whatever provider EF Core hands the options lambda.
   With `AddDbContext<T>((sp, o) => ...)` that lambda runs once per scope, so `sp` *is* the request
