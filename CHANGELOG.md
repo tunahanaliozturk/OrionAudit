@@ -46,10 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
   audit rows — silently, with no error raised. The capture pipeline is now a single private
   `CaptureAsync` shared by both entry points, with `SavingChanges` added as a thin sync wrapper, so
-  the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
-  chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
-  rather than duplicated; with neither wired the pipeline completes synchronously and the sync
-  override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
+  the two paths cannot drift apart again. The opt-in legs that are genuinely async (the hash
+  chain's anchor lock/read, `IAuditEventPublisher.PublishAsync`, and the periodic snapshot policy's
+  cursor read) are awaited on that one pipeline rather than duplicated; with none of them wired the
+  pipeline completes synchronously and the sync override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
   duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
   otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
   ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
@@ -155,6 +155,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which streams lost rows, which a bare `ExecuteDelete` never reveals. The batch is already bounded by
   `MaxRowsPerSweep`, and consumers without hash-chaining keep the fast path unchanged. Dry-run still
   deletes nothing and writes no checkpoint.
+
+### Performance
+
+- **The periodic snapshot policy no longer blocks a thread-pool thread on every audited save.**
+  `SnapshotPolicyEvaluator` read the entity's `SnapshotCursor` with a synchronous
+  `ctx.Set<SnapshotCursor>().Find(...)` from inside `SavingChangesAsync`, so `SnapshotEvery(...)`
+  cost a blocking database round-trip on the async hot path for every audited update. It now uses
+  `FindAsync`, which makes both call sites — the interceptor's capture pipeline and the async
+  dispatcher's `BuildAuditLogAsync` — async through. Once the cursor is tracked, later saves on the
+  same context resolve it from the change tracker without touching the database at all. The
+  synchronous `SaveChanges()` entry point blocks on exactly the round-trip it always blocked on.
+
+### Documentation
+
+- **The snapshot cadence counter's behaviour under concurrency is now stated, with a bound.**
+  `SnapshotCursor.UpdatesSinceLast` is read-modify-written with no lock and no concurrency token.
+  A group of `k` saves for the *same* entity that overlap — all reading the cursor before any of
+  them commits — advances it by 1 rather than by `k`. Consecutive snapshots for that entity are
+  therefore at least `n` and at most `n * k` updates apart under `SnapshotEvery(n)`; `k` is 1 for
+  any entity not written concurrently with itself, and separate entities hold separate cursor rows
+  and never interact. The counter only moves forward, so the cadence stretches but never stalls and
+  the n-th snapshot always arrives; a collision can duplicate a snapshot but never skip one.
+
+  Nothing about the trail itself is affected — no audit row is lost, delayed, or mis-stamped, and
+  the diff chain stays complete, so `AuditReconstructor` can always rebuild any state. `Snapshot`
+  is a replay-cost optimisation, so the cost of a lost increment is one snapshot taken later than
+  intended.
+
+  Guarding the counter with a concurrency token was considered and **rejected**: the cursor is
+  written inside the consumer's `SaveChanges`, so the losing writer would raise
+  `DbUpdateConcurrencyException` out of a business transaction, naming a table the consumer never
+  asked for — failing a customer's save to keep a snapshot cadence exact. That also contradicts how
+  the rest of capture behaves (a diff failure annotates the row, a custom-column provider failure
+  annotates the row, an observer fault is swallowed). It would have required a new non-null
+  `Version` column on `OrionAudit_Snapshot_Cursors`; there is **no schema change**. Consumers who
+  need a cadence that holds under same-entity concurrency should use `SnapshotEvery(TimeSpan)`,
+  which keys off `LastSnapshotUtc` rather than a counter: a concurrent group there takes an extra
+  snapshot instead of skipping one, so the interval is never exceeded.
 
 ## [0.11.3] - 2026-07-28
 
