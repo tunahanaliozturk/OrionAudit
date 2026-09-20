@@ -1,10 +1,20 @@
 #nullable enable
 Moongazing.OrionAudit.AspNetCore.AuditAspNetCoreServiceCollectionExtensions
 Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver
-Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver.ClaimAuditUserResolver(Microsoft.Extensions.Options.IOptions<Moongazing.OrionAudit.ClaimAuditUserResolverOptions!>! options) -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver.ClaimAuditUserResolver(Microsoft.Extensions.Options.IOptions<Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions!>! options) -> void
 Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolver.Resolve(System.IServiceProvider! serviceProvider) -> Moongazing.OrionAudit.AuditUser?
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.ClaimAuditUserResolverOptions() -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.DefaultUserType.get -> string!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.DefaultUserType.set -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.DisplayNameClaimTypes.get -> System.Collections.Generic.IList<string!>!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.IdClaimTypes.get -> System.Collections.Generic.IList<string!>!
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.RequireAuthenticated.get -> bool
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.RequireAuthenticated.set -> void
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.TypeClaimType.get -> string?
+Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions.TypeClaimType.set -> void
 Moongazing.OrionAudit.AspNetCore.HttpContextAuditUserResolver
 Moongazing.OrionAudit.AspNetCore.HttpContextAuditUserResolver.HttpContextAuditUserResolver() -> void
 Moongazing.OrionAudit.AspNetCore.HttpContextAuditUserResolver.Resolve(System.IServiceProvider! serviceProvider) -> Moongazing.OrionAudit.AuditUser?
 static Moongazing.OrionAudit.AspNetCore.AuditAspNetCoreServiceCollectionExtensions.AddOrionAuditAspNetCore(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
-static Moongazing.OrionAudit.AspNetCore.AuditAspNetCoreServiceCollectionExtensions.AddOrionAuditClaimResolver(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Moongazing.OrionAudit.ClaimAuditUserResolverOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Moongazing.OrionAudit.AspNetCore.AuditAspNetCoreServiceCollectionExtensions.AddOrionAuditClaimResolver(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<Moongazing.OrionAudit.AspNetCore.ClaimAuditUserResolverOptions!>? configure = null) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

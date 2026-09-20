@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-21
+
+1.0.0 shipped hours before this release. This is the cleanup that writing its public API down made
+visible.
+
+1.0.0 declared the surface stable but had nothing enforcing it, so the first thing after it shipped
+was to record that surface in `PublicAPI.Shipped.txt` and let `Microsoft.CodeAnalysis.PublicApiAnalyzers`
+hold the line. Recording it is what made it legible — 938 entries across 116 public types in the core
+package alone — and reading it back showed a promise made over a surface that was not ready to keep
+it: bookkeeping columns any consumer could hand-mutate, an options type sitting in the wrong package,
+two signatures the analyzer's own backcompat rules reject, and a long tail of library-internal
+machinery that was public only by accident. Four pull requests fixed those. All four are breaking,
+which is why this is 2.0.0 and not 1.0.1.
+
+Nothing had taken a dependency on 1.0.0 — it was hours old — so fixing this now cost nobody a
+migration, where living with it would have cost everyone one for a whole major cycle. That the
+problems surfaced at all is the mechanism working: the surface was written down, the writing down
+made it reviewable, and every removal below is recorded as a `*REMOVED*` line the compiler checks
+rather than a promise a reviewer has to remember.
+
 ### Breaking changes
 
 - **The persistence bookkeeping entities are read-only to consumers.** Every setter on
@@ -105,14 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ArgumentNullException` rather than silently registering nothing.
     `OrionAuditOptions.Audit<T>(configure = null)` — the surface almost every consumer actually
     calls — is untouched.
-Narrowing the core package's public surface. Writing the API down in 1.0.0 is what made the size of
-it visible — 938 entries across 116 public types, far more than a consumer needs. Each removal below
-is library-internal machinery that was only ever reachable by accident; none of it is part of how
-OrionAudit is meant to be used. 2.0.0 is the release that is allowed to take them back, and every
-removal is recorded in `src/Moongazing.OrionAudit/PublicAPI.Unshipped.txt` as a `*REMOVED*` line, so
-the analyzer — not a reviewer's memory — is what holds the line from here.
 
-- **BREAKING — the 13 `OrionAuditTelemetry.Record*` helpers are now `internal`** (−13 entries):
+- **The 13 `OrionAuditTelemetry.Record*` helpers are now `internal`** (−13 entries):
   `RecordCaptureEntrySize`, `RecordCompactionError`, `RecordDispatchBatchSize`,
   `RecordDispatchClaimDuration`, `RecordDispatchError`, `RecordDispatchFlushDuration`,
   `RecordDispatchIdlePoll`, `RecordDispatchLagViolation`, `RecordEventsPerPublish`,
@@ -133,7 +147,7 @@ the analyzer — not a reviewer's memory — is what holds the line from here.
   `System.Diagnostics.Metrics.Meter` and mirror the instrument names; that keeps your samples
   attributable to your component instead of silently merging into OrionAudit's.
 
-- **BREAKING — `AuditHashChainStamper`, and with it the nested `AuditHashChainStamper.ChainKey`, is
+- **`AuditHashChainStamper`, and with it the nested `AuditHashChainStamper.ChainKey`, is
   now `internal`** (−21 entries: the class, the `ChainKey` record struct with all its
   compiler-generated members, and `KeyFor` / `Stamp` / `DistinctKeys` / `SummarizeBatch`). This is
   the *write* half of the tamper-evident hash chain. Its only caller is the internal
@@ -143,15 +157,28 @@ the analyzer — not a reviewer's memory — is what holds the line from here.
   MACs the library did not issue, anchors that disagree with the rows they anchor, and a chain that
   fails its own verification. `ChainKey` is the dictionary key that walk shares with the anchor
   lock ordering; it has no meaning outside it.
-  **What to do instead:** nothing, if you were reading the chain — the *verification* half is
-  deliberately untouched and stays public, because verifying a chain without trusting the library
-  is the whole point of keying it. `Integrity.AuditEntryHasher.ComputeEntryHash` recomputes any
+  **What to do instead:** keep reading the chain — the *verification* half stays public
+  deliberately, because verifying a chain without trusting the library is the whole point of keying
+  it. `Integrity.AuditEntryHasher.ComputeEntryHash` recomputes any
   row's MAC from its content, its predecessor's hash and your key;
   `Integrity.AuditChainVerifier.VerifyStream` walks a stream in chain order and checks it against
-  its `AuditChainAnchor`; and `IAuditIntegrityVerifier` does both against an EF Core store. If you
+  its `AuditChainVerificationAnchor` (see the anchor change above); and `IAuditIntegrityVerifier`
+  does both against an EF Core store. If you
   were *writing* chained rows, use the supported write paths — the save-changes interceptor, the
   async dispatcher, or `AuditImportBuilder` for bulk import — all of which stamp through the same
   internal writer and keep the anchors consistent.
+
+- **What was looked at and deliberately kept public**, so the line is on the record rather than in
+  someone's head: `Integrity.AuditChainVerifier` and `Integrity.AuditEntryHasher`, because checking
+  a chain without trusting the library that wrote it is the reason the chain is keyed at all;
+  `DiffEngine`, because a consumer reading `AuditLog.Changes` needs the same parse the library uses
+  and reimplementing it against an internal format is how the two drift apart; `SnapshotBuilder`,
+  because reconstruction is a documented read path and building a state snapshot from rows you
+  already hold is a legitimate thing to do outside `IAuditReconstructor`; and
+  `AuditHistoryCompactor`, because compaction is an operator decision on data the operator owns and
+  the background compactor is only one way to schedule it. Each is a read or verify path over rows
+  the caller already has, which is the test the removals above all fail: they mutate state only the
+  library is allowed to author.
 
 ### Added
 
@@ -185,6 +212,19 @@ the analyzer — not a reviewer's memory — is what holds the line from here.
   `net8.0`, `net9.0` and `net10.0`. No code changed; this is a guard, not a behaviour change.
   Adding public API now means adding a line to `PublicAPI.Unshipped.txt`; the release cut promotes
   those lines into `PublicAPI.Shipped.txt`. See [CONTRIBUTING.md](CONTRIBUTING.md#public-api).
+
+- **The first promotion through that mechanism.** This release cut folds every
+  `PublicAPI.Unshipped.txt` into its project's `PublicAPI.Shipped.txt` and leaves each `Unshipped`
+  holding nothing but `#nullable enable`. Additions are appended; a `*REMOVED*` line is not copied
+  across but deletes the entry it names, which is how the 81 core removals above leave the record
+  rather than accumulate in it. The promoted baselines were regenerated by the analyzer's own
+  RS0016 code fix, so the ordering is the analyzer's and not a hand sort. As of 2.0.0 they stand at
+  **872 / 19 / 2 / 7 / 34** entries for `OrionAudit`, `OrionAudit.AspNetCore`, `OrionAudit.MySql`,
+  `OrionAudit.Viewer` and `OrionAudit.Testing` — the core package 66 entries smaller than the 938 it
+  froze at, and `OrionAudit.AspNetCore` 10 larger for the options type it took in. The baseline was
+  proved live before the cut: a member appended to `Shipped` that the code does not have fails the
+  build with RS0017, and deleting a real member's line fails it with RS0016, once per target
+  framework.
 
 ## [1.0.0] - 2026-09-20
 
