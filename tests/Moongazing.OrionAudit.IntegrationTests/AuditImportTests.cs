@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Moongazing.OrionAudit;
 using Moongazing.OrionAudit.Configuration;
@@ -65,8 +66,41 @@ public class AuditImportTests
         }
     }
 
+    private sealed class RetryImportDb : DbContext
+    {
+        public DbSet<Note> Notes => Set<Note>();
+        public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+        public RetryImportDb(DbContextOptions<RetryImportDb> options) : base(options) { }
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Note>().HasKey(n => n.Id);
+            modelBuilder.ApplyOrionAuditConfigurations(this);
+        }
+    }
+
+    /// <summary>Fails the n-th <c>SaveChanges</c> it sees, then steps aside once disarmed.</summary>
+    private sealed class FailOnNthSaveInterceptor : SaveChangesInterceptor
+    {
+        private readonly int failOn;
+        private int calls;
+        public FailOnNthSaveInterceptor(int failOn) => this.failOn = failOn;
+        public bool Disarmed { get; set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Disarmed && ++calls == failOn)
+            {
+                throw new InvalidOperationException("flush boom");
+            }
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
     private static async Task<(ServiceProvider sp, SqliteConnection conn)> BuildAsync<TDb>(
-        Action<OrionAuditOptions> configure) where TDb : DbContext
+        Action<OrionAuditOptions> configure,
+        IInterceptor? extraInterceptor = null) where TDb : DbContext
     {
         var conn = new SqliteConnection("DataSource=:memory:");
         await conn.OpenAsync();
@@ -75,7 +109,13 @@ public class AuditImportTests
         services.AddOrionAudit<TDb>(configure);
         services.AddSingleton(conn);
         services.AddDbContext<TDb>((sp, o) =>
-            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp));
+        {
+            o.UseSqlite(sp.GetRequiredService<SqliteConnection>()).UseOrionAudit(sp);
+            if (extraInterceptor is not null)
+            {
+                o.AddInterceptors(extraInterceptor);
+            }
+        });
         var sp = services.BuildServiceProvider();
         await using (var scope = sp.CreateAsyncScope())
         {
@@ -132,6 +172,50 @@ public class AuditImportTests
         Assert.Equal(1, r2.Skipped);
 
         Assert.Equal(1, await ctx.AuditLogs.CountAsync());
+    }
+
+    [Fact]
+    public async Task SaveAsync_Retried_After_PartialFlush_Writes_The_Records_That_Never_Landed()
+    {
+        // Two batches of two. The second flush throws, so batch #1 is committed and batch #2 is not.
+        var flushFailure = new FailOnNthSaveInterceptor(failOn: 2);
+        var (sp, conn) = await BuildAsync<RetryImportDb>(o => o.Audit<Note>(), flushFailure);
+        await using var _c = conn;
+        await using var _s = sp;
+
+        await using var scope = sp.CreateAsyncScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<RetryImportDb>();
+
+        var importer = ctx.CreateAuditImport(o =>
+        {
+            o.ImportBatch = "legacy-retry";
+            o.BatchSize = 2;
+        });
+        // No SourceId: every one of these records carries the same `import:legacy-retry`
+        // correlation, which is what used to make the retry mistake all of them for rows batch #1
+        // had already written.
+        for (var i = 0; i < 4; i++)
+        {
+            var id = Guid.NewGuid();
+            importer.Add<Note>(e => e
+                .Key(id)
+                .Action(AuditAction.Inserted)
+                .After(new Note { Id = id, Body = $"v{i}" }));
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => importer.SaveAsync());
+        Assert.Equal(2, await ctx.AuditLogs.CountAsync());
+
+        flushFailure.Disarmed = true;
+        var retry = await importer.SaveAsync();
+
+        // The two records the failed flush never wrote must land now, not be waved through as
+        // Skipped rows that are "already present" when nothing of the sort is in the table.
+        Assert.Equal(2, retry.Written);
+        Assert.Equal(0, retry.Skipped);
+        Assert.Equal(0, retry.DeadLettered);
+        Assert.Equal(4, await ctx.AuditLogs.CountAsync());
+        Assert.Equal(4, (await ctx.AuditLogs.Select(a => a.EntityId).ToListAsync()).Distinct().Count());
     }
 
     [Fact]

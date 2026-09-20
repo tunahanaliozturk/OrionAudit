@@ -173,7 +173,7 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         {
             try
             {
-                var auditLog = BuildAuditLog(ctx, row);
+                var auditLog = await BuildAuditLogAsync(ctx, row, cancellationToken).ConfigureAwait(false);
                 ctx.Add(auditLog);
                 ApplyCustomColumnsFromQueue(ctx, auditLog, row);
                 ctx.Set<AuditCaptureQueueEntry>().Remove(row);
@@ -367,7 +367,10 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         }
     }
 
-    private AuditLog BuildAuditLog(TDbContext ctx, AuditCaptureQueueEntry row)
+    private async Task<AuditLog> BuildAuditLogAsync(
+        TDbContext ctx,
+        AuditCaptureQueueEntry row,
+        CancellationToken cancellationToken)
     {
         var before = JsonNode.Parse(row.BeforeJson)!.AsObject();
         var after = JsonNode.Parse(row.AfterJson)!.AsObject();
@@ -397,7 +400,9 @@ public sealed partial class AuditDispatcher<TDbContext> : IAuditDispatcher
         }
         else if (row.Action == AuditAction.Updated
                  && snapshotPolicy is not SnapshotPolicy.NeverPolicy
-                 && SnapshotPolicyEvaluator.ShouldSnapshot(ctx, snapshotPolicy, auditLog, row.OccurredOnUtc))
+                 && await SnapshotPolicyEvaluator
+                        .ShouldSnapshotAsync(ctx, snapshotPolicy, auditLog, row.OccurredOnUtc, cancellationToken)
+                        .ConfigureAwait(false))
         {
             auditLog.Snapshot = row.AfterJson;
         }

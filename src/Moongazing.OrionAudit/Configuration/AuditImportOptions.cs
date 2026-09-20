@@ -26,7 +26,9 @@ public sealed class AuditImportOptions
 
     /// <summary>
     /// Stable, per-import label. Stamped into <c>AuditLog.CorrelationId</c> as
-    /// <c>import:{ImportBatch}#{SourceId}</c> so re-runs are idempotent.
+    /// <c>import:{ImportBatch}#{SourceId}</c> so re-runs are idempotent per record. A record
+    /// added without a <c>SourceId</c> is stamped <c>import:{ImportBatch}</c>, which identifies
+    /// the batch rather than the record, so such records are never reported as <c>Skipped</c>.
     /// Required; <c>SaveAsync</c> throws if null.
     /// </summary>
     public string? ImportBatch

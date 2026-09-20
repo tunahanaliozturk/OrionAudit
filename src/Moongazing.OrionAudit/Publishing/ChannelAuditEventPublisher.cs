@@ -165,6 +165,24 @@ public sealed partial class ChannelAuditEventPublisher : IAuditEventPublisher, I
             }
         }
 
-        shutdownCts.Dispose();
+        if (readerTask.IsCompleted)
+        {
+            shutdownCts.Dispose();
+        }
+        else
+        {
+            // The reader outlived both drain windows, so it is still sitting inside
+            // ReadAllAsync(shutdownCts.Token) (or inside a handler holding that token). Disposing
+            // the source here hands it a disposed token: the next MoveNextAsync throws
+            // ObjectDisposedException, which ReadLoopAsync does not catch, and it resurfaces as an
+            // unobserved task exception during host shutdown. Hand the dispose to the reader
+            // instead so the source is released whenever it finally unwinds.
+            _ = readerTask.ContinueWith(
+                static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+                shutdownCts,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
 }

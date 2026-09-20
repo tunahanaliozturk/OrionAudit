@@ -122,13 +122,6 @@ public class SnapshotPolicyCaptureTests
         Assert.NotNull(refreshed[2].Snapshot);
     }
 
-    private sealed class MutableTimeProvider(DateTimeOffset start) : TimeProvider
-    {
-        private DateTimeOffset now = start;
-        public override DateTimeOffset GetUtcNow() => now;
-        public void Advance(TimeSpan delta) => now = now.Add(delta);
-    }
-
     [Fact]
     public async Task SnapshotPolicy_DoesNotInterfereWithInsertOrDelete()
     {

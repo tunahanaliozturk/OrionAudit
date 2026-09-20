@@ -8,9 +8,16 @@ namespace Moongazing.OrionAudit.Configuration;
 
 /// <summary>
 /// Fluent bulk-import builder. Construct via <c>DbContext.CreateAuditImport(...)</c>;
-/// call <see cref="Add{T}"/> per record then <see cref="SaveAsync"/>. <see cref="SaveAsync"/>
-/// can be called multiple times to resume after a partial failure — idempotency stamps
-/// matched-already rows as <c>Skipped</c>.
+/// call <see cref="Add{T}"/> per record then <see cref="SaveAsync"/>.
+/// <para>
+/// <see cref="SaveAsync"/> can be called again to resume after a partial failure: only the records
+/// that actually reached the database leave the buffer, so the retry writes exactly the ones that
+/// did not. Across separate builders (re-running the whole import), idempotency is per-record and
+/// needs a per-record identity: a record with <c>SourceId(...)</c> is matched on
+/// <c>import:{ImportBatch}#{SourceId}</c> and reported as <c>Skipped</c> when its row is already
+/// present. A record without a <c>SourceId</c> only carries the batch-wide <c>import:{ImportBatch}</c>
+/// correlation, which cannot identify it, so it is always written.
+/// </para>
 /// </summary>
 public sealed class AuditImportBuilder
 {
@@ -78,64 +85,77 @@ public sealed class AuditImportBuilder
         var deadLettered = 0;
         var batch = new List<AuditLog>(Math.Min(pending.Count, options.BatchSize));
         var batchRecords = new List<PendingRecord>(batch.Capacity);
+        // How many leading records this call has fully accounted for (skipped, or flushed to the
+        // database). Records are processed in order and flushed in order, so that is always a
+        // prefix of the buffer. A flush that throws leaves everything after it in place, so a
+        // retry re-processes exactly the records that never reached the database.
+        var accountedFor = 0;
 
-        foreach (var record in pending)
+        try
         {
-            var correlation = record.SourceId is null
-                ? prefix
-                : $"{prefix}#{record.SourceId}";
+            for (var i = 0; i < pending.Count; i++)
+            {
+                var record = pending[i];
+                var correlation = record.SourceId is null
+                    ? prefix
+                    : $"{prefix}#{record.SourceId}";
 
-            if (existing.Contains(correlation))
-            {
-                skipped++;
-                continue;
-            }
-            // Don't add to `existing` here — that set represents rows already in the DB before
-            // this SaveAsync. Multiple in-batch records sharing a correlation (the no-SourceId
-            // case) are intentionally all written; their idempotency is batch-level, not
-            // per-record.
-
-            AuditLog row;
-            try
-            {
-                row = BuildAuditLog(record, correlation);
-                written++;
-            }
-#pragma warning disable CA1031 // a malformed record must not abort the batch
-            catch (Exception ex)
-#pragma warning restore CA1031
-            {
-                row = new AuditLog
+                // Idempotency is per-record, and only SourceId gives a record an identity. Records
+                // without one all share the batch-wide correlation, so a hit here means "this
+                // import tag has written something", not "this record was written" — matching on
+                // it reported never-written records as Skipped and dropped them for good.
+                if (record.SourceId is not null && existing.Contains(correlation))
                 {
-                    EntityType = record.EntityType.AssemblyQualifiedName!,
-                    EntityId = record.KeyString,
-                    Action = record.Action,
-                    OccurredOnUtc = record.OccurredOnUtc,
-                    UserId = record.UserId,
-                    UserDisplay = record.UserDisplay,
-                    UserType = record.UserType,
-                    TenantId = record.TenantId,
-                    CorrelationId = correlation,
-                    Diff = "[]",
-                    Error = ex.ToString(),
-                };
-                deadLettered++;
-            }
-            batch.Add(row);
-            batchRecords.Add(record);
+                    skipped++;
+                    continue;
+                }
 
-            if (batch.Count >= options.BatchSize)
+                AuditLog row;
+                try
+                {
+                    row = BuildAuditLog(record, correlation);
+                    written++;
+                }
+#pragma warning disable CA1031 // a malformed record must not abort the batch
+                catch (Exception ex)
+#pragma warning restore CA1031
+                {
+                    row = new AuditLog
+                    {
+                        EntityType = record.EntityType.AssemblyQualifiedName!,
+                        EntityId = record.KeyString,
+                        Action = record.Action,
+                        OccurredOnUtc = record.OccurredOnUtc,
+                        UserId = record.UserId,
+                        UserDisplay = record.UserDisplay,
+                        UserType = record.UserType,
+                        TenantId = record.TenantId,
+                        CorrelationId = correlation,
+                        Diff = "[]",
+                        Error = ex.ToString(),
+                    };
+                    deadLettered++;
+                }
+                batch.Add(row);
+                batchRecords.Add(record);
+
+                if (batch.Count >= options.BatchSize)
+                {
+                    await FlushAsync(batch, batchRecords, cancellationToken).ConfigureAwait(false);
+                    accountedFor = i + 1;
+                }
+            }
+
+            if (batch.Count > 0)
             {
                 await FlushAsync(batch, batchRecords, cancellationToken).ConfigureAwait(false);
             }
+            accountedFor = pending.Count;
         }
-
-        if (batch.Count > 0)
+        finally
         {
-            await FlushAsync(batch, batchRecords, cancellationToken).ConfigureAwait(false);
+            pending.RemoveRange(0, accountedFor);
         }
-
-        pending.Clear();
 
         OrionAuditTelemetry.ImportRowsWritten.Add(written);
         OrionAuditTelemetry.ImportRowsSkipped.Add(skipped);
@@ -159,7 +179,21 @@ public sealed class AuditImportBuilder
         {
             ApplyRecordCustomColumns(batch[i], batchRecords[i]);
         }
-        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A failed flush leaves this batch tracked as Added. The records stay in the buffer and
+            // a retry rebuilds their rows, so leaving the stale ones tracked would insert each row
+            // twice on the next successful SaveChanges.
+            foreach (var row in batch)
+            {
+                context.Entry(row).State = EntityState.Detached;
+            }
+            throw;
+        }
         batch.Clear();
         batchRecords.Clear();
     }

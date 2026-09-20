@@ -331,8 +331,14 @@ var result = await import.SaveAsync();
 // result.Written / Skipped / DeadLettered
 ```
 
-`ImportBatch` is mandatory — it stamps `AuditLog.CorrelationId` so re-running `SaveAsync` is
-safe (rows already present report as `Skipped`). Imported diffs are byte-for-byte equal to the
+`ImportBatch` is mandatory — it stamps `AuditLog.CorrelationId` as `import:{ImportBatch}#{SourceId}`,
+which is what makes a re-run safe: a record whose row is already present reports as `Skipped`.
+Idempotency is per record, so it needs `SourceId(...)`. A record added without one is stamped with
+the batch-wide `import:{ImportBatch}` instead, which identifies the batch and not the record, so it
+is never reported as `Skipped` and re-adding it writes a second row. Retrying `SaveAsync` on the
+same builder after a failed flush is safe either way: only the records that actually reached the
+database leave the buffer, so the retry writes exactly the ones that did not.
+Imported diffs are byte-for-byte equal to the
 diffs the live capture path produces (a parity test enforces this). Import always writes
 `AuditLog` directly, bypassing the async-capture queue.
 

@@ -69,11 +69,14 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     /// capture implementation, so the two entry points cannot drift apart (before v0.11.4 this
     /// override did not exist at all and <c>SaveChanges()</c> silently audited nothing).
     /// <para>
-    /// Two legs of that pipeline are genuinely async and have no synchronous counterpart: the hash
-    /// chain's anchor lock/read (<c>EfCoreAuditHashChainWriter.StampAsync</c>) and the consumer's
-    /// <see cref="IAuditEventPublisher.PublishAsync"/>. Both are opt-in, so with neither wired the
-    /// task below completes synchronously and <c>GetResult</c> never blocks. When one is wired we
-    /// block here rather than duplicating either leg.
+    /// Three legs of that pipeline are genuinely async and have no synchronous counterpart: the
+    /// hash chain's anchor lock/read (<c>EfCoreAuditHashChainWriter.StampAsync</c>), the consumer's
+    /// <see cref="IAuditEventPublisher.PublishAsync"/>, and the periodic snapshot policy's cursor
+    /// read (<c>SnapshotPolicyEvaluator.ShouldSnapshotAsync</c>). All three are opt-in, so with
+    /// none of them wired the task below completes synchronously and <c>GetResult</c> never blocks.
+    /// When one is wired we block here rather than duplicating that leg — for the cursor read that
+    /// is the same database round-trip this path always blocked on, just reached through
+    /// <c>FindAsync</c> so the async entry point no longer blocks a thread-pool thread on it.
     /// </para>
     /// <para>
     /// The ambient <see cref="SynchronizationContext"/> is cleared for the duration of the call.
@@ -213,7 +216,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
                 && snapshotPolicy is not SnapshotPolicy.NeverPolicy
                 && afterNode is not null)
             {
-                if (SnapshotPolicyEvaluator.ShouldSnapshot(ctx, snapshotPolicy, auditLog, occurredOn))
+                if (await SnapshotPolicyEvaluator
+                        .ShouldSnapshotAsync(ctx, snapshotPolicy, auditLog, occurredOn, cancellationToken)
+                        .ConfigureAwait(false))
                 {
                     auditLog.Snapshot = afterNode.ToJsonString();
                     snapshotsTaken++;

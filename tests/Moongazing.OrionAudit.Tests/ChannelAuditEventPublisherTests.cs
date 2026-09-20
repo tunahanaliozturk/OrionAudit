@@ -121,6 +121,38 @@ public class ChannelAuditEventPublisherTests
     }
 
     [Fact]
+    public async Task DisposeAsync_LeavesTheTokenSourceAlive_WhenTheReaderOutlivesTheDrainTimeout()
+    {
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource();
+        var readerToken = CancellationToken.None;
+
+        var publisher = new ChannelAuditEventPublisher(
+            async (_, ct) =>
+            {
+                readerToken = ct;
+                entered.TrySetResult();
+                // Deliberately ignores ct - this is the handler that outlives both drain windows.
+                await release.Task;
+            },
+            new ChannelAuditEventPublisherOptions { DrainTimeout = TimeSpan.FromMilliseconds(50) });
+
+        await publisher.PublishAsync(new[] { SampleEvent() }, CancellationToken.None);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Both drain windows expire with the reader still inside ReadAllAsync(shutdownCts.Token).
+        await publisher.DisposeAsync();
+
+        // The reader still holds that token, so its source must still be usable. When DisposeAsync
+        // disposed unconditionally, the reader's next MoveNextAsync threw ObjectDisposedException -
+        // which ReadLoopAsync does not catch, so it surfaced as an unobserved task exception during
+        // host shutdown.
+        Assert.Null(Record.Exception(() => readerToken.WaitHandle.WaitOne(0)));
+
+        release.SetResult();
+    }
+
+    [Fact]
     public void Ctor_RejectsInvalidOptions()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>

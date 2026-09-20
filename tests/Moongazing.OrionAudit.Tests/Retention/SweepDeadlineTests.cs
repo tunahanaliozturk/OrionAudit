@@ -72,14 +72,6 @@ public sealed class SweepDeadlineTests : IAsyncLifetime
             clock ?? TimeProvider.System,
             NullLogger<AuditRetentionHostedService<DeadlineDbContext>>.Instance);
 
-    private sealed class MutableTimeProvider : TimeProvider
-    {
-        private DateTimeOffset now;
-        public MutableTimeProvider(DateTimeOffset start) => now = start;
-        public override DateTimeOffset GetUtcNow() => now;
-        public void Advance(TimeSpan delta) => now = now.Add(delta);
-    }
-
     private sealed class AutoAdvanceTimeProvider : TimeProvider
     {
         private DateTimeOffset now;

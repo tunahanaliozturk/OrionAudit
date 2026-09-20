@@ -46,10 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SavingChangesAsync`, so any caller using the blocking `context.SaveChanges()` overload wrote zero
   audit rows — silently, with no error raised. The capture pipeline is now a single private
   `CaptureAsync` shared by both entry points, with `SavingChanges` added as a thin sync wrapper, so
-  the two paths cannot drift apart again. The two opt-in legs that are genuinely async (the hash
-  chain's anchor lock/read and `IAuditEventPublisher.PublishAsync`) are awaited on that one pipeline
-  rather than duplicated; with neither wired the pipeline completes synchronously and the sync
-  override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
+  the two paths cannot drift apart again. The opt-in legs that are genuinely async (the hash
+  chain's anchor lock/read, `IAuditEventPublisher.PublishAsync`, and the periodic snapshot policy's
+  cursor read) are awaited on that one pipeline rather than duplicated; with none of them wired the
+  pipeline completes synchronously and the sync override never blocks. The sync path also clears the ambient `SynchronizationContext` for the
   duration of the capture: a consumer publisher that awaits without `ConfigureAwait(false)` would
   otherwise post its continuation back to the single-threaded context (WPF, WinForms, legacy
   ASP.NET) whose thread is blocked waiting for it, and the save would deadlock.
@@ -155,6 +155,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which streams lost rows, which a bare `ExecuteDelete` never reveals. The batch is already bounded by
   `MaxRowsPerSweep`, and consumers without hash-chaining keep the fast path unchanged. Dry-run still
   deletes nothing and writes no checkpoint.
+- **`ChannelAuditEventPublisher.DisposeAsync` no longer disposes a `CancellationTokenSource` the
+  reader still holds.** The final `shutdownCts.Dispose()` ran unconditionally, including on the
+  path where the post-cancel `readerTask.WaitAsync(drainTimeout)` timed out and the timeout was
+  swallowed. A reader still sitting inside `ReadAllAsync(shutdownCts.Token)` then hit
+  `ObjectDisposedException` on its next read; `ReadLoopAsync` catches only
+  `OperationCanceledException`, so it resurfaced as an unobserved task exception during host
+  shutdown. The source is now disposed only once the reader has actually finished — immediately
+  when it completed within the drain budget, otherwise from a continuation on the reader task.
+- **Retrying `AuditImportBuilder.SaveAsync` after a partial flush no longer drops records and
+  reports them as `Skipped`.** Flushing happens per `BatchSize`, but the buffer was cleared only
+  after every flush had succeeded. When a later flush threw, the earlier batches were already
+  committed and the buffer still held every record; the retry rebuilt its already-present set from
+  the rows those batches wrote, and because records added without a `SourceId` all share the single
+  `import:{ImportBatch}` correlation, the check matched *every* remaining record. They were counted
+  as `Skipped` and never written — the README promised `Skipped` means "already present", and here
+  it was returned for rows that were not. Two changes fix it: the already-present check now applies
+  only to records that carry a `SourceId` (the only per-record identity there is), and only the
+  records that actually reached the database leave the buffer, so a retry re-processes exactly the
+  records that did not. A failed flush also detaches its batch so the retry cannot insert those
+  rows twice.
+
+### Changed
+
+- **Import idempotency is documented as per-record, which requires `SourceId(...)`.** A record
+  added without one is stamped with the batch-wide `import:{ImportBatch}` correlation, which
+  identifies the batch and not the record, so it is never reported as `Skipped` and re-adding it
+  to a fresh builder writes a second row. Retrying `SaveAsync` on the *same* builder after a
+  failed flush is safe either way. README and the `AuditImportBuilder` / `AuditImportOptions` docs
+  now say this instead of promising blanket re-run safety.
+
+### Performance
+
+- **The periodic snapshot policy no longer blocks a thread-pool thread on every audited save.**
+  `SnapshotPolicyEvaluator` read the entity's `SnapshotCursor` with a synchronous
+  `ctx.Set<SnapshotCursor>().Find(...)` from inside `SavingChangesAsync`, so `SnapshotEvery(...)`
+  cost a blocking database round-trip on the async hot path for every audited update. It now uses
+  `FindAsync`, which makes both call sites — the interceptor's capture pipeline and the async
+  dispatcher's `BuildAuditLogAsync` — async through. Once the cursor is tracked, later saves on the
+  same context resolve it from the change tracker without touching the database at all. The
+  synchronous `SaveChanges()` entry point blocks on exactly the round-trip it always blocked on.
+
+### Documentation
+
+- **`SnapshotEvery(n)` is documented as approximate under concurrent writes to one entity, with no
+  guaranteed interval in either direction.** `SnapshotCursor.UpdatesSinceLast` is read, incremented
+  in memory, and written back as an absolute value, with no lock and no concurrency token. With no
+  concurrent writes to the same entity that is exact — every save reads what the previous one
+  wrote, and every n-th update snapshots. Under concurrency it is approximate both ways: two saves
+  that both read `n - 1` both snapshot, so snapshots can land a single update apart; and because
+  the write is a blind overwrite rather than an increment, a stale writer can lower the count (A
+  reads 0, B commits 1, C commits 2, A commits its stale 1), which sustained contention can repeat,
+  deferring a snapshot without bound. The value stays sane regardless — only ever a reader's value
+  plus one, or 0 after a snapshot — so it never goes negative and never persists at or above `n`.
+
+  Nothing about the trail itself is affected: no audit row is lost, delayed, or mis-stamped, the
+  diff chain stays complete, and `AuditReconstructor` can always rebuild any state. `Snapshot` is
+  purely a replay-cost optimisation, so a drifting cadence costs replay time and nothing else.
+
+  **`SnapshotEvery(TimeSpan)` is the bounded variant.** It keys off `LastSnapshotUtc`, which is only
+  ever written as some save's own timestamp and so can never be set further ahead than a save that
+  really happened; a stale write moves it *earlier*, expiring the window sooner. Concurrency shows
+  up there as an extra snapshot, never a late one, so the interval is not exceeded (absent clock
+  skew between capture hosts).
+
+  Guarding the counter was considered and **rejected**. A concurrency token makes the losing writer
+  raise `DbUpdateConcurrencyException` out of the consumer's business transaction, naming a table
+  they never asked for, and contradicts how the rest of capture isolates audit-side faults (a diff
+  failure annotates the row, a custom-column provider failure annotates the row, an observer fault
+  is swallowed); it would also have added a non-null `Version` column. Making the write monotonic
+  is not reachable either: EF emits absolute values, no EF transaction exists yet at interceptor
+  time (so relative SQL we issue ourselves would commit separately and count rolled-back saves),
+  and EF's only conditional shape is the token again, because it checks rows-affected and throws
+  when the stale writer matches none. Monotonicity alone would not restore a lower bound anyway —
+  two savers reading `n - 1` both snapshot however the write is performed. There is **no schema
+  change**.
 
 ## [0.11.3] - 2026-07-28
 
