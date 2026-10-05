@@ -49,7 +49,7 @@
 
 ![OrionAudit capture flow on SaveChanges, sync and async modes](docs/diagrams/capture-flow.png)
 
-In sync mode the `AuditLog` row and the domain rows commit together: either both exist or neither does. A snapshot or diff failure does not abort your save; the row is still written with `Diff = []` and the exception in `Error`. In async mode the same atomicity holds for the queue row, and the dispatcher inserts the final `AuditLog` row and deletes the queue row in one transaction, so deferred rows are exactly-once:
+In sync mode the `AuditLog` row and the domain rows commit together: either both exist or neither does. A snapshot or diff failure does not abort your save; the row is still written with `Diff = []` and the exception in `Error`. In async mode the same atomicity holds for the queue row, and the dispatcher inserts the final `AuditLog` row and deletes the queue row in one transaction, so deferred rows are exactly-once. An `IAuditEventPublisher`, when configured, is called before that commit but is not part of it: if the commit fails after a successful `PublishAsync`, the queue row is claimed again once `ClaimLease` expires and its event is published again (with a new `AuditLog` id), so treat `AuditLogEvent` as an at-least-once notification and the `AuditLog` table as the record:
 
 ![OrionAudit async capture dispatch, retry and dead-letter](docs/diagrams/async-dispatch.png)
 
