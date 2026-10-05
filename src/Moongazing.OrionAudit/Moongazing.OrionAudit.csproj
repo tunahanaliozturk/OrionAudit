@@ -4,7 +4,6 @@
     <Description>EF Core change audit trail with JSON Patch diffs, multi-tenant support, time-travel reconstruction, and OpenTelemetry instrumentation.</Description>
     <PackageTags>audit;audit-trail;efcore;entity-framework;change-tracking;json-patch;compliance;ddd</PackageTags>
     <PackageReadmeFile>docs/README.md</PackageReadmeFile>
-    <PackageIcon>docs/logo.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,7 +30,6 @@
 
   <ItemGroup>
     <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
-    <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
   </ItemGroup>
 
   <!-- Expose internal building blocks (the hash-chain writer and the canonicalization helper) to

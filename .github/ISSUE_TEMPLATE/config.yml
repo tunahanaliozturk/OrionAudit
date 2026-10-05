@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Roadmap
+    url: https://github.com/tunahanaliozturk/OrionAudit/blob/master/ROADMAP.md
+    about: What is already planned. Check it before opening a duplicate request.
+  - name: Contributing guide
+    url: https://github.com/tunahanaliozturk/OrionAudit/blob/master/CONTRIBUTING.md
+    about: How to build, test and shape a pull request. Read the package's NuGet readme for its real behaviour.
+  - name: Security vulnerability
+    url: https://github.com/tunahanaliozturk/OrionAudit/blob/master/SECURITY.md
+    about: Do not file a public issue. Report it privately as described in SECURITY.md.

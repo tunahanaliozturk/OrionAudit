@@ -4,7 +4,6 @@
     <Description>Testing helpers for OrionAudit. Provides AuditCapture, fluent assertions, and InMemory resolvers. Framework-agnostic - no xUnit/NUnit/FluentAssertions dependency.</Description>
     <PackageTags>audit;audit-trail;testing;test-helpers;orionaudit</PackageTags>
     <PackageReadmeFile>docs/README.md</PackageReadmeFile>
-    <PackageIcon>docs/logo.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,7 +12,6 @@
 
   <ItemGroup>
     <None Include="docs/README.md" Pack="true" PackagePath="docs/" />
-    <None Include="docs/logo.png" Pack="true" PackagePath="docs/" />
   </ItemGroup>
   <!--
     API freeze. OrionAudit 1.0.0 declared the public surface stable, so every addition or removal

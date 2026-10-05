@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: "Segoe UI", Inter, "Helvetica Neue", Arial, sans-serif; fill: #1e1b4b; }
+    .title { font-size: 24px; font-weight: 700; }
+    .subtitle { font-size: 14px; fill: #475569; }
+    .label { font-size: 15px; font-weight: 600; }
+    .small { font-size: 12.5px; fill: #475569; }
+    .code { font-family: "Cascadia Code", Consolas, "SF Mono", monospace; font-size: 13px; fill: #3730a3; }
+    .edge { font-size: 12.5px; fill: #334155; }
+    .step { fill: #eef2ff; stroke: #4f46e5; stroke-width: 2; }
+    .ext { fill: #f0f9ff; stroke: #0284c7; stroke-width: 2; }
+    .ok { fill: #ecfdf5; stroke: #059669; stroke-width: 2; }
+    .fail { fill: #fef2f2; stroke: #dc2626; stroke-width: 2; }
+    .decision { fill: #fffbeb; stroke: #d97706; stroke-width: 2; }
+    .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 4 3; }
+    .lane { stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 6 5; }
+    .flow { fill: none; stroke: #64748b; stroke-width: 2; marker-end: url(#arrow); }
+    .flow.alt { stroke: #dc2626; stroke-dasharray: 6 4; marker-end: url(#arrow-fail); }
+    .flow.back { stroke-dasharray: 6 4; }
+    .badge { fill: #4f46e5; }
+    .badge-text { font-size: 12px; font-weight: 700; fill: #ffffff; }
+  </style>
+
+
+  <rect width="1200" height="540" fill="#ffffff"/>
+
+  <text class="title" x="40" y="52">OrionAudit - packages and where they plug in</text>
+  <text class="subtitle" x="40" y="78">The core package captures changes inside your DbContext; the satellite packages add attribution, MySQL mapping, a viewer and test helpers.</text>
+
+  <!-- application -->
+  <rect class="step" x="40" y="120" width="262" height="200" rx="14"/>
+  <text class="label" x="60" y="154">Your application</text>
+  <text class="code" x="60" y="190">AddOrionAudit&lt;TDbContext&gt;</text>
+  <text class="small" x="60" y="210">register audited types</text>
+  <text class="code" x="60" y="244">UseOrionAudit(sp)</text>
+  <text class="small" x="60" y="264">wire the interceptor</text>
+  <text class="code" x="60" y="298">ApplyOrionAuditConfigurations</text>
+
+  <path class="flow" d="M302,220 L338,220"/>
+
+  <!-- core -->
+  <rect class="step" x="340" y="120" width="500" height="200" rx="14"/>
+  <text class="label" x="360" y="154">OrionAudit (core)</text>
+  <text class="code" x="360" y="190">AuditSaveChangesInterceptor</text>
+  <text class="small" x="610" y="190">capture on every SaveChanges</text>
+  <text class="code" x="360" y="218">AuditDispatcher</text>
+  <text class="small" x="610" y="218">async capture (UseAsyncCapture)</text>
+  <text class="code" x="360" y="246">IAuditHistoryStore</text>
+  <text class="small" x="610" y="246">query, aggregate, compact</text>
+  <text class="code" x="360" y="274">IAuditReconstructor</text>
+  <text class="small" x="610" y="274">time-travel reconstruction</text>
+  <text class="code" x="360" y="302">IAuditIntegrityVerifier</text>
+  <text class="small" x="610" y="302">hash chain (UseHashChain)</text>
+
+  <path class="flow" d="M840,220 L888,220"/>
+
+  <!-- database -->
+  <rect class="ext" x="890" y="120" width="270" height="200" rx="14"/>
+  <text class="label" x="910" y="154">Your database</text>
+  <text class="code" x="910" y="190">OrionAudit_Log</text>
+  <text class="code" x="910" y="218">OrionAudit_Capture_Queue</text>
+  <text class="code" x="910" y="246">OrionAudit_Snapshot_Cursors</text>
+  <text class="code" x="910" y="274">OrionAudit_Chain_Anchor</text>
+  <text class="small" x="910" y="302">next to your own tables</text>
+
+  <!-- satellites reference the core -->
+  <path class="flow" d="M590,365 L590,322"/>
+  <path d="M165,365 L1035,365" fill="none" stroke="#64748b" stroke-width="2"/>
+  <path d="M165,365 L165,390" fill="none" stroke="#64748b" stroke-width="2"/>
+  <path d="M455,365 L455,390" fill="none" stroke="#64748b" stroke-width="2"/>
+  <path d="M745,365 L745,390" fill="none" stroke="#64748b" stroke-width="2"/>
+  <path d="M1035,365 L1035,390" fill="none" stroke="#64748b" stroke-width="2"/>
+  <text class="edge" x="610" y="354">each references OrionAudit</text>
+
+  <rect class="step" x="40" y="390" width="250" height="120" rx="14"/>
+  <text class="label" x="165" y="422" text-anchor="middle">OrionAudit.AspNetCore</text>
+  <text class="code" x="165" y="452" text-anchor="middle">HttpContextAuditUserResolver</text>
+  <text class="small" x="165" y="476" text-anchor="middle">UserId / UserDisplay from</text>
+  <text class="small" x="165" y="494" text-anchor="middle">HttpContext.User claims</text>
+
+  <rect class="step" x="330" y="390" width="250" height="120" rx="14"/>
+  <text class="label" x="455" y="422" text-anchor="middle">OrionAudit.MySql</text>
+  <text class="code" x="455" y="452" text-anchor="middle">ApplyOrionAuditMySql</text>
+  <text class="code" x="455" y="470" text-anchor="middle">Configurations(this)</text>
+  <text class="small" x="455" y="494" text-anchor="middle">JSON or LONGTEXT payload columns</text>
+
+  <rect class="step" x="620" y="390" width="250" height="120" rx="14"/>
+  <text class="label" x="745" y="422" text-anchor="middle">OrionAudit.Viewer</text>
+  <text class="code" x="745" y="452" text-anchor="middle">MapOrionAuditViewer</text>
+  <text class="small" x="745" y="476" text-anchor="middle">read-only JSON API + UI;</text>
+  <text class="small" x="745" y="494" text-anchor="middle">explicit access decision</text>
+
+  <rect class="step" x="910" y="390" width="250" height="120" rx="14"/>
+  <text class="label" x="1035" y="422" text-anchor="middle">OrionAudit.Testing</text>
+  <text class="code" x="1035" y="452" text-anchor="middle">AuditCapture.From(ctx)</text>
+  <text class="small" x="1035" y="476" text-anchor="middle">assertions, in-memory resolvers</text>
+  <text class="small" x="1035" y="494" text-anchor="middle">and InMemoryAuditHistoryStore</text>
+</svg>
