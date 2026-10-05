@@ -1,13 +1,18 @@
 # OrionAudit.Testing
 
-Testing helpers for [OrionAudit](https://www.nuget.org/packages/OrionAudit). Provides
-`AuditCapture`, fluent assertions, and in-memory resolvers — framework-agnostic, with no
-dependency on xUnit, NUnit, or FluentAssertions. Throws plain exceptions on failure so it
-works with any test runner.
+Testing helpers for OrionAudit: `AuditCapture`, fluent assertions, in-memory resolvers and an
+in-memory history store. Framework-agnostic, with no dependency on xUnit, NUnit or
+FluentAssertions; it throws plain exceptions on failure so it works with any test runner.
+
+![OrionAudit packages and where they plug in](https://raw.githubusercontent.com/tunahanaliozturk/OrionAudit/master/docs/diagrams/overview.png)
+
+## Install
 
 ```bash
 dotnet add package OrionAudit.Testing
 ```
+
+Plugs into the core `OrionAudit` package, which it references.
 
 ## Capture and assert
 
@@ -40,6 +45,11 @@ services.AddSingleton<IAuditTenantResolver>(new InMemoryAuditTenantResolver("ten
 Both resolvers expose mutable `User` / `TenantId` properties so the same instance can be
 re-pointed mid-test to simulate cross-tenant scenarios.
 
+## In-memory history store
+
+`InMemoryAuditHistoryStore` implements the full `IAuditHistoryStore` surface (query, aggregate,
+compact) over an in-memory row list, for tests and prototyping against the abstraction.
+
 ## Why no FluentAssertions / xUnit dependency
 
 `OrionAudit.Testing` ships with applications that run their tests on any framework. Pulling in a
@@ -47,5 +57,12 @@ specific assertion library would force a choice on consumers. Failures throw
 `OrionAuditAssertionException` — every modern test runner treats any thrown exception as a test
 failure, so this works everywhere.
 
-See the [project repository](https://github.com/tunahanaliozturk/OrionAudit) for the full
-design spec, sample app, and benchmarks.
+## Related packages
+
+- `OrionAudit` - the core capture, read and reconstruction library.
+
+## Links
+
+- Documentation and full README: https://github.com/tunahanaliozturk/OrionAudit
+- Changelog: https://github.com/tunahanaliozturk/OrionAudit/blob/master/CHANGELOG.md
+- License: MIT

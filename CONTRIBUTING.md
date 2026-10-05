@@ -36,7 +36,7 @@ Branch from `master`. Name the branch after intent: `feat/...`, `fix/...`, `docs
 
 ## Coding style
 
-- The repo enforces analyzer warnings as errors and `AllEnabledByDefault` analysis mode. Treat warnings as bugs.
+- The repo enforces analyzer warnings as errors and the `latest-recommended` analysis level. Treat warnings as bugs.
 - Match the surrounding code style. The repo does not have a separate STYLE.md; if the existing code does X, do X.
 - Names are spelled out. No `mgr`, `svc`, `ctx`. The exceptions are well-known abbreviations (`Id`, `Db`, `Url`, `Json`).
 - Comments explain why, not what. The code already says what.
@@ -68,7 +68,7 @@ At a release cut, the `Unshipped` entries move into `Shipped` and `Unshipped` go
 
 ## Tests
 
-- xUnit + FluentAssertions.
+- xUnit v3 with its built-in `Assert`.
 - Test names are sentences with underscores: `Account_withdraw_throws_when_insufficient_funds`.
 - Integration tests that need infrastructure go in a separate test project, gated by Testcontainers or `Skip` attributes when the infrastructure is unavailable.
 - Coverage is a side effect of writing tests for behaviour, not a target in itself.
@@ -81,11 +81,13 @@ Open an issue with:
 - The actual behaviour vs the expected behaviour
 - The runtime (`dotnet --info` output) and the package version
 
-If the bug has security implications, please email the maintainer privately before opening a public issue.
+If the bug has security implications, do not open a public issue; report it privately as described in [SECURITY.md](SECURITY.md).
 
 ## Security
 
-Do not file public issues for vulnerabilities. Contact the maintainer directly. See [SECURITY.md](SECURITY.md) if present, otherwise email the address listed in the package NuGet metadata.
+Do not file public issues for vulnerabilities. Report them privately through GitHub's
+[private vulnerability reporting](https://github.com/tunahanaliozturk/OrionAudit/security/advisories/new);
+[SECURITY.md](SECURITY.md) describes what to include and what happens next.
 
 ## Conduct
 
@@ -93,4 +95,4 @@ Be kind. We follow the [Code of Conduct](CODE_OF_CONDUCT.md). Disagreement is fi
 
 ## License
 
-By submitting a pull request, you agree your contribution is licensed under the repo's [MIT License](LICENSE).
+By submitting a pull request, you agree your contribution is licensed under the repo's [MIT License](LICENSE.txt).

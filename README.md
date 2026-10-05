@@ -1,7 +1,10 @@
 <!-- markdownlint-disable MD033 MD041 MD060 -->
 
 <p align="center">
-  <img src="docs/logo.png" alt="OrionAudit Logo" width="150" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo.png">
+    <img src="docs/icon.png" alt="OrionAudit logo" width="150">
+  </picture>
 </p>
 
 <h1 align="center">OrionAudit</h1>
@@ -11,6 +14,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/tunahanaliozturk/OrionAudit/actions/workflows/ci-cd.yml"><img src="https://github.com/tunahanaliozturk/OrionAudit/actions/workflows/ci-cd.yml/badge.svg" alt="CI" /></a>
   <a href="https://www.nuget.org/packages/OrionAudit"><img src="https://img.shields.io/nuget/v/OrionAudit?style=flat-square&color=blue" alt="NuGet" /></a>
   <a href="https://www.nuget.org/packages/OrionAudit"><img src="https://img.shields.io/nuget/dt/OrionAudit?style=flat-square&color=green" alt="Downloads" /></a>
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" alt="License" /></a>
@@ -41,42 +45,13 @@
 
 ## How it works
 
-A SaveChangesInterceptor sits in EF Core's pipeline. For every `[Auditable]` entity in `Added`, `Modified`, or `Deleted` state it builds a snapshot, runs the diff engine against the previous snapshot (loaded from `AuditLog` history or a periodic snapshot), and writes one `AuditLog` row in the same transaction as the data change. Synchronous mode writes the final row directly; async mode writes a lightweight queue row instead and lets a dispatcher hosted service materialize the diff off the hot path.
+`AuditSaveChangesInterceptor` sits in EF Core's `SaveChanges` pipeline. For every audited entity in `Added`, `Modified`, or `Deleted` state it builds a before and an after snapshot from the change tracker's original and current values (with `Hash`, `Redact` and `Exclude` rules applied), and either computes the RFC 6902 diff and adds an `AuditLog` row (synchronous mode, the default) or adds a lightweight `OrionAudit_Capture_Queue` row (async mode, `UseAsyncCapture`). Either row joins the same `SaveChanges` as your data, so it commits in the same transaction.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Application code
-    participant EF as DbContext
-    participant Int as OrionAudit<br/>SaveChangesInterceptor
-    participant Snap as SnapshotBuilder
-    participant Diff as DiffEngine<br/>(RFC 6902)
-    participant DB as AuditLog table<br/>(same DB, same tx)
-    participant Disp as AuditDispatcher<br/>(async mode only)
+![OrionAudit capture flow on SaveChanges, sync and async modes](docs/diagrams/capture-flow.png)
 
-    App->>EF: SaveChangesAsync()
-    EF->>Int: SavingChanges
-    loop each tracked Added/Modified/Deleted entity
-        Int->>Snap: Build(entity)
-        Snap-->>Int: JsonNode (current state)
-        Int->>Diff: Compute(previous, current)
-        Diff-->>Int: JSON Patch operations
-        alt sync mode (default)
-            Int->>DB: INSERT AuditLog row<br/>(Action, EntityId, Diff, UserId, TenantId)
-        else async mode (UseAsyncCapture)
-            Int->>DB: INSERT OrionAudit_Capture_Queue row<br/>(same transaction, atomic)
-            Note right of Disp: Later, off the hot path:
-            Disp->>DB: claim queue rows
-            Disp->>Diff: re-materialize diff if needed
-            Disp->>DB: INSERT final AuditLog rows
-        end
-    end
-    EF->>DB: INSERT/UPDATE/DELETE domain rows
-    DB-->>EF: COMMIT (atomic)
-    EF-->>App: rows affected
-```
+In sync mode the `AuditLog` row and the domain rows commit together: either both exist or neither does. A snapshot or diff failure does not abort your save; the row is still written with `Diff = []` and the exception in `Error`. In async mode the same atomicity holds for the queue row, and the dispatcher inserts the final `AuditLog` row and deletes the queue row in one transaction, so deferred rows are exactly-once:
 
-The diagram makes the two key guarantees visible. In sync mode the `AuditLog` row and the domain rows commit together: either both exist or neither does. In async mode the same atomicity holds for the `Capture_Queue` row, and the dispatcher's "claim, materialize, insert final" trio is itself one transaction so deferred rows are exactly-once.
+![OrionAudit async capture dispatch, retry and dead-letter](docs/diagrams/async-dispatch.png)
 
 ---
 
@@ -146,6 +121,8 @@ same transaction.
 ---
 
 ## Ecosystem Packages
+
+![OrionAudit packages and where they plug in](docs/diagrams/overview.png)
 
 | Package                  | Install                                        | Purpose                                            |
 | ------------------------ | ---------------------------------------------- | -------------------------------------------------- |
@@ -511,7 +488,11 @@ applies the registered `IAuditTenantResolver`.
 
 ### Benchmark — the honest story
 
-`InterceptorBench` (in-memory SQLite, .NET 10 — `bench/Moongazing.OrionAudit.Bench`):
+Measured at v0.5.0 with `InterceptorBench` (in-memory SQLite, .NET 10) in the legacy
+`bench/` project. That project has since been removed; the current suite in
+[`benchmarks/`](benchmarks/Moongazing.OrionAudit.Benchmarks) covers only the pure in-memory paths
+(see [benchmarks.md](benchmarks.md)), so this table is a historical record, not something you can
+re-run today:
 
 | Scenario                | Batch | Mean (µs) | Ratio | Allocated         |
 | ----------------------- | ----- | --------: | :---: | ----------------- |
@@ -802,15 +783,17 @@ or any other runner — no transitive `FluentAssertions` / `Shouldly` choice for
 
 ## Benchmarks
 
-See [benchmarks.md](benchmarks.md) for the full BenchmarkDotNet run, environment, and per-scenario interpretation (snapshot build, JSON Patch compute vs. apply, EF Core SaveChanges overhead, time-travel reconstruction). Headline numbers from the last measured run on an Intel i7-7820HQ (Kaby Lake), .NET 10.0.5, BenchmarkDotNet 0.15.8:
+The BenchmarkDotNet suite in [`benchmarks/Moongazing.OrionAudit.Benchmarks`](benchmarks/Moongazing.OrionAudit.Benchmarks)
+measures OrionAudit's pure, in-memory hot paths: snapshot building (`SnapshotBuilderBenchmarks`),
+JSON Patch compute and apply (`DiffEngineBenchmarks`), the replay fold behind time-travel
+reconstruction (`ReplayBenchmarks`), and the read-side view projection (`AuditViewRenderBenchmarks`).
+It deliberately has no database benchmark, and no reference numbers are published: results depend
+on hardware and runtime, so run it on your own machine. [benchmarks.md](benchmarks.md) describes
+each scenario and how to read the results.
 
-- Snapshot build of a 7-property entity: ~677 ns, ~984 B allocated.
-- JSON Patch compute on 16 properties: ~96 us, ~88 KB.
-- JSON Patch apply on the same diff: ~36 us, ~15 KB (about 5x cheaper than compute).
-- SaveChanges overhead on in-memory Sqlite: 3.5x for single-row, 4.2x for 100-row batches; drops into the 5-15 percent range on a real DB where round-trip dominates.
-- Reconstruction at depth 1000: ~9 ms, ~4.3 MB (O(N) without snapshotting).
-
-Reproduce with `dotnet run -c Release --project bench/Moongazing.OrionAudit.Bench`.
+```bash
+dotnet run -c Release --project benchmarks/Moongazing.OrionAudit.Benchmarks -- --filter '*'
+```
 
 ---
 
@@ -835,7 +818,8 @@ you can scan the output instead of reading source.
 - [Design spec](docs/superpowers/specs/2026-05-13-orionaudit-v0.1.0-design.md)
 - [v0.1.0 implementation plan](docs/superpowers/plans/2026-05-13-orionaudit-v0.1.0.md)
 - Sample console: [`sample/Moongazing.OrionAudit.Sample.Console`](sample/Moongazing.OrionAudit.Sample.Console)
-- Benchmarks: [`bench/Moongazing.OrionAudit.Bench`](bench/Moongazing.OrionAudit.Bench)
+- Benchmarks: [`benchmarks/Moongazing.OrionAudit.Benchmarks`](benchmarks/Moongazing.OrionAudit.Benchmarks) and [benchmarks.md](benchmarks.md)
+- [Security policy](SECURITY.md)
 
 ---
 
@@ -862,7 +846,7 @@ OrionAudit is one of a set of standalone .NET libraries:
 
 ## Contributing
 
-Issues and pull requests welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening one.
+Issues and pull requests welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening one. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## License
 
